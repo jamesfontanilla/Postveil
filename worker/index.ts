@@ -497,7 +497,14 @@ async function api(request: Request, env: Env): Promise<Response> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/")) return api(request, env);
+    if (url.pathname.startsWith("/api/")) {
+      try {
+        return await api(request, env);
+      } catch (requestError) {
+        const message = requestError instanceof Error ? requestError.message : "Internal server error";
+        return error(url.searchParams.get("debug") === "1" ? message : "Internal server error", 500);
+      }
+    }
     return env.ASSETS.fetch(request);
   },
 
