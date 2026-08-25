@@ -93,6 +93,21 @@ async function dbRequest<T = unknown>(env: Env, path: string, init: RequestInit 
   return (await response.json()) as T;
 }
 
+async function probeSupabase(env: Env): Promise<{ ok: boolean; status: number; detail?: string }> {
+  try {
+    const response = await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?select=id&limit=1`, {
+      headers: supabaseHeaders(env),
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      ...(response.ok ? {} : { detail: (await response.text()).slice(0, 180) }),
+    };
+  } catch (probeError) {
+    return { ok: false, status: 0, detail: probeError instanceof Error ? probeError.message.slice(0, 180) : "Probe failed" };
+  }
+}
+
 async function getUser(request: Request, env: Env): Promise<User | null> {
   const authorization = request.headers.get("authorization");
   if (!authorization?.toLowerCase().startsWith("bearer ")) return null;
@@ -376,6 +391,7 @@ async function api(request: Request, env: Env): Promise<Response> {
         b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY),
         inboundOwner: Boolean(env.OWNER_USER_ID),
       },
+      supabaseProbe: await probeSupabase(env),
       timestamp: new Date().toISOString(),
     });
   }
