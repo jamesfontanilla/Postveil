@@ -10,5 +10,8 @@ binding = "ASSETS"
 [observability]
 enabled = true
 
+[triggers]
+crons = ["* * * * *"]
+
 [vars]
 APP_DOMAIN = "jamesfontanilla.com"
