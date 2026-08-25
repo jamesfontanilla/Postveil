@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -1320,6 +1321,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [sort, setSort] = useState("newest");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
       const [addresses, customFolders, labelRows, signatureRows, preference] =
@@ -1392,6 +1394,36 @@ function MailboxApp({ session }: { session: Session }) {
     void loadMeta();
     void loadWorkspace();
   }, [loadMeta, loadWorkspace]);
+  useEffect(() => {
+    if (
+      settings.desktop_notifications &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "default"
+    )
+      void Notification.requestPermission();
+  }, [settings.desktop_notifications]);
+  useEffect(() => {
+    const nextIds = new Set(messages.map((message) => message.id));
+    const previousIds = previousMessageIds.current;
+    if (
+      previousIds.size > 0 &&
+      folder === "inbox" &&
+      settings.desktop_notifications &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted"
+    ) {
+      messages
+        .filter((message) => !previousIds.has(message.id) && !message.is_read)
+        .slice(0, 3)
+        .forEach(
+          (message) =>
+            new Notification(message.subject || "New message", {
+              body: `${message.from_address}: ${message.snippet || "Open Parcel to read it."}`,
+            }),
+        );
+    }
+    previousMessageIds.current = nextIds;
+  }, [folder, messages, settings.desktop_notifications]);
   useEffect(() => {
     if (view !== "mail") return;
     void loadMessages(folder, true);
@@ -1477,6 +1509,20 @@ function MailboxApp({ session }: { session: Session }) {
         labelError instanceof Error
           ? labelError.message
           : "Label assignment failed",
+      );
+    }
+  }
+  async function openAttachment(id: string) {
+    try {
+      const result = await apiFetch<{ url: string }>(
+        `/api/attachments/${id}?json=true`,
+      );
+      window.open(result.url, "_blank", "noopener,noreferrer");
+    } catch (attachmentError) {
+      setError(
+        attachmentError instanceof Error
+          ? attachmentError.message
+          : "Attachment unavailable",
       );
     }
   }
@@ -1938,14 +1984,15 @@ function MailboxApp({ session }: { session: Session }) {
                   <div className="attachments">
                     <p className="eyebrow">ATTACHMENTS</p>
                     {selected.attachments.map((attachment) => (
-                      <a
+                      <button
                         key={attachment.id}
-                        href={`/api/attachments/${attachment.id}`}
+                        className="attachment-link"
+                        onClick={() => void openAttachment(attachment.id)}
                       >
                         <Paperclip size={14} />
                         <span>{attachment.filename}</span>
                         <small>{formatBytes(attachment.byte_size)}</small>
-                      </a>
+                      </button>
                     ))}
                   </div>
                 )}

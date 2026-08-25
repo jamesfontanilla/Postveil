@@ -100,7 +100,7 @@ input:focus, textarea:focus, select:focus { border-color: #2d5bff; background: #
 .sender-line span { margin-top: 4px; color: #98a3b2; font-size: 11px; }
 .body-copy { margin-top: 32px; color: #536279; font-size: 14px; line-height: 1.8; white-space: pre-wrap; }
 .attachments { display: grid; gap: 8px; margin-top: 30px; }
-.attachments a { display: inline-flex; align-items: center; gap: 7px; width: fit-content; border-radius: 8px; background: #f2f5fa; color: #4862aa; padding: 8px 10px; font-size: 11px; text-decoration: none; }
+.attachments a, .attachments .attachment-link { display: inline-flex; align-items: center; gap: 7px; width: fit-content; border: 0; border-radius: 8px; background: #f2f5fa; color: #4862aa; padding: 8px 10px; font-size: 11px; text-decoration: none; cursor: pointer; }
 .detail-actions { display: flex; gap: 9px; margin-top: 45px; }
 .compose-overlay { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(27,38,56,.35); backdrop-filter: blur(7px); }
 .compose-card { width: min(620px, 100%); max-height: min(780px, calc(100vh - 40px)); overflow: auto; border: 1px solid #e0e6ef; border-radius: 21px; background: #fff; box-shadow: 0 35px 100px rgba(13,25,51,.25); padding: 25px; }
@@ -123,8 +123,8 @@ input:focus, textarea:focus, select:focus { border-color: #2d5bff; background: #
 .signal-box { display: flex; gap: 10px; margin-top: 20px; border: 1px solid #f0d6cf; border-radius: 11px; background: #fff8f5; color: #a95245; padding: 11px 13px; }
 .signal-box strong, .signal-box span { display: block; font-size: 11px; line-height: 1.5; }
 .signal-box span { margin-top: 2px; color: #9b716a; }
-.attachments a { justify-content: space-between; min-width: 220px; }
-.attachments a small { margin-left: 10px; color: #9aa5b5; font: 10px "DM Mono", monospace; }
+.attachments a, .attachments .attachment-link { justify-content: space-between; min-width: 220px; }
+.attachments a small, .attachments .attachment-link small { margin-left: 10px; color: #9aa5b5; font: 10px "DM Mono", monospace; }
 .thread-stack { display: grid; gap: 7px; margin-top: 30px; }
 .thread-stack button { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; border: 1px solid #edf0f4; border-radius: 10px; background: #fafbfe; color: #69778d; padding: 10px 12px; text-align: left; }
 .thread-stack button.active { border-color: #cbd8ff; background: #f5f7ff; }
