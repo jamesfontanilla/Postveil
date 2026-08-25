@@ -57,6 +57,7 @@ type Message = {
   folder: string;
   status: string;
   custom_folder_id?: string | null;
+  from_name?: string | null;
   from_address: string;
   to_addresses: string[];
   cc_addresses?: string[];
@@ -88,6 +89,12 @@ type Message = {
     content_type: string;
     byte_size: number;
   }>;
+};
+type Contact = {
+  id: string;
+  display_name: string;
+  email: string;
+  avatar_url?: string | null;
 };
 type Mailbox = {
   id: string;
@@ -188,6 +195,36 @@ const folderIcons: Record<SystemFolder, typeof Inbox> = {
 
 function displayName(address: string) {
   return address.split("@")[0] || address;
+}
+function initials(value: string) {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  return (parts.length > 1 ? parts.slice(0, 2).map((part) => part[0]) : [value.trim()[0] || "?"]).join("").toUpperCase();
+}
+function avatarGradient(email: string) {
+  let hash = 0;
+  for (const character of email) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  const hue = Math.abs(hash) % 360;
+  return { background: `linear-gradient(135deg, hsl(${hue} 68% 58%), hsl(${(hue + 42) % 360} 72% 42%))` };
+}
+function SenderAvatar({ name, email, avatarUrl, large = false }: { name: string; email: string; avatarUrl?: string | null; large?: boolean }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  return (
+    <div className={`avatar ${large ? "large-avatar" : "row-avatar"} ${avatarUrl && !imageFailed ? "avatar-image" : ""}`} style={avatarUrl && !imageFailed ? undefined : avatarGradient(email)} aria-label={`${name} profile picture`}>
+      {avatarUrl && !imageFailed ? <img src={avatarUrl} alt="" onError={() => setImageFailed(true)} /> : initials(name || email)}
+    </div>
+  );
+}
+function contactFor(address: string, contacts: Contact[]) {
+  return contacts.find((contact) => contact.email.toLowerCase() === address.toLowerCase());
+}
+function senderForMessage(message: Message, contacts: Contact[], mailboxes: Mailbox[]) {
+  const address = message.direction === "inbound" ? message.from_address : message.to_addresses?.[0] || message.from_address;
+  const contact = contactFor(address, contacts);
+  const mailbox = mailboxes.find((item) => item.address.toLowerCase() === message.from_address.toLowerCase());
+  const name = message.direction === "inbound"
+    ? contact?.display_name?.trim() || message.from_name?.trim() || displayName(address)
+    : contact?.display_name?.trim() || mailbox?.display_name?.trim() || displayName(address);
+  return { name, email: address, avatarUrl: contact?.avatar_url || null };
 }
 function formatDate(value?: string) {
   if (!value) return "";
@@ -672,6 +709,7 @@ function SettingsPanel({
   const [labelName, setLabelName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactName, setContactName] = useState("");
+  const [contactAvatarUrl, setContactAvatarUrl] = useState("");
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleName, setRuleName] = useState("");
   const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([
@@ -732,10 +770,11 @@ function SettingsPanel({
     if (!contactEmail.trim()) return;
     await apiFetch("/api/contacts", {
       method: "POST",
-      body: JSON.stringify({ email: contactEmail, displayName: contactName }),
+      body: JSON.stringify({ email: contactEmail, displayName: contactName, avatarUrl: contactAvatarUrl }),
     });
     setContactEmail("");
     setContactName("");
+    setContactAvatarUrl("");
     setNotice("Contact saved");
     onChanged();
   }
@@ -1124,6 +1163,13 @@ function SettingsPanel({
                 onChange={(event) => setContactEmail(event.target.value)}
                 placeholder="Email address"
               />
+              <input
+                type="url"
+                value={contactAvatarUrl}
+                onChange={(event) => setContactAvatarUrl(event.target.value)}
+                placeholder="Profile image URL (optional, https://)"
+              />
+              <small className="field-help">Names come from the message header. Add a photo here for a saved sender.</small>
               <button
                 className="secondary-button"
                 onClick={() => void createContact()}
@@ -1698,6 +1744,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [folder, setFolder] = useState<ViewKey>("inbox");
   const [messages, setMessages] = useState<Message[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [folders, setFolders] = useState<CustomFolder[]>([]);
   const [labels, setLabels] = useState<Label[]>([]);
   const [signatures, setSignatures] = useState<Signature[]>([]);
@@ -1724,9 +1771,10 @@ function MailboxApp({ session }: { session: Session }) {
   const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
-      const [addresses, customFolders, labelRows, signatureRows, ruleRows, preference] =
+      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, preference] =
         await Promise.all([
           apiFetch<Mailbox[]>("/api/mailboxes"),
+          apiFetch<Contact[]>("/api/contacts"),
           apiFetch<CustomFolder[]>("/api/folders"),
           apiFetch<Label[]>("/api/labels"),
           apiFetch<Signature[]>("/api/signatures"),
@@ -1734,6 +1782,7 @@ function MailboxApp({ session }: { session: Session }) {
           apiFetch<AppSettings>("/api/settings"),
         ]);
       setMailboxes(addresses);
+      setContacts(contactRows);
       setFolders(customFolders);
       setLabels(labelRows);
       setSignatures(signatureRows);
@@ -2219,21 +2268,16 @@ function MailboxApp({ session }: { session: Session }) {
                     className={`message-row ${selectedId === message.id ? "selected" : ""} ${message.is_read ? "read" : "unread"}`}
                     onClick={() => void openMessage(message)}
                   >
-                    <div className="row-avatar">
-                      {displayName(
-                        message.direction === "inbound"
-                          ? message.from_address
-                          : message.to_addresses?.[0] || "sent",
-                      )
-                        .slice(0, 1)
-                        .toUpperCase()}
-                    </div>
+                    {(() => {
+                      const sender = senderForMessage(message, contacts, mailboxes);
+                      return <SenderAvatar name={sender.name} email={sender.email} avatarUrl={sender.avatarUrl} />;
+                    })()}
                     <div className="row-copy">
                       <div className="row-top">
                         <strong>
                           {message.direction === "inbound"
-                            ? message.from_address
-                            : `To ${message.to_addresses?.[0] || "recipient"}`}
+                            ? senderForMessage(message, contacts, mailboxes).name
+                            : `To ${senderForMessage(message, contacts, mailboxes).name}`}
                         </strong>
                         <time>
                           {formatDate(
@@ -2242,6 +2286,9 @@ function MailboxApp({ session }: { session: Session }) {
                               message.created_at,
                           )}
                         </time>
+                      </div>
+                      <div className="row-address">
+                        {senderForMessage(message, contacts, mailboxes).email}
                       </div>
                       <div className="row-subject">
                         {message.subject || "(no subject)"}
@@ -2345,13 +2392,13 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 </div>
                 <div className="sender-line">
-                  <div className="avatar large-avatar">
-                    {displayName(selected.from_address)
-                      .slice(0, 1)
-                      .toUpperCase()}
-                  </div>
+                  {(() => {
+                    const sender = senderForMessage(selected, contacts, mailboxes);
+                    return <SenderAvatar name={sender.name} email={sender.email} avatarUrl={sender.avatarUrl} large />;
+                  })()}
                   <div>
-                    <strong>{selected.from_address}</strong>
+                    <strong>{senderForMessage(selected, contacts, mailboxes).name}</strong>
+                    <small>{senderForMessage(selected, contacts, mailboxes).email}</small>
                     <span>to {selected.to_addresses?.join(", ")}</span>
                   </div>
                 </div>
@@ -2411,7 +2458,7 @@ function MailboxApp({ session }: { session: Session }) {
                         }
                         onClick={() => void openMessage(threadMessage)}
                       >
-                        <span>{threadMessage.from_address}</span>
+                        <span>{senderForMessage(threadMessage, contacts, mailboxes).name}</span>
                         <strong>{threadMessage.subject}</strong>
                         <small>
                           {formatDate(

@@ -55,6 +55,13 @@ function headerValue(parsed: { headers?: Array<{ key: string; value: string }> }
   return parsed.headers?.find((header) => header.key.toLowerCase() === key.toLowerCase())?.value;
 }
 
+function senderIdentity(parsed: { from?: { name?: string; address?: string; group?: unknown[] }; headers?: Array<{ key: string; value: string }> }, fallback: string): { address: string; name: string } {
+  const parsedFrom = parsed.from && "address" in parsed.from ? parsed.from : undefined;
+  const address = cleanAddress(String(parsedFrom?.address || headerValue(parsed, "from") || fallback));
+  const name = String(parsedFrom?.name || "").trim().replace(/\s+/g, " ").slice(0, 200);
+  return { address, name: name && name.toLowerCase() !== address ? name : "" };
+}
+
 function supabaseHeaders(env: Env, token?: string): HeadersInit {
   return { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${token ?? env.SUPABASE_SERVICE_ROLE_KEY}`, "content-type": "application/json" };
 }
@@ -307,7 +314,9 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   const messageIdHeader = headerValue(parsed, "message-id") || `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`;
   const duplicate = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&message_id_header=eq.${encodeURIComponent(messageIdHeader)}&limit=1`);
   if (duplicate[0]) return;
-  const headerFrom = cleanAddress(headerValue(parsed, "from") || envelopeFrom);
+  const sender = senderIdentity(parsed, envelopeFrom);
+  const headerFrom = sender.address;
+  const fromName = sender.name;
   const inReplyTo = headerValue(parsed, "in-reply-to") || null;
   const references = headerValue(parsed, "references") || null;
   const assessment = await assessInbound(env, ownerId, envelopeFrom, headerFrom, subject, textBody, htmlBody, parsed);
@@ -318,7 +327,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   const attachmentResult = await saveAttachments(env, ownerId, messageId, parsed.attachments ?? []);
   const reasons = [...assessment.reasons, ...(attachmentResult.blocked.length ? [`blocked attachments: ${attachmentResult.blocked.join(", ")}`] : [])];
   const folder = assessment.score >= 0.7 ? "spam" : "inbox";
-  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder, status: "received", from_address: headerFrom, to_addresses: splitAddresses(headerValue(parsed, "to") || destination), reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: rawKey, has_attachment: attachmentResult.stored.length > 0, spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, received_at: new Date().toISOString() }) });
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder, status: "received", from_name: fromName, from_address: headerFrom, to_addresses: splitAddresses(headerValue(parsed, "to") || destination), reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: rawKey, has_attachment: attachmentResult.stored.length > 0, spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, received_at: new Date().toISOString() }) });
   if (!inserted[0]) throw new Error("Message insert returned no row");
   if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
   await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
@@ -359,7 +368,7 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord): P
   if (ownerId && mailbox) {
     const threadId = typeof body.threadId === "string" && body.threadId ? body.threadId : await findOrCreateThread(env, ownerId, subject, typeof body.inReplyTo === "string" ? body.inReplyTo : undefined, typeof body.references === "string" ? body.references : undefined);
     const scheduledAt = typeof body.scheduledAt === "string" && body.scheduledAt ? body.scheduledAt : null;
-    const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: scheduledAt ? "drafts" : "sent", status: scheduledAt ? "scheduled" : "queued", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledAt, sent_at: scheduledAt ? null : new Date().toISOString() }) });
+     const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: scheduledAt ? "drafts" : "sent", status: scheduledAt ? "scheduled" : "queued", from_name: mailbox.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledAt, sent_at: scheduledAt ? null : new Date().toISOString() }) });
     messageId = inserted[0]?.id;
     if (scheduledAt) return json({ ok: true, id: messageId, scheduled: true });
   }
@@ -392,7 +401,7 @@ async function handleDraft(env: Env, user: User, body: JsonRecord): Promise<Resp
   const mailbox = await getMailbox(env, user.id, fromAddress);
   if (!mailbox) return error("Sender mailbox not found", 404);
   const id = typeof body.id === "string" ? body.id : "";
-  const patch = { subject: String(body.subject || ""), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, to_addresses: splitAddresses(body.to), cc_addresses: splitAddresses(body.cc), bcc_addresses: splitAddresses(body.bcc), from_address: fromAddress, snippet: snippet(String(body.text || "")), updated_at: new Date().toISOString() };
+   const patch = { subject: String(body.subject || ""), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, to_addresses: splitAddresses(body.to), cc_addresses: splitAddresses(body.cc), bcc_addresses: splitAddresses(body.bcc), from_name: mailbox.display_name || "", from_address: fromAddress, snippet: snippet(String(body.text || "")), updated_at: new Date().toISOString() };
   if (id) { const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.drafts`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows?.[0] || null); }
   const threadId = await findOrCreateThread(env, user.id, patch.subject);
   const rows = await dbRequest<JsonRecord[]>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: "drafts", status: "draft", message_id_header: `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`, ...patch }) });
@@ -434,9 +443,9 @@ async function api(request: Request, env: Env): Promise<Response> {
   if (request.method === "GET" && url.pathname === "/api/mail") {
     const folder = url.searchParams.get("folder") || "inbox";
     const q = url.searchParams.get("q")?.trim();
-    const parts = [`owner_id=eq.${encodeURIComponent(user.id)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,focused_score,focused_category,scheduled_at,snoozed_until,received_at,sent_at,created_at"];
+     const parts = [`owner_id=eq.${encodeURIComponent(user.id)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,focused_score,focused_category,scheduled_at,snoozed_until,received_at,sent_at,created_at"];
     if (folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(folder.slice(7))}`); } else if (folder === "focused") parts.push("folder=eq.inbox", "focused_category=eq.focused"); else if (folder === "other") parts.push("folder=eq.inbox", "focused_category=eq.other"); else parts.push(`folder=eq.${encodeURIComponent(folder)}`);
-    if (q) { const safe = q.replace(/[*(),]/g, " "); parts.push(`or=${encodeURIComponent(`(subject.ilike.*${safe}*,from_address.ilike.*${safe}*,text_body.ilike.*${safe}*,snippet.ilike.*${safe}*)`)}`); }
+    if (q) { const safe = q.replace(/[*(),]/g, " "); parts.push(`or=${encodeURIComponent(`(subject.ilike.*${safe}*,from_name.ilike.*${safe}*,from_address.ilike.*${safe}*,text_body.ilike.*${safe}*,snippet.ilike.*${safe}*)`)}`); }
     if (url.searchParams.get("unread") === "true") parts.push("is_read=eq.false");
     if (url.searchParams.get("starred") === "true") parts.push("is_starred=eq.true");
     if (url.searchParams.get("pinned") === "true") parts.push("is_pinned=eq.true");
@@ -470,7 +479,7 @@ async function api(request: Request, env: Env): Promise<Response> {
   if (request.method === "POST" && url.pathname === "/api/labels") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "labels", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: String(body.name || "Untitled"), color: String(body.color || "#2d5bff") }) }); return json(rows[0], 201); }
   if (request.method === "POST" && url.pathname === "/api/labels/assign") { const body = (await request.json()) as JsonRecord; const labelId = String(body.labelId || ""); const messageId = String(body.messageId || ""); if (!labelId || !messageId) return error("Message and label are required"); await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, label_id: labelId }) }); return json({ ok: true }); }
   if (request.method === "GET" && url.pathname === "/api/contacts") { const q = url.searchParams.get("q")?.trim(); const path = `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc${q ? `&or=${encodeURIComponent(`email.ilike.*${q}*,display_name.ilike.*${q}*`)}` : ""}`; return json(await dbRequest(env, path)); }
-  if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!email.includes("@")) return error("A valid email is required"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]), company: body.company || null, notes: body.notes || null }) }); return json(rows[0], 201); }
+  if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!email.includes("@")) return error("A valid email is required"); const avatarUrl = typeof body.avatarUrl === "string" && body.avatarUrl.trim() ? body.avatarUrl.trim() : null; if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return error("Profile image URL must use https://"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]), avatar_url: avatarUrl, company: body.company || null, notes: body.notes || null }) }); return json(rows[0], 201); }
   if (request.method === "GET" && url.pathname === "/api/rules") return json(await dbRequest(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`));
   if (request.method === "POST" && url.pathname === "/api/rules") {
     const body = (await request.json()) as JsonRecord;
