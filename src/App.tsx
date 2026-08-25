@@ -956,7 +956,7 @@ function SettingsPanel({
       <section className="settings-panel">
         <div className="panel-title">
           <div>
-            <p className="eyebrow">PARCEL CONTROL ROOM</p>
+            <p className="eyebrow">MAILBOX SETTINGS</p>
             <h2>Settings & organization</h2>
           </div>
           <button
@@ -2142,7 +2142,7 @@ function MailboxApp({ session }: { session: Session }) {
           <section className="message-column">
             <div className="column-head">
               <div>
-                <p className="eyebrow">YOUR DESK</p>
+                <p className="eyebrow">INBOX VIEW</p>
                 <h1>
                   <CurrentIcon size={22} /> {currentLabel}
                 </h1>
