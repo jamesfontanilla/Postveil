@@ -90,7 +90,9 @@ async function dbRequest<T = unknown>(env: Env, path: string, init: RequestInit 
     throw new Error(`Supabase ${response.status}: ${body.slice(0, 500)}`);
   }
   if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  const body = await response.text();
+  if (!body.trim()) return undefined as T;
+  return JSON.parse(body) as T;
 }
 
 async function probeSupabase(env: Env): Promise<{ ok: boolean; status: number; detail?: string }> {
@@ -501,8 +503,7 @@ export default {
       try {
         return await api(request, env);
       } catch (requestError) {
-        const message = requestError instanceof Error ? requestError.message : "Internal server error";
-        return error(url.searchParams.get("debug") === "1" ? message : "Internal server error", 500);
+        return error("Internal server error", 500);
       }
     }
     return env.ASSETS.fetch(request);
