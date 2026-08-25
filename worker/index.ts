@@ -301,7 +301,7 @@ async function sendViaBrevo(env: Env, input: { fromAddress: string; to: string[]
   return result as { messageId?: string };
 }
 
-async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, envelopeTo: string, forwardInbound?: (address: string) => Promise<void>): Promise<void> {
+async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, envelopeTo: string, forwardInbound?: (address: string) => Promise<void>, ctx?: ExecutionContext): Promise<void> {
   const destination = cleanAddress(envelopeTo);
   const ownerId = env.OWNER_USER_ID;
   if (!ownerId) throw new Error("OWNER_USER_ID is not configured");
@@ -319,38 +319,53 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   const fromName = sender.name;
   const inReplyTo = headerValue(parsed, "in-reply-to") || null;
   const references = headerValue(parsed, "references") || null;
-  const assessment = await assessInbound(env, ownerId, envelopeFrom, headerFrom, subject, textBody, htmlBody, parsed);
   const messageId = crypto.randomUUID();
   const threadId = await findOrCreateThread(env, ownerId, subject, inReplyTo || undefined, references || undefined);
-  const rawKey = `raw/${ownerId}/${messageId}.eml`;
-  await putObject(env, rawKey, new Uint8Array(raw), "message/rfc822");
-  const attachmentResult = await saveAttachments(env, ownerId, messageId, parsed.attachments ?? []);
-  const reasons = [...assessment.reasons, ...(attachmentResult.blocked.length ? [`blocked attachments: ${attachmentResult.blocked.join(", ")}`] : [])];
-  const folder = assessment.score >= 0.7 ? "spam" : "inbox";
-  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder, status: "received", from_name: fromName, from_address: headerFrom, to_addresses: splitAddresses(headerValue(parsed, "to") || destination), reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: rawKey, has_attachment: attachmentResult.stored.length > 0, spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, received_at: new Date().toISOString() }) });
+  const toAddresses = splitAddresses(headerValue(parsed, "to") || destination);
+  const ccAddresses = splitAddresses(headerValue(parsed, "cc") || "");
+  const receivedAt = new Date().toISOString();
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder: "inbox", status: "queued", from_name: fromName, from_address: headerFrom, to_addresses: toAddresses, cc_addresses: ccAddresses, reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: null, has_attachment: Boolean(parsed.attachments?.length), spam_score: 0, spam_reasons: [], focused_score: 0.5, focused_category: "focused", auth_results: {}, received_at: receivedAt }) });
   if (!inserted[0]) throw new Error("Message insert returned no row");
-  if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
-  await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
-  await applyInboundRules(env, ownerId, messageId, {
-    from: headerFrom,
-    to: splitAddresses(headerValue(parsed, "to") || destination),
-    cc: splitAddresses(headerValue(parsed, "cc") || ""),
-    subject,
-    body: textBody,
-    hasAttachment: attachmentResult.stored.length > 0,
-    isRead: false,
-    isFlagged: false,
-    isPinned: false,
-    priority: 0,
-    folder,
-  }, forwardInbound);
-  const autoReplies = await dbRequest<Array<{ enabled: boolean; subject: string; body: string; starts_at: string | null; ends_at: string | null }>>(env, `auto_replies?owner_id=eq.${encodeURIComponent(ownerId)}&mailbox_id=eq.${encodeURIComponent(mailbox.id)}&enabled=eq.true&limit=1`);
-  const autoReply = autoReplies[0];
-  const now = Date.now();
-  if (autoReply && (!autoReply.starts_at || now >= Date.parse(autoReply.starts_at)) && (!autoReply.ends_at || now <= Date.parse(autoReply.ends_at)) && headerFrom !== destination && !/auto-submitted|list-/i.test(headerValue(parsed, "auto-submitted") || "")) await sendViaBrevo(env, { fromAddress: destination, to: [headerFrom], subject: autoReply.subject, text: autoReply.body, replyTo: destination });
+
+  const finishInbound = async (): Promise<void> => {
+    try {
+      const assessment = await assessInbound(env, ownerId, envelopeFrom, headerFrom, subject, textBody, htmlBody, parsed);
+      const rawKey = `raw/${ownerId}/${messageId}.eml`;
+      await putObject(env, rawKey, new Uint8Array(raw), "message/rfc822");
+      const attachmentResult = await saveAttachments(env, ownerId, messageId, parsed.attachments ?? []);
+      const reasons = [...assessment.reasons, ...(attachmentResult.blocked.length ? [`blocked attachments: ${attachmentResult.blocked.join(", ")}`] : [])];
+      const folder = assessment.score >= 0.7 ? "spam" : "inbox";
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, status: "received", raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, updated_at: new Date().toISOString() }) });
+      if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
+      await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
+      await applyInboundRules(env, ownerId, messageId, {
+        from: headerFrom,
+        to: toAddresses,
+        cc: ccAddresses,
+        subject,
+        body: textBody,
+        hasAttachment: Boolean(parsed.attachments?.length),
+        isRead: false,
+        isFlagged: false,
+        isPinned: false,
+        priority: 0,
+        folder,
+      }, forwardInbound);
+      const autoReplies = await dbRequest<Array<{ enabled: boolean; subject: string; body: string; starts_at: string | null; ends_at: string | null }>>(env, `auto_replies?owner_id=eq.${encodeURIComponent(ownerId)}&mailbox_id=eq.${encodeURIComponent(mailbox.id)}&enabled=eq.true&limit=1`);
+      const autoReply = autoReplies[0];
+      const now = Date.now();
+      if (autoReply && (!autoReply.starts_at || now >= Date.parse(autoReply.starts_at)) && (!autoReply.ends_at || now <= Date.parse(autoReply.ends_at)) && headerFrom !== destination && !/auto-submitted|list-/i.test(headerValue(parsed, "auto-submitted") || "")) await sendViaBrevo(env, { fromAddress: destination, to: [headerFrom], subject: autoReply.subject, text: autoReply.body, replyTo: destination });
+    } catch (processingError) {
+      const note = processingError instanceof Error ? processingError.message.slice(0, 500) : "Inbound processing failed";
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", work_note: note, updated_at: new Date().toISOString() }) }).catch(() => undefined);
+      console.error("Inbound processing failed", processingError);
+    }
+  };
+  if (ctx) ctx.waitUntil(finishInbound());
+  else await finishInbound();
 }
 
-async function handleSend(env: Env, ownerId: string | null, body: JsonRecord): Promise<Response> {
+async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ctx?: ExecutionContext): Promise<Response> {
   const fromAddress = cleanAddress(String(body.fromAddress || `james@${env.APP_DOMAIN}`));
   const to = splitAddresses(body.to);
   const cc = splitAddresses(body.cc);
@@ -368,18 +383,26 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord): P
   if (ownerId && mailbox) {
     const threadId = typeof body.threadId === "string" && body.threadId ? body.threadId : await findOrCreateThread(env, ownerId, subject, typeof body.inReplyTo === "string" ? body.inReplyTo : undefined, typeof body.references === "string" ? body.references : undefined);
     const scheduledAt = typeof body.scheduledAt === "string" && body.scheduledAt ? body.scheduledAt : null;
-     const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: scheduledAt ? "drafts" : "sent", status: scheduledAt ? "scheduled" : "queued", from_name: mailbox.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledAt, sent_at: scheduledAt ? null : new Date().toISOString() }) });
+     const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: scheduledAt ? "drafts" : "sent", status: scheduledAt ? "scheduled" : "queued", from_name: mailbox.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledAt, sent_at: null }) });
     messageId = inserted[0]?.id;
     if (scheduledAt) return json({ ok: true, id: messageId, scheduled: true });
   }
-  try {
-    const providerResult = await sendViaBrevo(env, { fromAddress, to, cc, bcc, subject, text, html, replyTo, attachments });
-    if (messageId) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ status: "sent", provider_message_id: providerResult.messageId || null }) });
-    return json({ ok: true, id: messageId, providerMessageId: providerResult.messageId });
-  } catch (sendError) {
-    if (messageId) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ status: "failed" }) }).catch(() => undefined);
-    throw sendError;
+  const deliver = async (): Promise<{ messageId?: string }> => {
+    try {
+      const providerResult = await sendViaBrevo(env, { fromAddress, to, cc, bcc, subject, text, html, replyTo, attachments });
+      if (messageId) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ status: "sent", sent_at: new Date().toISOString(), provider_message_id: providerResult.messageId || null, work_note: "" }) });
+      return { messageId: providerResult.messageId };
+    } catch (sendError) {
+      if (messageId) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", work_note: sendError instanceof Error ? sendError.message.slice(0, 500) : "Send failed" }) }).catch(() => undefined);
+      throw sendError;
+    }
+  };
+  if (ctx && messageId) {
+    ctx.waitUntil(deliver().catch(() => undefined));
+    return json({ ok: true, id: messageId, status: "queued" });
   }
+  const providerResult = await deliver();
+  return json({ ok: true, id: messageId, providerMessageId: providerResult.messageId });
 }
 
 async function processScheduled(env: Env): Promise<void> {
@@ -417,7 +440,7 @@ function protectedHeaders(response: Response): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-async function api(request: Request, env: Env): Promise<Response> {
+async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === "/api/health") return json({ ok: true, service: "james-email-service", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
   if (url.pathname === "/api/webhooks/brevo") {
@@ -430,7 +453,7 @@ async function api(request: Request, env: Env): Promise<Response> {
     if (rows[0]) { const status = statusMap[String(event.event || "").toLowerCase()]; if (status) await dbRequest(env, `messages?id=eq.${encodeURIComponent(rows[0].id)}`, { method: "PATCH", body: JSON.stringify({ status }) }); await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: rows[0].owner_id, message_id: rows[0].id, provider: "brevo", event_type: String(event.event || "unknown"), provider_message_id: providerMessageId, payload: event }) }); }
     return json({ ok: true });
   }
-  if (url.pathname === "/api/internal/send-test") { if (!env.INTERNAL_TEST_TOKEN || request.headers.get("x-internal-test-token") !== env.INTERNAL_TEST_TOKEN) return error("Unauthorized", 401); try { return await handleSend(env, null, (await request.json()) as JsonRecord); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
+  if (url.pathname === "/api/internal/send-test") { if (!env.INTERNAL_TEST_TOKEN || request.headers.get("x-internal-test-token") !== env.INTERNAL_TEST_TOKEN) return error("Unauthorized", 401); try { return await handleSend(env, null, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
   const user = await getUser(request, env);
   if (!user) return error("Sign in required", 401);
   const mailbox = await ensureProfileAndMailbox(env, user);
@@ -550,20 +573,20 @@ async function api(request: Request, env: Env): Promise<Response> {
   if (request.method === "PATCH" && url.pathname === "/api/integrations") { const body = (await request.json()) as JsonRecord; const provider = String(body.provider || ""); if (!provider) return error("Provider is required"); const rows = await dbRequest<JsonRecord[]>(env, "integrations", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, provider, status: String(body.status || "not_configured"), settings: body.settings || {} }) }); return json(rows[0] || null); }
   if (request.method === "POST" && url.pathname === "/api/drafts") return handleDraft(env, user, (await request.json()) as JsonRecord);
   if (request.method === "POST" && url.pathname === "/api/attachments") { const form = await request.formData(); const file = form.get("file"); if (!(file instanceof File)) return error("File is required"); if (file.size > 15 * 1024 * 1024) return error("Attachments are limited to 15 MB"); if (isDangerousAttachment(file.name, file.type)) return error("This attachment type is blocked for safety"); const objectKey = `drafts/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; await putObject(env, objectKey, new Uint8Array(await file.arrayBuffer()), file.type || "application/octet-stream"); return json({ object_key: objectKey, filename: file.name, content_type: file.type || "application/octet-stream", byte_size: file.size }); }
-  if (request.method === "POST" && url.pathname === "/api/send") { try { return await handleSend(env, user.id, (await request.json()) as JsonRecord); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
+  if (request.method === "POST" && url.pathname === "/api/send") { try { return await handleSend(env, user.id, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
   if (request.method === "GET" && url.pathname.startsWith("/api/attachments/")) { const id = url.pathname.split("/").pop() || ""; const rows = await dbRequest<Array<{ object_key: string }>>(env, `attachments?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!rows[0]) return error("Attachment not found", 404); const signedUrl = await signedObjectUrl(env, rows[0].object_key); return url.searchParams.get("json") === "true" ? json({ url: signedUrl }) : Response.redirect(signedUrl, 302); }
   return error("Not found", 404);
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/")) { try { return protectedHeaders(await api(request, env)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
+    if (url.pathname.startsWith("/api/")) { try { return protectedHeaders(await api(request, env, ctx)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
     return protectedHeaders(await env.ASSETS.fetch(request));
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await processScheduled(env); },
-  async email(message: { from: string; to: string; raw: ReadableStream<Uint8Array>; forward: (address: string) => Promise<void>; setReject: (reason: string) => void }, env: Env): Promise<void> {
-    try { const raw = await new Response(message.raw).arrayBuffer(); await ingestRawEmail(env, raw, message.from, message.to, async (address) => message.forward(address)); if (env.OUTLOOK_FORWARD_TO) await message.forward(env.OUTLOOK_FORWARD_TO); }
+  async email(message: { from: string; to: string; raw: ReadableStream<Uint8Array>; forward: (address: string) => Promise<void>; setReject: (reason: string) => void }, env: Env, ctx: ExecutionContext): Promise<void> {
+    try { const raw = await new Response(message.raw).arrayBuffer(); await ingestRawEmail(env, raw, message.from, message.to, async (address) => message.forward(address), ctx); if (env.OUTLOOK_FORWARD_TO) await message.forward(env.OUTLOOK_FORWARD_TO); }
     catch (ingestError) { message.setReject(ingestError instanceof Error ? ingestError.message.slice(0, 180) : "Inbound processing failed"); }
   },
 };

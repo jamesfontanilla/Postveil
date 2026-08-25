@@ -234,6 +234,17 @@ function formatDate(value?: string) {
     ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     : d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
+function messageStatusLabel(message: Message) {
+  if (message.direction === "inbound" && message.status === "queued") return "Receiving";
+  if (message.direction === "outbound" && message.status === "queued") return "Sending";
+  if (message.status === "received") return "Received";
+  if (message.status === "sent") return "Sent";
+  if (message.status === "delivered") return "Delivered";
+  if (message.status === "failed") return "Failed";
+  if (message.status === "bounced") return "Bounced";
+  if (message.status === "scheduled") return "Scheduled";
+  return message.status;
+}
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
@@ -1768,6 +1779,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [sort, setSort] = useState("newest");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [liveState, setLiveState] = useState<"connecting" | "live" | "reconnecting" | "offline">("connecting");
   const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
@@ -1880,20 +1892,27 @@ function MailboxApp({ session }: { session: Session }) {
     void loadMessages(folder, true);
     const interval = window.setInterval(
       () => void loadMessages(folder, false),
-      5000,
+      15000,
     );
     let channel:
       | ReturnType<NonNullable<typeof supabase>["channel"]>
       | undefined;
     if (supabase) {
+      setLiveState("connecting");
       channel = supabase
         .channel(`messages-${folder}`)
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "messages" },
+          { event: "*", schema: "public", table: "messages", filter: `owner_id=eq.${session.user.id}` },
           () => void loadMessages(folder, false),
         )
-        .subscribe();
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") setLiveState("live");
+          else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setLiveState("reconnecting");
+          else if (status === "CLOSED") setLiveState("offline");
+        });
+    } else {
+      setLiveState("offline");
     }
     return () => {
       window.clearInterval(interval);
@@ -2239,6 +2258,10 @@ function MailboxApp({ session }: { session: Session }) {
                 <option value="oldest">Oldest</option>
               </select>
             </div>
+            <div className={`sync-status sync-${liveState}`} role="status" aria-live="polite">
+              <span className="sync-dot" />
+              {liveState === "live" ? "Live updates" : liveState === "connecting" ? "Connecting to live updates…" : liveState === "reconnecting" ? "Reconnecting…" : "Polling for updates"}
+            </div>
             {error && <div className="inline-error">{error}</div>}
             <div className="message-list">
               {loading ? (
@@ -2292,6 +2315,11 @@ function MailboxApp({ session }: { session: Session }) {
                       </div>
                       <div className="row-subject">
                         {message.subject || "(no subject)"}
+                        {message.status !== "received" && (
+                          <span className={`message-status message-status-${message.status}`}>
+                            {messageStatusLabel(message)}
+                          </span>
+                        )}
                         {message.has_attachment && <Paperclip size={13} />}
                         {message.is_pinned && (
                           <Pin size={13} fill="currentColor" />
@@ -2339,7 +2367,7 @@ function MailboxApp({ session }: { session: Session }) {
                     </p>
                     <h2>{selected.subject || "(no subject)"}</h2>
                     <div className="detail-meta">
-                      <span>{selected.status}</span>
+                      <span>{messageStatusLabel(selected)}</span>
                       {selected.spam_score !== undefined && (
                         <span>
                           spam risk {Math.round(selected.spam_score * 100)}%

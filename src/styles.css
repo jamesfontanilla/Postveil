@@ -120,6 +120,14 @@ input:focus, textarea:focus, select:focus { border-color: #2d5bff; background: #
 .secondary-nav { gap: 2px; }
 .search-box select { border: 0; border-left: 1px solid #edf0f4; background: transparent; color: #718098; padding: 10px 4px 10px 8px; font-size: 10px; outline: 0; }
 .row-subject { display: flex; align-items: center; gap: 7px; }
+.message-status { flex: 0 0 auto; border-radius: 999px; background: #eef3ff; color: #4e68bd; padding: 3px 6px; font: 10px "DM Mono", monospace; }
+.message-status-queued { background: #fff7df; color: #9a7220; }
+.message-status-failed, .message-status-bounced { background: #fff0ef; color: #b5524b; }
+.sync-status { display: flex; align-items: center; gap: 6px; margin: 0 18px 10px; color: #8995a8; font: 10px "DM Mono", monospace; }
+.sync-dot { width: 6px; height: 6px; border-radius: 50%; background: #98a3b2; }
+.sync-live .sync-dot { background: #2bb879; box-shadow: 0 0 0 4px rgba(43,184,121,.12); }
+.sync-reconnecting .sync-dot { background: #d59c2a; }
+.sync-offline .sync-dot { background: #b5524b; }
 .score-badge { flex: 0 0 auto; border-radius: 999px; background: #fff0ef; color: #b5524b; padding: 3px 6px; font: 10px "DM Mono", monospace; }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .detail-meta span { border-radius: 999px; background: #f0f3f8; color: #7c899d; padding: 4px 7px; font: 10px "DM Mono", monospace; }
