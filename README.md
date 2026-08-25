@@ -20,12 +20,17 @@ The full server requires the Worker secrets in `wrangler secret` or the Cloudfla
 
 ## Supabase setup
 
-Run `supabase/migrations/202608250001_initial.sql` followed by
-`supabase/migrations/202608250002_outlook_features.sql` in the Supabase SQL
-Editor. The second migration adds custom folders, labels, contacts, rules,
+Run `supabase/migrations/202608250001_initial.sql`, followed by
+`supabase/migrations/202608250002_outlook_features.sql` and
+`supabase/migrations/20260825133332_capability_foundation.sql` in the Supabase
+SQL Editor. The second migration adds custom folders, labels, contacts, rules,
 signatures, automatic replies, calendar events, tasks, mailbox membership,
 integrations, spam feedback, full-text search, threading metadata, scheduled
-send, snooze, message flags, and owner-based RLS policies.
+send, snooze, message flags, and owner-based RLS policies. The capability
+foundation adds durable audit records, rule-run metadata, outbox/idempotency
+fields, trust and attachment evidence, sender policies, saved searches,
+address profiles, collaboration records, push devices, domain checks, and
+explicit RLS boundaries for the next application updates.
 
 ## Worker secrets
 
