@@ -189,3 +189,9 @@ input:focus, textarea:focus, select:focus { border-color: #2d5bff; background: #
 .density-compact .message-row { padding-top: 10px; padding-bottom: 10px; }
 .density-compact .row-copy p { margin-top: 3px; }
 @media (max-width: 720px) { .settings-grid, .workspace-grid { grid-template-columns: 1fr; } .workspace-view { padding: 28px 18px 50px; } .workspace-head { display: block; } .workspace-stamp { margin-top: 11px; text-align: left; } .search-box { flex-wrap: wrap; padding-top: 3px; padding-bottom: 3px; } .search-box select { flex: 1; } }
+.mailbox-setting { align-items: center; gap: 1rem; }
+.mailbox-setting > div:first-child { display: grid; gap: .18rem; }
+.mailbox-setting small { color: var(--muted); }
+.detail-labels { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; margin: 1rem 0; }
+.detail-labels .eyebrow { margin-right: .25rem; }
+.label-chip { display: inline-flex; align-items: center; gap: .25rem; border: 1px solid currentColor; border-radius: 999px; background: transparent; padding: .28rem .55rem; font-size: .75rem; }

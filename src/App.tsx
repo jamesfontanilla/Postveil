@@ -1,8 +1,43 @@
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Archive, Bell, CalendarDays, Check, ChevronDown, Clock3, Eye, Flag, FolderPlus, Forward, Inbox, ListTodo,
-  LogOut, Mail, Menu, MoreHorizontal, Paperclip, PenLine, Pin, Plus, RefreshCcw, Search, Send, Settings2,
-  ShieldAlert, SlidersHorizontal, Star, Tag, Trash2, Users, X,
+  ChangeEvent,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  Archive,
+  Bell,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  Clock3,
+  Eye,
+  Flag,
+  FolderPlus,
+  Forward,
+  Inbox,
+  ListTodo,
+  LogOut,
+  Mail,
+  Menu,
+  MoreHorizontal,
+  Paperclip,
+  PenLine,
+  Pin,
+  Plus,
+  RefreshCcw,
+  Search,
+  Send,
+  Settings2,
+  ShieldAlert,
+  SlidersHorizontal,
+  Star,
+  Tag,
+  Trash2,
+  Users,
+  X,
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { requireSupabase, supabase } from "./lib/supabase";
@@ -10,109 +45,2074 @@ import { requireSupabase, supabase } from "./lib/supabase";
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam";
 type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
 type Message = {
-  id: string; thread_id: string; mailbox_id: string | null; direction: "inbound" | "outbound"; folder: string; status: string;
-  custom_folder_id?: string | null; from_address: string; to_addresses: string[]; cc_addresses?: string[]; bcc_addresses?: string[];
-  subject: string; snippet: string; text_body?: string; html_body?: string | null; is_read: boolean; is_starred: boolean;
-  is_pinned?: boolean; is_flagged?: boolean; priority?: number; has_attachment?: boolean; spam_score?: number;
-  spam_reasons?: string[]; focused_category?: string; scheduled_at?: string | null; snoozed_until?: string | null;
-  received_at?: string; sent_at?: string; created_at: string;
-  attachments?: Array<{ id: string; filename: string; content_type: string; byte_size: number }>;
+  id: string;
+  thread_id: string;
+  mailbox_id: string | null;
+  direction: "inbound" | "outbound";
+  folder: string;
+  status: string;
+  custom_folder_id?: string | null;
+  from_address: string;
+  to_addresses: string[];
+  cc_addresses?: string[];
+  bcc_addresses?: string[];
+  subject: string;
+  snippet: string;
+  message_id_header?: string | null;
+  in_reply_to?: string | null;
+  references_header?: string | null;
+  text_body?: string;
+  html_body?: string | null;
+  is_read: boolean;
+  is_starred: boolean;
+  is_pinned?: boolean;
+  is_flagged?: boolean;
+  priority?: number;
+  has_attachment?: boolean;
+  spam_score?: number;
+  spam_reasons?: string[];
+  focused_category?: string;
+  scheduled_at?: string | null;
+  snoozed_until?: string | null;
+  received_at?: string;
+  sent_at?: string;
+  created_at: string;
+  attachments?: Array<{
+    id: string;
+    filename: string;
+    content_type: string;
+    byte_size: number;
+  }>;
 };
-type Mailbox = { id: string; address: string; display_name: string; is_default: boolean; can_send: boolean; can_receive?: boolean };
+type Mailbox = {
+  id: string;
+  address: string;
+  display_name: string;
+  is_default: boolean;
+  can_send: boolean;
+  can_receive?: boolean;
+};
 type CustomFolder = { id: string; name: string; color: string; slug: string };
 type Label = { id: string; name: string; color: string };
-type Signature = { id: string; name: string; text_body: string; is_default: boolean };
-type AppSettings = { theme?: string; density?: string; reading_pane?: string; timezone?: string; focused_inbox_enabled?: boolean; desktop_notifications?: boolean };
-type Task = { id: string; title: string; notes: string; due_at?: string | null; priority: number; completed: boolean };
-type CalendarEvent = { id: string; title: string; description: string; starts_at: string; ends_at: string; location?: string | null; all_day: boolean };
-type ComposeSeed = { to?: string; cc?: string; subject?: string; text?: string; threadId?: string; inReplyTo?: string; references?: string; draftId?: string };
+type Signature = {
+  id: string;
+  name: string;
+  text_body: string;
+  is_default: boolean;
+};
+type AutoReply = {
+  id?: string;
+  mailbox_id?: string;
+  enabled: boolean;
+  subject: string;
+  body: string;
+  starts_at?: string | null;
+  ends_at?: string | null;
+};
+type AppSettings = {
+  theme?: string;
+  density?: string;
+  reading_pane?: string;
+  timezone?: string;
+  focused_inbox_enabled?: boolean;
+  desktop_notifications?: boolean;
+};
+type Task = {
+  id: string;
+  title: string;
+  notes: string;
+  due_at?: string | null;
+  priority: number;
+  completed: boolean;
+};
+type CalendarEvent = {
+  id: string;
+  title: string;
+  description: string;
+  starts_at: string;
+  ends_at: string;
+  location?: string | null;
+  all_day: boolean;
+};
+type ComposeSeed = {
+  to?: string;
+  cc?: string;
+  subject?: string;
+  text?: string;
+  threadId?: string;
+  inReplyTo?: string;
+  references?: string;
+  draftId?: string;
+};
 
-const folderNames: Record<SystemFolder, string> = { inbox: "Inbox", sent: "Sent", drafts: "Drafts", archive: "Archive", trash: "Trash", spam: "Spam" };
-const folderIcons: Record<SystemFolder, typeof Inbox> = { inbox: Inbox, sent: Send, drafts: PenLine, archive: Archive, trash: Trash2, spam: ShieldAlert };
+const folderNames: Record<SystemFolder, string> = {
+  inbox: "Inbox",
+  sent: "Sent",
+  drafts: "Drafts",
+  archive: "Archive",
+  trash: "Trash",
+  spam: "Spam",
+};
+const folderIcons: Record<SystemFolder, typeof Inbox> = {
+  inbox: Inbox,
+  sent: Send,
+  drafts: PenLine,
+  archive: Archive,
+  trash: Trash2,
+  spam: ShieldAlert,
+};
 
-function displayName(address: string) { return address.split("@")[0] || address; }
-function formatDate(value?: string) { if (!value) return ""; const d = new Date(value); const now = new Date(); return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString([], { month: "short", day: "numeric" }); }
-function formatBytes(value: number) { if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`; return `${(value / 1024 / 1024).toFixed(1)} MB`; }
+function displayName(address: string) {
+  return address.split("@")[0] || address;
+}
+function formatDate(value?: string) {
+  if (!value) return "";
+  const d = new Date(value);
+  const now = new Date();
+  return d.toDateString() === now.toDateString()
+    ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
 
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = (await requireSupabase().auth.getSession()).data.session;
-  const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...(session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {}), ...(init.headers ?? {}) } });
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      "content-type": "application/json",
+      ...(session?.access_token
+        ? { authorization: `Bearer ${session.access_token}` }
+        : {}),
+      ...(init.headers ?? {}),
+    },
+  });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  if (!response.ok)
+    throw new Error(payload.error || `Request failed (${response.status})`);
   return payload as T;
 }
 
 async function apiUpload<T>(path: string, file: File): Promise<T> {
   const session = (await requireSupabase().auth.getSession()).data.session;
-  const form = new FormData(); form.append("file", file);
-  const response = await fetch(path, { method: "POST", body: form, headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(path, {
+    method: "POST",
+    body: form,
+    headers: session?.access_token
+      ? { authorization: `Bearer ${session.access_token}` }
+      : {},
+  });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `Upload failed (${response.status})`);
+  if (!response.ok)
+    throw new Error(payload.error || `Upload failed (${response.status})`);
   return payload as T;
 }
 
 function AuthScreen() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [notice, setNotice] = useState("");
-  async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); setNotice(""); try { const client = requireSupabase(); const result = mode === "signin" ? await client.auth.signInWithPassword({ email, password }) : await client.auth.signUp({ email, password }); if (result.error) throw result.error; if (mode === "signup" && !result.data.session) setNotice("Check your inbox to confirm the account, then sign in here."); } catch (authError) { setError(authError instanceof Error ? authError.message : "Authentication failed"); } finally { setBusy(false); } }
-  return <main className="auth-shell"><section className="auth-card"><div className="brand-mark">P</div><p className="eyebrow">PRIVATE MAIL / {new Date().getFullYear()}</p><h1>Keep your address close.</h1><p className="auth-copy">A focused mailbox for your custom domain. Sign in to open messages across desktop and mobile.</p><form onSubmit={submit} className="auth-form"><label>Email address<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label>Password<input type="password" required minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 6 characters" autoComplete={mode === "signin" ? "current-password" : "new-password"} /></label>{error && <div className="form-error">{error}</div>}{notice && <div className="form-notice">{notice}</div>}<button className="primary-button" disabled={busy}>{busy ? "Opening…" : mode === "signin" ? "Open mailbox" : "Create account"}</button></form><button className="text-button" onClick={() => setMode(mode === "signin" ? "signup" : "signin")}>{mode === "signin" ? "Need an account? Create one" : "Already have an account? Sign in"}</button></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> system ready</div><p className="aside-quote">“The inbox is the room where your attention either gathers or scatters.”</p><p className="aside-meta">Your messages stay private, organized, and addressed to the names you chose.</p></aside></main>;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const client = requireSupabase();
+      const result =
+        mode === "signin"
+          ? await client.auth.signInWithPassword({ email, password })
+          : await client.auth.signUp({ email, password });
+      if (result.error) throw result.error;
+      if (mode === "signup" && !result.data.session)
+        setNotice(
+          "Check your inbox to confirm the account, then sign in here.",
+        );
+    } catch (authError) {
+      setError(
+        authError instanceof Error
+          ? authError.message
+          : "Authentication failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="brand-mark">P</div>
+        <p className="eyebrow">PRIVATE MAIL / {new Date().getFullYear()}</p>
+        <h1>Keep your address close.</h1>
+        <p className="auth-copy">
+          A focused mailbox for your custom domain. Sign in to open messages
+          across desktop and mobile.
+        </p>
+        <form onSubmit={submit} className="auth-form">
+          <label>
+            Email address
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              required
+              minLength={6}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="At least 6 characters"
+              autoComplete={
+                mode === "signin" ? "current-password" : "new-password"
+              }
+            />
+          </label>
+          {error && <div className="form-error">{error}</div>}
+          {notice && <div className="form-notice">{notice}</div>}
+          <button className="primary-button" disabled={busy}>
+            {busy
+              ? "Opening…"
+              : mode === "signin"
+                ? "Open mailbox"
+                : "Create account"}
+          </button>
+        </form>
+        <button
+          className="text-button"
+          onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+        >
+          {mode === "signin"
+            ? "Need an account? Create one"
+            : "Already have an account? Sign in"}
+        </button>
+      </section>
+      <aside className="auth-aside">
+        <div className="aside-note">
+          <span className="status-dot" /> system ready
+        </div>
+        <p className="aside-quote">
+          “The inbox is the room where your attention either gathers or
+          scatters.”
+        </p>
+        <p className="aside-meta">
+          Your messages stay private, organized, and addressed to the names you
+          chose.
+        </p>
+      </aside>
+    </main>
+  );
 }
 
-function Compose({ mailboxes, signatures, seed, onClose, onSent }: { mailboxes: Mailbox[]; signatures: Signature[]; seed?: ComposeSeed; onClose: () => void; onSent: () => void }) {
-  const defaultMailbox = mailboxes.find((mailbox) => mailbox.is_default) || mailboxes[0];
-  const [fromAddress, setFromAddress] = useState(defaultMailbox?.address || ""); const [to, setTo] = useState(seed?.to || ""); const [cc, setCc] = useState(seed?.cc || ""); const [bcc, setBcc] = useState(""); const [subject, setSubject] = useState(seed?.subject || ""); const [text, setText] = useState(seed?.text || ""); const [scheduledAt, setScheduledAt] = useState(""); const [draftId, setDraftId] = useState(seed?.draftId || ""); const [attachments, setAttachments] = useState<Array<{ filename: string; object_key: string; byte_size: number }>>([]); const [signatureId, setSignatureId] = useState(""); const [busy, setBusy] = useState(false); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
-  const saveDraft = useCallback(async () => { if (!fromAddress || (!to.trim() && !subject.trim() && !text.trim())) return; setSaving(true); try { const saved = await apiFetch<Message>("/api/drafts", { method: "POST", body: JSON.stringify({ id: draftId || undefined, fromAddress, to, cc, bcc, subject, text }) }); if (saved?.id) setDraftId(saved.id); } catch (draftError) { setError(draftError instanceof Error ? draftError.message : "Draft could not be saved"); } finally { setSaving(false); } }, [bcc, cc, draftId, fromAddress, subject, text, to]);
-  useEffect(() => { const timer = window.setTimeout(() => void saveDraft(), 3000); return () => window.clearTimeout(timer); }, [saveDraft]);
-  function chooseSignature(id: string) { setSignatureId(id); const signature = signatures.find((item) => item.id === id); if (signature && !text.includes(signature.text_body)) setText((current) => `${current}${current ? "\n\n" : ""}${signature.text_body}`); }
-  async function upload(event: ChangeEvent<HTMLInputElement>) { for (const file of Array.from(event.target.files || [])) { try { const item = await apiUpload<{ filename: string; object_key: string; byte_size: number }>("/api/attachments", file); setAttachments((current) => [...current, item]); } catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "Attachment upload failed"); } } event.target.value = ""; }
-  async function send(event: FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { await apiFetch("/api/send", { method: "POST", body: JSON.stringify({ fromAddress, to, cc, bcc, subject, text, scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null, threadId: seed?.threadId, inReplyTo: seed?.inReplyTo, references: seed?.references, attachments }) }); onSent(); onClose(); } catch (sendError) { setError(sendError instanceof Error ? sendError.message : "The message could not be sent"); } finally { setBusy(false); } }
-  return <div className="compose-overlay" role="presentation"><form className="compose-card" onSubmit={send}><div className="compose-head"><div><p className="eyebrow">{seed?.to ? "REPLY / FORWARD" : "NEW MESSAGE"}</p><h2>{seed?.to ? "Continue the thread" : "Write a note"}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close compose"><X size={18} /></button></div><div className="compose-fields"><label>From<select value={fromAddress} onChange={(event) => setFromAddress(event.target.value)}>{mailboxes.filter((mailbox) => mailbox.can_send).map((mailbox) => <option key={mailbox.id} value={mailbox.address}>{mailbox.address}</option>)}</select></label><label>To<input required value={to} onChange={(event) => setTo(event.target.value)} placeholder="recipient@example.com" /></label><label>CC<input value={cc} onChange={(event) => setCc(event.target.value)} placeholder="Optional" /></label><label>BCC<input value={bcc} onChange={(event) => setBcc(event.target.value)} placeholder="Optional" /></label><label>Subject<input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="What is this about?" /></label><label className="message-input">Message<textarea required value={text} onChange={(event) => setText(event.target.value)} placeholder="Start writing…" rows={8} /></label></div>{signatures.length > 0 && <div className="compose-tools"><Tag size={15} /><select value={signatureId} onChange={(event) => chooseSignature(event.target.value)}><option value="">Add signature</option>{signatures.map((signature) => <option key={signature.id} value={signature.id}>{signature.name}</option>)}</select></div>}<div className="attachment-strip">{attachments.map((attachment) => <span key={attachment.object_key}><Paperclip size={13} />{attachment.filename} <small>{formatBytes(attachment.byte_size)}</small></span>)}</div>{error && <div className="form-error compose-error">{error}</div>}<div className="compose-foot"><label className="file-button"><Paperclip size={15} /> Attach<input type="file" multiple onChange={upload} /></label><label className="schedule-field"><Clock3 size={15} /><input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} aria-label="Schedule send" /></label><span className="compose-hint">{saving ? "Saving draft…" : draftId ? "Draft saved" : "Autosaves after you start writing"}</span><button className="primary-button" disabled={busy}><Send size={15} /> {busy ? "Sending…" : scheduledAt ? "Schedule" : "Send message"}</button></div></form></div>;
+function Compose({
+  mailboxes,
+  signatures,
+  seed,
+  onClose,
+  onSent,
+}: {
+  mailboxes: Mailbox[];
+  signatures: Signature[];
+  seed?: ComposeSeed;
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const defaultMailbox =
+    mailboxes.find((mailbox) => mailbox.is_default) || mailboxes[0];
+  const [fromAddress, setFromAddress] = useState(defaultMailbox?.address || "");
+  const [to, setTo] = useState(seed?.to || "");
+  const [cc, setCc] = useState(seed?.cc || "");
+  const [bcc, setBcc] = useState("");
+  const [subject, setSubject] = useState(seed?.subject || "");
+  const [text, setText] = useState(seed?.text || "");
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [draftId, setDraftId] = useState(seed?.draftId || "");
+  const [attachments, setAttachments] = useState<
+    Array<{ filename: string; object_key: string; byte_size: number }>
+  >([]);
+  const [signatureId, setSignatureId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const saveDraft = useCallback(async () => {
+    if (!fromAddress || (!to.trim() && !subject.trim() && !text.trim())) return;
+    setSaving(true);
+    try {
+      const saved = await apiFetch<Message>("/api/drafts", {
+        method: "POST",
+        body: JSON.stringify({
+          id: draftId || undefined,
+          fromAddress,
+          to,
+          cc,
+          bcc,
+          subject,
+          text,
+        }),
+      });
+      if (saved?.id) setDraftId(saved.id);
+    } catch (draftError) {
+      setError(
+        draftError instanceof Error
+          ? draftError.message
+          : "Draft could not be saved",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [bcc, cc, draftId, fromAddress, subject, text, to]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void saveDraft(), 3000);
+    return () => window.clearTimeout(timer);
+  }, [saveDraft]);
+  function chooseSignature(id: string) {
+    setSignatureId(id);
+    const signature = signatures.find((item) => item.id === id);
+    if (signature && !text.includes(signature.text_body))
+      setText(
+        (current) => `${current}${current ? "\n\n" : ""}${signature.text_body}`,
+      );
+  }
+  async function upload(event: ChangeEvent<HTMLInputElement>) {
+    for (const file of Array.from(event.target.files || [])) {
+      try {
+        const item = await apiUpload<{
+          filename: string;
+          object_key: string;
+          byte_size: number;
+        }>("/api/attachments", file);
+        setAttachments((current) => [...current, item]);
+      } catch (uploadError) {
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : "Attachment upload failed",
+        );
+      }
+    }
+    event.target.value = "";
+  }
+  async function send(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch("/api/send", {
+        method: "POST",
+        body: JSON.stringify({
+          fromAddress,
+          to,
+          cc,
+          bcc,
+          subject,
+          text,
+          scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          threadId: seed?.threadId,
+          inReplyTo: seed?.inReplyTo,
+          references: seed?.references,
+          attachments,
+        }),
+      });
+      onSent();
+      onClose();
+    } catch (sendError) {
+      setError(
+        sendError instanceof Error
+          ? sendError.message
+          : "The message could not be sent",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="compose-overlay" role="presentation">
+      <form className="compose-card" onSubmit={send}>
+        <div className="compose-head">
+          <div>
+            <p className="eyebrow">
+              {seed?.to ? "REPLY / FORWARD" : "NEW MESSAGE"}
+            </p>
+            <h2>{seed?.to ? "Continue the thread" : "Write a note"}</h2>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Close compose"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="compose-fields">
+          <label>
+            From
+            <select
+              value={fromAddress}
+              onChange={(event) => setFromAddress(event.target.value)}
+            >
+              {mailboxes
+                .filter((mailbox) => mailbox.can_send)
+                .map((mailbox) => (
+                  <option key={mailbox.id} value={mailbox.address}>
+                    {mailbox.address}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            To
+            <input
+              required
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+              placeholder="recipient@example.com"
+            />
+          </label>
+          <label>
+            CC
+            <input
+              value={cc}
+              onChange={(event) => setCc(event.target.value)}
+              placeholder="Optional"
+            />
+          </label>
+          <label>
+            BCC
+            <input
+              value={bcc}
+              onChange={(event) => setBcc(event.target.value)}
+              placeholder="Optional"
+            />
+          </label>
+          <label>
+            Subject
+            <input
+              value={subject}
+              onChange={(event) => setSubject(event.target.value)}
+              placeholder="What is this about?"
+            />
+          </label>
+          <label className="message-input">
+            Message
+            <textarea
+              required
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="Start writing…"
+              rows={8}
+            />
+          </label>
+        </div>
+        {signatures.length > 0 && (
+          <div className="compose-tools">
+            <Tag size={15} />
+            <select
+              value={signatureId}
+              onChange={(event) => chooseSignature(event.target.value)}
+            >
+              <option value="">Add signature</option>
+              {signatures.map((signature) => (
+                <option key={signature.id} value={signature.id}>
+                  {signature.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="attachment-strip">
+          {attachments.map((attachment) => (
+            <span key={attachment.object_key}>
+              <Paperclip size={13} />
+              {attachment.filename}{" "}
+              <small>{formatBytes(attachment.byte_size)}</small>
+            </span>
+          ))}
+        </div>
+        {error && <div className="form-error compose-error">{error}</div>}
+        <div className="compose-foot">
+          <label className="file-button">
+            <Paperclip size={15} /> Attach
+            <input type="file" multiple onChange={upload} />
+          </label>
+          <label className="schedule-field">
+            <Clock3 size={15} />
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(event) => setScheduledAt(event.target.value)}
+              aria-label="Schedule send"
+            />
+          </label>
+          <span className="compose-hint">
+            {saving
+              ? "Saving draft…"
+              : draftId
+                ? "Draft saved"
+                : "Autosaves after you start writing"}
+          </span>
+          <button className="primary-button" disabled={busy}>
+            <Send size={15} />{" "}
+            {busy ? "Sending…" : scheduledAt ? "Schedule" : "Send message"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
 }
 
-function SettingsPanel({ settings, folders, labels, mailboxes, onClose, onChanged }: { settings: AppSettings; folders: CustomFolder[]; labels: Label[]; mailboxes: Mailbox[]; onClose: () => void; onChanged: () => void }) {
-  const [tab, setTab] = useState<"appearance" | "organize" | "contacts" | "automation" | "integrations">("appearance"); const [folderName, setFolderName] = useState(""); const [labelName, setLabelName] = useState(""); const [contactEmail, setContactEmail] = useState(""); const [contactName, setContactName] = useState(""); const [ruleName, setRuleName] = useState(""); const [ruleFrom, setRuleFrom] = useState(""); const [ruleFolder, setRuleFolder] = useState("spam"); const [signatureName, setSignatureName] = useState(""); const [signatureText, setSignatureText] = useState(""); const [notice, setNotice] = useState("");
-  async function updateSettings(patch: JsonSettings) { await apiFetch("/api/settings", { method: "PATCH", body: JSON.stringify(patch) }); onChanged(); }
-  async function createFolder() { if (!folderName.trim()) return; await apiFetch("/api/folders", { method: "POST", body: JSON.stringify({ name: folderName }) }); setFolderName(""); setNotice("Folder created"); onChanged(); }
-  async function createLabel() { if (!labelName.trim()) return; await apiFetch("/api/labels", { method: "POST", body: JSON.stringify({ name: labelName }) }); setLabelName(""); setNotice("Label created"); onChanged(); }
-  async function createContact() { if (!contactEmail.trim()) return; await apiFetch("/api/contacts", { method: "POST", body: JSON.stringify({ email: contactEmail, displayName: contactName }) }); setContactEmail(""); setContactName(""); setNotice("Contact saved"); onChanged(); }
-  async function createRule() { if (!ruleName.trim() || !ruleFrom.trim()) return; await apiFetch("/api/rules", { method: "POST", body: JSON.stringify({ name: ruleName, conditions: { fromContains: ruleFrom }, actions: { folder: ruleFolder } }) }); setRuleName(""); setRuleFrom(""); setNotice("Rule created"); onChanged(); }
-  async function createSignature() { if (!signatureName.trim()) return; await apiFetch("/api/signatures", { method: "POST", body: JSON.stringify({ mailboxId: mailboxes[0]?.id, name: signatureName, text: signatureText, isDefault: true }) }); setSignatureName(""); setSignatureText(""); setNotice("Signature saved"); onChanged(); }
-  return <div className="modal-backdrop"><section className="settings-panel"><div className="panel-title"><div><p className="eyebrow">PARCEL CONTROL ROOM</p><h2>Settings & organization</h2></div><button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={18} /></button></div><div className="settings-tabs">{([["appearance", "Appearance"], ["organize", "Folders & labels"], ["contacts", "Contacts"], ["automation", "Rules & signatures"], ["integrations", "Integrations"]] as const).map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>)}</div>{tab === "appearance" && <div className="settings-grid"><div className="setting-card"><h3>Interface</h3><p>Shape the desk around how you work.</p><div className="choice-row"><button className={settings.theme === "light" ? "selected" : ""} onClick={() => void updateSettings({ theme: "light" })}>Light</button><button className={settings.theme === "dark" ? "selected" : ""} onClick={() => void updateSettings({ theme: "dark" })}>Dark</button></div><div className="choice-row"><button className={settings.density === "comfortable" ? "selected" : ""} onClick={() => void updateSettings({ density: "comfortable" })}>Comfortable</button><button className={settings.density === "compact" ? "selected" : ""} onClick={() => void updateSettings({ density: "compact" })}>Compact</button></div></div><div className="setting-card"><h3>Attention</h3><p>Focused Inbox uses sender history and message signals.</p><label className="toggle-row"><input type="checkbox" checked={settings.focused_inbox_enabled !== false} onChange={(event) => void updateSettings({ focused_inbox_enabled: event.target.checked })} /> Focused Inbox</label><label className="toggle-row"><input type="checkbox" checked={Boolean(settings.desktop_notifications)} onChange={(event) => void updateSettings({ desktop_notifications: event.target.checked })} /> Desktop notifications</label></div></div>}{tab === "organize" && <div className="settings-grid"><div className="setting-card"><h3>Custom folders</h3><div className="inline-form"><input value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="Folder name" /><button className="secondary-button" onClick={() => void createFolder()}><Plus size={15} /> Add</button></div>{folders.map((folder) => <div className="settings-item" key={folder.id}><span className="color-dot" style={{ background: folder.color }} />{folder.name}</div>)}</div><div className="setting-card"><h3>Labels</h3><div className="inline-form"><input value={labelName} onChange={(event) => setLabelName(event.target.value)} placeholder="Label name" /><button className="secondary-button" onClick={() => void createLabel()}><Plus size={15} /> Add</button></div>{labels.map((label) => <div className="settings-item" key={label.id}><span className="color-dot" style={{ background: label.color }} />{label.name}</div>)}</div></div>}{tab === "contacts" && <div className="settings-grid"><div className="setting-card"><h3>People</h3><p>Save trusted senders so spam scoring learns who matters.</p><input value={contactName} onChange={(event) => setContactName(event.target.value)} placeholder="Display name" /><input value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} placeholder="Email address" /><button className="secondary-button" onClick={() => void createContact()}><Users size={15} /> Save contact</button></div></div>}{tab === "automation" && <div className="settings-grid"><div className="setting-card"><h3>Rules</h3><input value={ruleName} onChange={(event) => setRuleName(event.target.value)} placeholder="Rule name" /><input value={ruleFrom} onChange={(event) => setRuleFrom(event.target.value)} placeholder="Sender contains" /><select value={ruleFolder} onChange={(event) => setRuleFolder(event.target.value)}><option value="spam">Move to Spam</option><option value="archive">Archive</option><option value="trash">Delete</option><option value="inbox">Keep in Inbox</option></select><button className="secondary-button" onClick={() => void createRule()}><SlidersHorizontal size={15} /> Add rule</button></div><div className="setting-card"><h3>Signatures</h3><input value={signatureName} onChange={(event) => setSignatureName(event.target.value)} placeholder="Signature name" /><textarea value={signatureText} onChange={(event) => setSignatureText(event.target.value)} placeholder="Regards, James" rows={4} /><button className="secondary-button" onClick={() => void createSignature()}><PenLine size={15} /> Save signature</button></div></div>}{tab === "integrations" && <div className="settings-grid"><div className="setting-card"><h3>Optional connections</h3><p>Calendar, OneDrive, Teams, Google Drive, and AI can be attached here without putting provider secrets in the browser.</p><div className="integration-row"><span>Google Calendar</span><small>Connect through OAuth when credentials are configured.</small></div><div className="integration-row"><span>Microsoft Graph</span><small>Mail and Teams connectors are not configured.</small></div><div className="integration-row"><span>AI assistant</span><small>Optional and disabled by default.</small></div></div></div>}{notice && <div className="form-notice">{notice}</div>}</section></div>;
+function SettingsPanel({
+  settings,
+  folders,
+  labels,
+  mailboxes,
+  onClose,
+  onChanged,
+}: {
+  settings: AppSettings;
+  folders: CustomFolder[];
+  labels: Label[];
+  mailboxes: Mailbox[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [tab, setTab] = useState<
+    | "appearance"
+    | "organize"
+    | "contacts"
+    | "automation"
+    | "mailboxes"
+    | "integrations"
+  >("appearance");
+  const [folderName, setFolderName] = useState("");
+  const [labelName, setLabelName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [ruleName, setRuleName] = useState("");
+  const [ruleFrom, setRuleFrom] = useState("");
+  const [ruleFolder, setRuleFolder] = useState("spam");
+  const [signatureName, setSignatureName] = useState("");
+  const [signatureText, setSignatureText] = useState("");
+  const [mailboxAddress, setMailboxAddress] = useState("");
+  const [mailboxName, setMailboxName] = useState("");
+  const [autoReply, setAutoReply] = useState<AutoReply>({
+    enabled: false,
+    subject: "Automatic reply",
+    body: "",
+  });
+  const [notice, setNotice] = useState("");
+  async function updateSettings(patch: JsonSettings) {
+    await apiFetch("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    onChanged();
+  }
+  async function createFolder() {
+    if (!folderName.trim()) return;
+    await apiFetch("/api/folders", {
+      method: "POST",
+      body: JSON.stringify({ name: folderName }),
+    });
+    setFolderName("");
+    setNotice("Folder created");
+    onChanged();
+  }
+  async function createLabel() {
+    if (!labelName.trim()) return;
+    await apiFetch("/api/labels", {
+      method: "POST",
+      body: JSON.stringify({ name: labelName }),
+    });
+    setLabelName("");
+    setNotice("Label created");
+    onChanged();
+  }
+  async function createContact() {
+    if (!contactEmail.trim()) return;
+    await apiFetch("/api/contacts", {
+      method: "POST",
+      body: JSON.stringify({ email: contactEmail, displayName: contactName }),
+    });
+    setContactEmail("");
+    setContactName("");
+    setNotice("Contact saved");
+    onChanged();
+  }
+  async function createRule() {
+    if (!ruleName.trim() || !ruleFrom.trim()) return;
+    await apiFetch("/api/rules", {
+      method: "POST",
+      body: JSON.stringify({
+        name: ruleName,
+        conditions: { fromContains: ruleFrom },
+        actions: { folder: ruleFolder },
+      }),
+    });
+    setRuleName("");
+    setRuleFrom("");
+    setNotice("Rule created");
+    onChanged();
+  }
+  async function createSignature() {
+    if (!signatureName.trim()) return;
+    await apiFetch("/api/signatures", {
+      method: "POST",
+      body: JSON.stringify({
+        mailboxId: mailboxes[0]?.id,
+        name: signatureName,
+        text: signatureText,
+        isDefault: true,
+      }),
+    });
+    setSignatureName("");
+    setSignatureText("");
+    setNotice("Signature saved");
+    onChanged();
+  }
+  async function createMailbox() {
+    if (!mailboxAddress.trim()) return;
+    await apiFetch("/api/mailboxes", {
+      method: "POST",
+      body: JSON.stringify({
+        address: mailboxAddress,
+        displayName: mailboxName || mailboxAddress.split("@")[0],
+      }),
+    });
+    setMailboxAddress("");
+    setMailboxName("");
+    setNotice("Mailbox added");
+    onChanged();
+  }
+  async function updateMailbox(mailbox: Mailbox, patch: JsonSettings) {
+    await apiFetch(`/api/mailboxes/${mailbox.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+    setNotice("Mailbox updated");
+    onChanged();
+  }
+  async function saveAutoReply() {
+    await apiFetch("/api/auto-replies", {
+      method: "POST",
+      body: JSON.stringify({
+        mailboxId:
+          autoReply.mailbox_id ||
+          mailboxes.find((item) => item.is_default)?.id ||
+          mailboxes[0]?.id,
+        enabled: autoReply.enabled,
+        subject: autoReply.subject,
+        body: autoReply.body,
+        startsAt: autoReply.starts_at || null,
+        endsAt: autoReply.ends_at || null,
+      }),
+    });
+    setNotice("Automatic reply saved");
+  }
+  useEffect(() => {
+    if (tab !== "automation") return;
+    void apiFetch<AutoReply[]>("/api/auto-replies")
+      .then((rows) => {
+        if (rows[0]) setAutoReply(rows[0]);
+      })
+      .catch((loadError) =>
+        setNotice(
+          loadError instanceof Error
+            ? loadError.message
+            : "Automatic reply unavailable",
+        ),
+      );
+  }, [tab]);
+  return (
+    <div className="modal-backdrop">
+      <section className="settings-panel">
+        <div className="panel-title">
+          <div>
+            <p className="eyebrow">PARCEL CONTROL ROOM</p>
+            <h2>Settings & organization</h2>
+          </div>
+          <button
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Close settings"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="settings-tabs">
+          {(
+            [
+              ["appearance", "Appearance"],
+              ["organize", "Folders & labels"],
+              ["contacts", "Contacts"],
+              ["automation", "Rules & signatures"],
+              ["mailboxes", "Mailboxes"],
+              ["integrations", "Integrations"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              className={tab === key ? "active" : ""}
+              onClick={() => setTab(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {tab === "appearance" && (
+          <div className="settings-grid">
+            <div className="setting-card">
+              <h3>Interface</h3>
+              <p>Shape the desk around how you work.</p>
+              <div className="choice-row">
+                <button
+                  className={settings.theme === "light" ? "selected" : ""}
+                  onClick={() => void updateSettings({ theme: "light" })}
+                >
+                  Light
+                </button>
+                <button
+                  className={settings.theme === "dark" ? "selected" : ""}
+                  onClick={() => void updateSettings({ theme: "dark" })}
+                >
+                  Dark
+                </button>
+              </div>
+              <div className="choice-row">
+                <button
+                  className={
+                    settings.density === "comfortable" ? "selected" : ""
+                  }
+                  onClick={() =>
+                    void updateSettings({ density: "comfortable" })
+                  }
+                >
+                  Comfortable
+                </button>
+                <button
+                  className={settings.density === "compact" ? "selected" : ""}
+                  onClick={() => void updateSettings({ density: "compact" })}
+                >
+                  Compact
+                </button>
+              </div>
+            </div>
+            <div className="setting-card">
+              <h3>Attention</h3>
+              <p>Focused Inbox uses sender history and message signals.</p>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.focused_inbox_enabled !== false}
+                  onChange={(event) =>
+                    void updateSettings({
+                      focused_inbox_enabled: event.target.checked,
+                    })
+                  }
+                />{" "}
+                Focused Inbox
+              </label>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings.desktop_notifications)}
+                  onChange={(event) =>
+                    void updateSettings({
+                      desktop_notifications: event.target.checked,
+                    })
+                  }
+                />{" "}
+                Desktop notifications
+              </label>
+            </div>
+          </div>
+        )}
+        {tab === "organize" && (
+          <div className="settings-grid">
+            <div className="setting-card">
+              <h3>Custom folders</h3>
+              <div className="inline-form">
+                <input
+                  value={folderName}
+                  onChange={(event) => setFolderName(event.target.value)}
+                  placeholder="Folder name"
+                />
+                <button
+                  className="secondary-button"
+                  onClick={() => void createFolder()}
+                >
+                  <Plus size={15} /> Add
+                </button>
+              </div>
+              {folders.map((folder) => (
+                <div className="settings-item" key={folder.id}>
+                  <span
+                    className="color-dot"
+                    style={{ background: folder.color }}
+                  />
+                  {folder.name}
+                </div>
+              ))}
+            </div>
+            <div className="setting-card">
+              <h3>Labels</h3>
+              <div className="inline-form">
+                <input
+                  value={labelName}
+                  onChange={(event) => setLabelName(event.target.value)}
+                  placeholder="Label name"
+                />
+                <button
+                  className="secondary-button"
+                  onClick={() => void createLabel()}
+                >
+                  <Plus size={15} /> Add
+                </button>
+              </div>
+              {labels.map((label) => (
+                <div className="settings-item" key={label.id}>
+                  <span
+                    className="color-dot"
+                    style={{ background: label.color }}
+                  />
+                  {label.name}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {tab === "contacts" && (
+          <div className="settings-grid">
+            <div className="setting-card">
+              <h3>People</h3>
+              <p>Save trusted senders so spam scoring learns who matters.</p>
+              <input
+                value={contactName}
+                onChange={(event) => setContactName(event.target.value)}
+                placeholder="Display name"
+              />
+              <input
+                value={contactEmail}
+                onChange={(event) => setContactEmail(event.target.value)}
+                placeholder="Email address"
+              />
+              <button
+                className="secondary-button"
+                onClick={() => void createContact()}
+              >
+                <Users size={15} /> Save contact
+              </button>
+            </div>
+          </div>
+        )}
+        {tab === "automation" && (
+          <div className="settings-grid">
+            <div className="setting-card">
+              <h3>Rules</h3>
+              <input
+                value={ruleName}
+                onChange={(event) => setRuleName(event.target.value)}
+                placeholder="Rule name"
+              />
+              <input
+                value={ruleFrom}
+                onChange={(event) => setRuleFrom(event.target.value)}
+                placeholder="Sender contains"
+              />
+              <select
+                value={ruleFolder}
+                onChange={(event) => setRuleFolder(event.target.value)}
+              >
+                <option value="spam">Move to Spam</option>
+                <option value="archive">Archive</option>
+                <option value="trash">Delete</option>
+                <option value="inbox">Keep in Inbox</option>
+              </select>
+              <button
+                className="secondary-button"
+                onClick={() => void createRule()}
+              >
+                <SlidersHorizontal size={15} /> Add rule
+              </button>
+            </div>
+            <div className="setting-card">
+              <h3>Signatures</h3>
+              <input
+                value={signatureName}
+                onChange={(event) => setSignatureName(event.target.value)}
+                placeholder="Signature name"
+              />
+              <textarea
+                value={signatureText}
+                onChange={(event) => setSignatureText(event.target.value)}
+                placeholder="Regards, James"
+                rows={4}
+              />
+              <button
+                className="secondary-button"
+                onClick={() => void createSignature()}
+              >
+                <PenLine size={15} /> Save signature
+              </button>
+            </div>
+            <div className="setting-card">
+              <h3>Automatic replies</h3>
+              <p>
+                Send one rate-limited vacation response for the selected
+                mailbox.
+              </p>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={autoReply.enabled}
+                  onChange={(event) =>
+                    setAutoReply((current) => ({
+                      ...current,
+                      enabled: event.target.checked,
+                    }))
+                  }
+                />{" "}
+                Enabled
+              </label>
+              <input
+                value={autoReply.subject}
+                onChange={(event) =>
+                  setAutoReply((current) => ({
+                    ...current,
+                    subject: event.target.value,
+                  }))
+                }
+                placeholder="Automatic reply subject"
+              />
+              <textarea
+                value={autoReply.body}
+                onChange={(event) =>
+                  setAutoReply((current) => ({
+                    ...current,
+                    body: event.target.value,
+                  }))
+                }
+                placeholder="I am away and will reply soon."
+                rows={4}
+              />
+              <button
+                className="secondary-button"
+                onClick={() => void saveAutoReply()}
+              >
+                <Bell size={15} /> Save reply
+              </button>
+            </div>
+          </div>
+        )}
+        {tab === "mailboxes" && (
+          <div className="settings-grid">
+            <div className="setting-card">
+              <h3>Add an address</h3>
+              <p>
+                Each address can send through Brevo and receive through
+                Cloudflare routing.
+              </p>
+              <input
+                value={mailboxName}
+                onChange={(event) => setMailboxName(event.target.value)}
+                placeholder="Display name"
+              />
+              <input
+                type="email"
+                value={mailboxAddress}
+                onChange={(event) => setMailboxAddress(event.target.value)}
+                placeholder="name@your-domain.com"
+              />
+              <button
+                className="secondary-button"
+                onClick={() => void createMailbox()}
+              >
+                <Plus size={15} /> Add mailbox
+              </button>
+            </div>
+            <div className="setting-card">
+              <h3>Connected addresses</h3>
+              {mailboxes.map((item) => (
+                <div className="settings-item mailbox-setting" key={item.id}>
+                  <div>
+                    <strong>{item.address}</strong>
+                    <small>
+                      {item.display_name}
+                      {item.is_default ? " · default" : ""}
+                    </small>
+                  </div>
+                  <div className="choice-row">
+                    <button
+                      className={item.can_send ? "selected" : ""}
+                      onClick={() =>
+                        void updateMailbox(item, { can_send: !item.can_send })
+                      }
+                    >
+                      Send
+                    </button>
+                    <button
+                      className={item.can_receive ? "selected" : ""}
+                      onClick={() =>
+                        void updateMailbox(item, {
+                          can_receive: !item.can_receive,
+                        })
+                      }
+                    >
+                      Receive
+                    </button>
+                    {!item.is_default && (
+                      <button
+                        onClick={() =>
+                          void updateMailbox(item, { is_default: true })
+                        }
+                      >
+                        Default
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {tab === "integrations" && (
+          <div className="settings-grid">
+            <div className="setting-card">
+              <h3>Optional connections</h3>
+              <p>
+                Calendar, OneDrive, Teams, Google Drive, and AI can be attached
+                here without putting provider secrets in the browser.
+              </p>
+              <div className="integration-row">
+                <span>Google Calendar</span>
+                <small>
+                  Connect through OAuth when credentials are configured.
+                </small>
+              </div>
+              <div className="integration-row">
+                <span>Microsoft Graph</span>
+                <small>Mail and Teams connectors are not configured.</small>
+              </div>
+              <div className="integration-row">
+                <span>AI assistant</span>
+                <small>Optional and disabled by default.</small>
+              </div>
+            </div>
+          </div>
+        )}
+        {notice && <div className="form-notice">{notice}</div>}
+      </section>
+    </div>
+  );
 }
 
 type JsonSettings = Record<string, unknown>;
 
-function Workspace({ mode, tasks, events, onRefresh }: { mode: "calendar" | "tasks"; tasks: Task[]; events: CalendarEvent[]; onRefresh: () => void }) {
-  const [title, setTitle] = useState(""); const [date, setDate] = useState("");
+function Workspace({
+  mode,
+  tasks,
+  events,
+  onRefresh,
+}: {
+  mode: "calendar" | "tasks";
+  tasks: Task[];
+  events: CalendarEvent[];
+  onRefresh: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [date, setDate] = useState("");
   const [error, setError] = useState("");
-  async function addTask() { if (!title.trim()) return; setError(""); try { await apiFetch("/api/tasks", { method: "POST", body: JSON.stringify({ title, dueAt: date ? new Date(date).toISOString() : null }) }); setTitle(""); setDate(""); onRefresh(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save the task"); } }
-  async function addEvent() { if (!title.trim()) return; setError(""); try { const start = date ? new Date(date) : new Date(Date.now() + 60 * 60 * 1000); const end = new Date(start.getTime() + 60 * 60 * 1000); await apiFetch("/api/calendar", { method: "POST", body: JSON.stringify({ title, startsAt: start.toISOString(), endsAt: end.toISOString() }) }); setTitle(""); setDate(""); onRefresh(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save the event"); } }
-  async function toggleTask(task: Task) { setError(""); try { await apiFetch(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ completed: !task.completed }) }); onRefresh(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not update the task"); } }
-  return <section className="workspace-view"><div className="workspace-head"><div><p className="eyebrow">YOUR WORKSPACE</p><h1>{mode === "calendar" ? <><CalendarDays size={23} /> Calendar</> : <><ListTodo size={23} /> To Do</>}</h1></div><div className="workspace-stamp">{mode === "calendar" ? "Events from email can become appointments." : "Turn a message into a next action."}</div></div>{error && <div className="inline-error workspace-error">{error}</div>}<div className="workspace-grid"><div className="setting-card workspace-create"><h3>{mode === "calendar" ? "Add an event" : "Add a task"}</h3><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={mode === "calendar" ? "Event title" : "Task title"} /><input type={mode === "calendar" ? "datetime-local" : "datetime-local"} value={date} onChange={(event) => setDate(event.target.value)} /><button className="primary-button" onClick={() => void (mode === "calendar" ? addEvent() : addTask())}><Plus size={15} /> Add {mode === "calendar" ? "event" : "task"}</button></div><div className="workspace-list">{mode === "calendar" ? (events.length ? events.map((event) => <article className="event-card" key={event.id}><div className="event-time">{formatDate(event.starts_at)}</div><div><strong>{event.title}</strong><p>{new Date(event.starts_at).toLocaleString()}</p></div></article>) : <div className="list-empty"><CalendarDays size={25} /><p>No events yet.</p></div>) : (tasks.length ? tasks.map((task) => <label className={`task-card ${task.completed ? "completed" : ""}`} key={task.id}><input type="checkbox" checked={task.completed} onChange={() => void toggleTask(task)} /><span><strong>{task.title}</strong><small>{task.due_at ? `Due ${new Date(task.due_at).toLocaleString()}` : "No due date"}</small></span></label>) : <div className="list-empty"><ListTodo size={25} /><p>No tasks yet.</p></div>)}</div></div></section>;
+  async function addTask() {
+    if (!title.trim()) return;
+    setError("");
+    try {
+      await apiFetch("/api/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          dueAt: date ? new Date(date).toISOString() : null,
+        }),
+      });
+      setTitle("");
+      setDate("");
+      onRefresh();
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Could not save the task",
+      );
+    }
+  }
+  async function addEvent() {
+    if (!title.trim()) return;
+    setError("");
+    try {
+      const start = date
+        ? new Date(date)
+        : new Date(Date.now() + 60 * 60 * 1000);
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      await apiFetch("/api/calendar", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          startsAt: start.toISOString(),
+          endsAt: end.toISOString(),
+        }),
+      });
+      setTitle("");
+      setDate("");
+      onRefresh();
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Could not save the event",
+      );
+    }
+  }
+  async function toggleTask(task: Task) {
+    setError("");
+    try {
+      await apiFetch(`/api/tasks/${task.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ completed: !task.completed }),
+      });
+      onRefresh();
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Could not update the task",
+      );
+    }
+  }
+  return (
+    <section className="workspace-view">
+      <div className="workspace-head">
+        <div>
+          <p className="eyebrow">YOUR WORKSPACE</p>
+          <h1>
+            {mode === "calendar" ? (
+              <>
+                <CalendarDays size={23} /> Calendar
+              </>
+            ) : (
+              <>
+                <ListTodo size={23} /> To Do
+              </>
+            )}
+          </h1>
+        </div>
+        <div className="workspace-stamp">
+          {mode === "calendar"
+            ? "Events from email can become appointments."
+            : "Turn a message into a next action."}
+        </div>
+      </div>
+      {error && <div className="inline-error workspace-error">{error}</div>}
+      <div className="workspace-grid">
+        <div className="setting-card workspace-create">
+          <h3>{mode === "calendar" ? "Add an event" : "Add a task"}</h3>
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder={mode === "calendar" ? "Event title" : "Task title"}
+          />
+          <input
+            type={mode === "calendar" ? "datetime-local" : "datetime-local"}
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+          />
+          <button
+            className="primary-button"
+            onClick={() => void (mode === "calendar" ? addEvent() : addTask())}
+          >
+            <Plus size={15} /> Add {mode === "calendar" ? "event" : "task"}
+          </button>
+        </div>
+        <div className="workspace-list">
+          {mode === "calendar" ? (
+            events.length ? (
+              events.map((event) => (
+                <article className="event-card" key={event.id}>
+                  <div className="event-time">
+                    {formatDate(event.starts_at)}
+                  </div>
+                  <div>
+                    <strong>{event.title}</strong>
+                    <p>{new Date(event.starts_at).toLocaleString()}</p>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="list-empty">
+                <CalendarDays size={25} />
+                <p>No events yet.</p>
+              </div>
+            )
+          ) : tasks.length ? (
+            tasks.map((task) => (
+              <label
+                className={`task-card ${task.completed ? "completed" : ""}`}
+                key={task.id}
+              >
+                <input
+                  type="checkbox"
+                  checked={task.completed}
+                  onChange={() => void toggleTask(task)}
+                />
+                <span>
+                  <strong>{task.title}</strong>
+                  <small>
+                    {task.due_at
+                      ? `Due ${new Date(task.due_at).toLocaleString()}`
+                      : "No due date"}
+                  </small>
+                </span>
+              </label>
+            ))
+          ) : (
+            <div className="list-empty">
+              <ListTodo size={25} />
+              <p>No tasks yet.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function MailboxApp({ session }: { session: Session }) {
-  const [view, setView] = useState<"mail" | "calendar" | "tasks">("mail"); const [folder, setFolder] = useState<ViewKey>("inbox"); const [messages, setMessages] = useState<Message[]>([]); const [mailboxes, setMailboxes] = useState<Mailbox[]>([]); const [folders, setFolders] = useState<CustomFolder[]>([]); const [labels, setLabels] = useState<Label[]>([]); const [signatures, setSignatures] = useState<Signature[]>([]); const [settings, setSettings] = useState<AppSettings>({ theme: "light", density: "comfortable", focused_inbox_enabled: true }); const [tasks, setTasks] = useState<Task[]>([]); const [events, setEvents] = useState<CalendarEvent[]>([]); const [selectedId, setSelectedId] = useState<string | null>(null); const [selected, setSelected] = useState<Message | null>(null); const [threadMessages, setThreadMessages] = useState<Message[]>([]); const [composeOpen, setComposeOpen] = useState(false); const [composeSeed, setComposeSeed] = useState<ComposeSeed | undefined>(); const [settingsOpen, setSettingsOpen] = useState(false); const [mobileNav, setMobileNav] = useState(false); const [query, setQuery] = useState(""); const [filter, setFilter] = useState("all"); const [sort, setSort] = useState("newest"); const [loading, setLoading] = useState(true); const [error, setError] = useState("");
-  const loadMeta = useCallback(async () => { try { const [addresses, customFolders, labelRows, signatureRows, preference] = await Promise.all([apiFetch<Mailbox[]>("/api/mailboxes"), apiFetch<CustomFolder[]>("/api/folders"), apiFetch<Label[]>("/api/labels"), apiFetch<Signature[]>("/api/signatures"), apiFetch<AppSettings>("/api/settings")]); setMailboxes(addresses); setFolders(customFolders); setLabels(labelRows); setSignatures(signatureRows); setSettings(preference); } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Mailbox settings unavailable"); } }, []);
-  const loadMessages = useCallback(async (target: ViewKey = folder, showLoading = true) => { if (showLoading) setLoading(true); setError(""); try { const params = new URLSearchParams({ folder: target, limit: "80", sort }); if (query.trim()) params.set("q", query.trim()); if (filter === "unread") params.set("unread", "true"); if (filter === "starred") params.set("starred", "true"); if (filter === "attachments") params.set("attachments", "true"); setMessages(await apiFetch<Message[]>(`/api/mail?${params.toString()}`)); } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Mailbox unavailable"); } finally { setLoading(false); } }, [filter, folder, query, sort]);
-  const loadWorkspace = useCallback(async () => { try { const [taskRows, eventRows] = await Promise.all([apiFetch<Task[]>("/api/tasks"), apiFetch<CalendarEvent[]>("/api/calendar")]); setTasks(taskRows); setEvents(eventRows); } catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Workspace unavailable"); } }, []);
-  useEffect(() => { void loadMeta(); void loadWorkspace(); }, [loadMeta, loadWorkspace]);
-  useEffect(() => { if (view !== "mail") return; void loadMessages(folder, true); const interval = window.setInterval(() => void loadMessages(folder, false), 5000); let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | undefined; if (supabase) { channel = supabase.channel(`messages-${folder}`).on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => void loadMessages(folder, false)).subscribe(); } return () => { window.clearInterval(interval); if (channel && supabase) void supabase.removeChannel(channel); }; }, [folder, view, loadMessages]);
-  useEffect(() => { const timer = window.setTimeout(() => { if (view === "mail") void loadMessages(folder, false); }, 300); return () => window.clearTimeout(timer); }, [query, filter, sort, folder, view, loadMessages]);
-  async function openMessage(message: Message) { setSelectedId(message.id); try { const detail = await apiFetch<Message>(`/api/mail/${message.id}`); setSelected(detail); setThreadMessages(await apiFetch<Message[]>(`/api/threads/${message.thread_id}`)); if (!message.is_read) { await apiFetch(`/api/mail/${message.id}`, { method: "POST", body: JSON.stringify({ isRead: true }) }); setMessages((current) => current.map((item) => item.id === message.id ? { ...item, is_read: true } : item)); } } catch (openError) { setError(openError instanceof Error ? openError.message : "Message unavailable"); } }
-  async function mutateMessage(body: JsonSettings) { if (!selected) return; try { await apiFetch(`/api/mail/${selected.id}`, { method: "POST", body: JSON.stringify(body) }); await loadMessages(folder, false); const detail = await apiFetch<Message>(`/api/mail/${selected.id}`); setSelected(detail); } catch (actionError) { setError(actionError instanceof Error ? actionError.message : "Action failed"); } }
-  function openCompose(seed?: ComposeSeed) { setComposeSeed(seed); setComposeOpen(true); }
-  const currentLabel = folder === "focused" ? "Focused" : folder === "other" ? "Other" : folder.startsWith("custom:") ? folders.find((item) => item.id === folder.slice(7))?.name || "Folder" : folderNames[folder as SystemFolder];
-  const CurrentIcon = folder === "focused" || folder === "other" || folder.startsWith("custom:") ? Mail : folderIcons[folder as SystemFolder];
+  const [view, setView] = useState<"mail" | "calendar" | "tasks">("mail");
+  const [folder, setFolder] = useState<ViewKey>("inbox");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
+  const [folders, setFolders] = useState<CustomFolder[]>([]);
+  const [labels, setLabels] = useState<Label[]>([]);
+  const [signatures, setSignatures] = useState<Signature[]>([]);
+  const [settings, setSettings] = useState<AppSettings>({
+    theme: "light",
+    density: "comfortable",
+    focused_inbox_enabled: true,
+  });
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Message | null>(null);
+  const [threadMessages, setThreadMessages] = useState<Message[]>([]);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeSeed, setComposeSeed] = useState<ComposeSeed | undefined>();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [sort, setSort] = useState("newest");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const loadMeta = useCallback(async () => {
+    try {
+      const [addresses, customFolders, labelRows, signatureRows, preference] =
+        await Promise.all([
+          apiFetch<Mailbox[]>("/api/mailboxes"),
+          apiFetch<CustomFolder[]>("/api/folders"),
+          apiFetch<Label[]>("/api/labels"),
+          apiFetch<Signature[]>("/api/signatures"),
+          apiFetch<AppSettings>("/api/settings"),
+        ]);
+      setMailboxes(addresses);
+      setFolders(customFolders);
+      setLabels(labelRows);
+      setSignatures(signatureRows);
+      setSettings(preference);
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Mailbox settings unavailable",
+      );
+    }
+  }, []);
+  const loadMessages = useCallback(
+    async (target: ViewKey = folder, showLoading = true) => {
+      if (showLoading) setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams({
+          folder: target,
+          limit: "80",
+          sort,
+        });
+        if (query.trim()) params.set("q", query.trim());
+        if (filter === "unread") params.set("unread", "true");
+        if (filter === "starred") params.set("starred", "true");
+        if (filter === "attachments") params.set("attachments", "true");
+        setMessages(
+          await apiFetch<Message[]>(`/api/mail?${params.toString()}`),
+        );
+      } catch (loadError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Mailbox unavailable",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [filter, folder, query, sort],
+  );
+  const loadWorkspace = useCallback(async () => {
+    try {
+      const [taskRows, eventRows] = await Promise.all([
+        apiFetch<Task[]>("/api/tasks"),
+        apiFetch<CalendarEvent[]>("/api/calendar"),
+      ]);
+      setTasks(taskRows);
+      setEvents(eventRows);
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Workspace unavailable",
+      );
+    }
+  }, []);
+  useEffect(() => {
+    void loadMeta();
+    void loadWorkspace();
+  }, [loadMeta, loadWorkspace]);
+  useEffect(() => {
+    if (view !== "mail") return;
+    void loadMessages(folder, true);
+    const interval = window.setInterval(
+      () => void loadMessages(folder, false),
+      5000,
+    );
+    let channel:
+      | ReturnType<NonNullable<typeof supabase>["channel"]>
+      | undefined;
+    if (supabase) {
+      channel = supabase
+        .channel(`messages-${folder}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "messages" },
+          () => void loadMessages(folder, false),
+        )
+        .subscribe();
+    }
+    return () => {
+      window.clearInterval(interval);
+      if (channel && supabase) void supabase.removeChannel(channel);
+    };
+  }, [folder, view, loadMessages]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (view === "mail") void loadMessages(folder, false);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [query, filter, sort, folder, view, loadMessages]);
+  async function openMessage(message: Message) {
+    setSelectedId(message.id);
+    try {
+      const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
+      setSelected(detail);
+      setThreadMessages(
+        await apiFetch<Message[]>(`/api/threads/${message.thread_id}`),
+      );
+      if (!message.is_read) {
+        await apiFetch(`/api/mail/${message.id}`, {
+          method: "POST",
+          body: JSON.stringify({ isRead: true }),
+        });
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === message.id ? { ...item, is_read: true } : item,
+          ),
+        );
+      }
+    } catch (openError) {
+      setError(
+        openError instanceof Error ? openError.message : "Message unavailable",
+      );
+    }
+  }
+  async function mutateMessage(body: JsonSettings) {
+    if (!selected) return;
+    try {
+      await apiFetch(`/api/mail/${selected.id}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      await loadMessages(folder, false);
+      const detail = await apiFetch<Message>(`/api/mail/${selected.id}`);
+      setSelected(detail);
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error ? actionError.message : "Action failed",
+      );
+    }
+  }
+  async function assignLabel(labelId: string) {
+    if (!selected) return;
+    try {
+      await apiFetch("/api/labels/assign", {
+        method: "POST",
+        body: JSON.stringify({ messageId: selected.id, labelId }),
+      });
+      setError("");
+    } catch (labelError) {
+      setError(
+        labelError instanceof Error
+          ? labelError.message
+          : "Label assignment failed",
+      );
+    }
+  }
+  function openCompose(seed?: ComposeSeed) {
+    setComposeSeed(seed);
+    setComposeOpen(true);
+  }
+  const currentLabel =
+    folder === "focused"
+      ? "Focused"
+      : folder === "other"
+        ? "Other"
+        : folder.startsWith("custom:")
+          ? folders.find((item) => item.id === folder.slice(7))?.name ||
+            "Folder"
+          : folderNames[folder as SystemFolder];
+  const CurrentIcon =
+    folder === "focused" || folder === "other" || folder.startsWith("custom:")
+      ? Mail
+      : folderIcons[folder as SystemFolder];
   const unread = messages.filter((message) => !message.is_read).length;
-  const selectedReplySeed = selected ? { to: selected.direction === "inbound" ? selected.from_address : selected.to_addresses?.[0], subject: selected.subject.startsWith("Re:") ? selected.subject : `Re: ${selected.subject}`, text: `\n\n— Original message —\n${selected.text_body || selected.snippet}`, threadId: selected.thread_id, inReplyTo: selected.id } : undefined;
-  return <main className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}><header className="mobile-topbar"><button className="icon-button" onClick={() => setMobileNav(!mobileNav)} aria-label="Open navigation"><Menu size={19} /></button><div className="mini-brand"><span>P</span> Parcel</div><button className="icon-button" onClick={() => void loadMessages()} aria-label="Refresh"><RefreshCcw size={17} /></button></header><aside className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}><div className="sidebar-top"><div className="brand-lockup"><div className="brand-mark small">P</div><div><strong>Parcel</strong><span>private mail</span></div></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)} aria-label="Close navigation"><X size={18} /></button></div><button className="compose-button" onClick={() => { openCompose(); setMobileNav(false); }}><PenLine size={17} /> Compose</button><nav className="folder-nav" aria-label="Mailbox folders"><button className={`folder-link ${view === "mail" && folder === "inbox" ? "active" : ""}`} onClick={() => { setView("mail"); setFolder("inbox"); setMobileNav(false); }}><Inbox size={17} /><span>Inbox</span>{unread > 0 && <em>{unread}</em>}</button><button className={`folder-link ${view === "mail" && folder === "focused" ? "active" : ""}`} onClick={() => { setView("mail"); setFolder("focused"); setMobileNav(false); }}><Eye size={17} /><span>Focused</span></button><button className={`folder-link ${view === "mail" && folder === "other" ? "active" : ""}`} onClick={() => { setView("mail"); setFolder("other"); setMobileNav(false); }}><Mail size={17} /><span>Other</span></button>{(["sent", "drafts", "archive", "trash", "spam"] as SystemFolder[]).map((item) => { const Icon = folderIcons[item]; return <button key={item} className={`folder-link ${view === "mail" && folder === item ? "active" : ""}`} onClick={() => { setView("mail"); setFolder(item); setMobileNav(false); }}><Icon size={17} /><span>{folderNames[item]}</span></button>; })}{folders.map((customFolder) => <button key={customFolder.id} className={`folder-link ${view === "mail" && folder === `custom:${customFolder.id}` ? "active" : ""}`} onClick={() => { setView("mail"); setFolder(`custom:${customFolder.id}`); setMobileNav(false); }}><Tag size={17} color={customFolder.color} /><span>{customFolder.name}</span></button>)}</nav><div className="sidebar-divider" /><nav className="folder-nav secondary-nav"><button className={view === "calendar" ? "active folder-link" : "folder-link"} onClick={() => setView("calendar")}><CalendarDays size={17} /><span>Calendar</span></button><button className={view === "tasks" ? "active folder-link" : "folder-link"} onClick={() => setView("tasks")}><ListTodo size={17} /><span>To Do</span></button></nav><div className="sidebar-spacer" /><div className="account-chip"><div className="avatar">{(session.user.email || "J").slice(0, 1).toUpperCase()}</div><div className="account-text"><strong>{displayName(session.user.email || "James")}</strong><span>{session.user.email}</span></div><button className="icon-button" onClick={() => void requireSupabase().auth.signOut()} aria-label="Sign out"><LogOut size={16} /></button></div></aside>{view === "mail" ? <><section className="message-column"><div className="column-head"><div><p className="eyebrow">YOUR DESK</p><h1><CurrentIcon size={22} /> {currentLabel}</h1></div><div className="head-actions"><button className="icon-button" onClick={() => void loadMessages()} aria-label="Refresh messages"><RefreshCcw size={17} /></button><button className="icon-button" onClick={() => setSettingsOpen(true)} aria-label="Settings"><Settings2 size={17} /></button></div></div><div className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search messages, people, or files" /><select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filter messages"><option value="all">All mail</option><option value="unread">Unread</option><option value="starred">Starred</option><option value="attachments">Attachments</option></select><select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort messages"><option value="newest">Newest</option><option value="oldest">Oldest</option></select></div>{error && <div className="inline-error">{error}</div>}<div className="message-list">{loading ? <div className="list-empty"><div className="pulse-dot" /><p>Gathering your mail…</p></div> : messages.length === 0 ? <div className="list-empty"><div className="empty-glyph"><Mail size={22} /></div><h3>{currentLabel === "Inbox" ? "A quiet inbox" : `No mail in ${currentLabel.toLowerCase()}`}</h3><p>New messages and saved rules will appear here.</p><button className="text-button" onClick={() => openCompose()}>Write the first message</button></div> : messages.map((message) => <button key={message.id} className={`message-row ${selectedId === message.id ? "selected" : ""} ${message.is_read ? "read" : "unread"}`} onClick={() => void openMessage(message)}><div className="row-avatar">{displayName(message.direction === "inbound" ? message.from_address : (message.to_addresses?.[0] || "sent")).slice(0, 1).toUpperCase()}</div><div className="row-copy"><div className="row-top"><strong>{message.direction === "inbound" ? message.from_address : `To ${message.to_addresses?.[0] || "recipient"}`}</strong><time>{formatDate(message.received_at || message.sent_at || message.created_at)}</time></div><div className="row-subject">{message.subject || "(no subject)"}{message.has_attachment && <Paperclip size={13} />}{message.is_pinned && <Pin size={13} fill="currentColor" />}</div><p>{message.snippet || "No preview available."}</p></div>{message.spam_score && message.spam_score >= 0.35 ? <span className="score-badge">{Math.round(message.spam_score * 100)}%</span> : null}{message.is_starred && <Star className="row-star" size={15} fill="currentColor" />}</button>)}</div></section><section className="reading-pane">{!selected ? <div className="reading-empty"><div className="empty-glyph large"><Mail size={30} /></div><p>Select a message to read it here.</p><span>Your inbox, without the noise.</span></div> : <article className="message-detail"><div className="detail-head"><div><p className="eyebrow">{selected.direction === "inbound" ? "RECEIVED" : "SENT"} / {formatDate(selected.received_at || selected.sent_at || selected.created_at)}</p><h2>{selected.subject || "(no subject)"}</h2><div className="detail-meta"><span>{selected.status}</span>{selected.spam_score !== undefined && <span>spam risk {Math.round(selected.spam_score * 100)}%</span>}{selected.focused_category && <span>{selected.focused_category}</span>}</div></div><div className="head-actions"><button className="icon-button" onClick={() => void mutateMessage({ isStarred: !selected.is_starred })} aria-label="Star message"><Star size={17} fill={selected.is_starred ? "currentColor" : "none"} /></button><button className="icon-button" onClick={() => void mutateMessage({ isPinned: !selected.is_pinned })} aria-label="Pin message"><Pin size={17} fill={selected.is_pinned ? "currentColor" : "none"} /></button><button className="icon-button" onClick={() => void mutateMessage({ folder: "archive" })} aria-label="Archive message"><Archive size={17} /></button><button className="icon-button" onClick={() => void mutateMessage({ folder: "trash" })} aria-label="Delete message"><Trash2 size={17} /></button></div></div><div className="sender-line"><div className="avatar large-avatar">{displayName(selected.from_address).slice(0, 1).toUpperCase()}</div><div><strong>{selected.from_address}</strong><span>to {selected.to_addresses?.join(", ")}</span></div></div>{selected.spam_reasons && selected.spam_reasons.length > 0 && <div className="signal-box"><ShieldAlert size={15} /><div><strong>Why this was flagged</strong><span>{selected.spam_reasons.join(" · ")}</span></div></div>}<div className="body-copy">{selected.text_body || selected.snippet || "No message body."}</div>{selected.attachments && selected.attachments.length > 0 && <div className="attachments"><p className="eyebrow">ATTACHMENTS</p>{selected.attachments.map((attachment) => <a key={attachment.id} href={`/api/attachments/${attachment.id}`}><Paperclip size={14} /><span>{attachment.filename}</span><small>{formatBytes(attachment.byte_size)}</small></a>)}</div>}{threadMessages.length > 1 && <div className="thread-stack"><p className="eyebrow">THREAD / {threadMessages.length} MESSAGES</p>{threadMessages.map((threadMessage) => <button key={threadMessage.id} className={threadMessage.id === selected.id ? "active" : ""} onClick={() => void openMessage(threadMessage)}><span>{threadMessage.from_address}</span><strong>{threadMessage.subject}</strong><small>{formatDate(threadMessage.received_at || threadMessage.sent_at || threadMessage.created_at)}</small></button>)}</div>}<div className="detail-actions"><button className="secondary-button" onClick={() => openCompose(selectedReplySeed)}><PenLine size={15} /> Reply</button><button className="secondary-button" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}><Forward size={15} /> Forward</button><button className="secondary-button" onClick={() => void mutateMessage({ isRead: false })}><Eye size={15} /> Mark unread</button><button className="secondary-button" onClick={() => void mutateMessage({ folder: selected.folder === "spam" ? "inbox" : "spam" })}><ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}</button><button className="secondary-button" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}><Clock3 size={15} /> Snooze 1h</button><button className="secondary-button" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}><Flag size={15} /> Flag</button></div></article>}</section></> : <Workspace mode={view} tasks={tasks} events={events} onRefresh={() => { void loadWorkspace(); }} />}{composeOpen && <Compose mailboxes={mailboxes} signatures={signatures} seed={composeSeed} onClose={() => { setComposeOpen(false); setComposeSeed(undefined); }} onSent={() => { void loadMessages("sent"); }} />}{settingsOpen && <SettingsPanel settings={settings} folders={folders} labels={labels} mailboxes={mailboxes} onClose={() => setSettingsOpen(false)} onChanged={() => { void loadMeta(); }} />}</main>;
+  const selectedReplySeed = selected
+    ? {
+        to:
+          selected.direction === "inbound"
+            ? selected.from_address
+            : selected.to_addresses?.[0],
+        subject: selected.subject.startsWith("Re:")
+          ? selected.subject
+          : `Re: ${selected.subject}`,
+        text: `\n\n— Original message —\n${selected.text_body || selected.snippet}`,
+        threadId: selected.thread_id,
+        inReplyTo: selected.message_id_header || undefined,
+        references: [selected.references_header, selected.message_id_header]
+          .filter(Boolean)
+          .join(" "),
+      }
+    : undefined;
+  const selectedReplyAllSeed = selected
+    ? {
+        ...selectedReplySeed,
+        to:
+          selected.direction === "inbound"
+            ? selected.from_address
+            : selected.to_addresses.join(", "),
+        cc: [
+          ...(selected.cc_addresses || []),
+          ...(selected.direction === "inbound" ? selected.to_addresses : []),
+        ]
+          .filter(
+            (address) =>
+              address.toLowerCase() !==
+              (session.user.email || "").toLowerCase(),
+          )
+          .join(", "),
+      }
+    : undefined;
+  return (
+    <main
+      className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
+    >
+      <header className="mobile-topbar">
+        <button
+          className="icon-button"
+          onClick={() => setMobileNav(!mobileNav)}
+          aria-label="Open navigation"
+        >
+          <Menu size={19} />
+        </button>
+        <div className="mini-brand">
+          <span>P</span> Parcel
+        </div>
+        <button
+          className="icon-button"
+          onClick={() => void loadMessages()}
+          aria-label="Refresh"
+        >
+          <RefreshCcw size={17} />
+        </button>
+      </header>
+      <aside className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}>
+        <div className="sidebar-top">
+          <div className="brand-lockup">
+            <div className="brand-mark small">P</div>
+            <div>
+              <strong>Parcel</strong>
+              <span>private mail</span>
+            </div>
+          </div>
+          <button
+            className="icon-button mobile-close"
+            onClick={() => setMobileNav(false)}
+            aria-label="Close navigation"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <button
+          className="compose-button"
+          onClick={() => {
+            openCompose();
+            setMobileNav(false);
+          }}
+        >
+          <PenLine size={17} /> Compose
+        </button>
+        <nav className="folder-nav" aria-label="Mailbox folders">
+          <button
+            className={`folder-link ${view === "mail" && folder === "inbox" ? "active" : ""}`}
+            onClick={() => {
+              setView("mail");
+              setFolder("inbox");
+              setMobileNav(false);
+            }}
+          >
+            <Inbox size={17} />
+            <span>Inbox</span>
+            {unread > 0 && <em>{unread}</em>}
+          </button>
+          <button
+            className={`folder-link ${view === "mail" && folder === "focused" ? "active" : ""}`}
+            onClick={() => {
+              setView("mail");
+              setFolder("focused");
+              setMobileNav(false);
+            }}
+          >
+            <Eye size={17} />
+            <span>Focused</span>
+          </button>
+          <button
+            className={`folder-link ${view === "mail" && folder === "other" ? "active" : ""}`}
+            onClick={() => {
+              setView("mail");
+              setFolder("other");
+              setMobileNav(false);
+            }}
+          >
+            <Mail size={17} />
+            <span>Other</span>
+          </button>
+          {(
+            ["sent", "drafts", "archive", "trash", "spam"] as SystemFolder[]
+          ).map((item) => {
+            const Icon = folderIcons[item];
+            return (
+              <button
+                key={item}
+                className={`folder-link ${view === "mail" && folder === item ? "active" : ""}`}
+                onClick={() => {
+                  setView("mail");
+                  setFolder(item);
+                  setMobileNav(false);
+                }}
+              >
+                <Icon size={17} />
+                <span>{folderNames[item]}</span>
+              </button>
+            );
+          })}
+          {folders.map((customFolder) => (
+            <button
+              key={customFolder.id}
+              className={`folder-link ${view === "mail" && folder === `custom:${customFolder.id}` ? "active" : ""}`}
+              onClick={() => {
+                setView("mail");
+                setFolder(`custom:${customFolder.id}`);
+                setMobileNav(false);
+              }}
+            >
+              <Tag size={17} color={customFolder.color} />
+              <span>{customFolder.name}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-divider" />
+        <nav className="folder-nav secondary-nav">
+          <button
+            className={
+              view === "calendar" ? "active folder-link" : "folder-link"
+            }
+            onClick={() => setView("calendar")}
+          >
+            <CalendarDays size={17} />
+            <span>Calendar</span>
+          </button>
+          <button
+            className={view === "tasks" ? "active folder-link" : "folder-link"}
+            onClick={() => setView("tasks")}
+          >
+            <ListTodo size={17} />
+            <span>To Do</span>
+          </button>
+        </nav>
+        <div className="sidebar-spacer" />
+        <div className="account-chip">
+          <div className="avatar">
+            {(session.user.email || "J").slice(0, 1).toUpperCase()}
+          </div>
+          <div className="account-text">
+            <strong>{displayName(session.user.email || "James")}</strong>
+            <span>{session.user.email}</span>
+          </div>
+          <button
+            className="icon-button"
+            onClick={() => void requireSupabase().auth.signOut()}
+            aria-label="Sign out"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
+      </aside>
+      {view === "mail" ? (
+        <>
+          <section className="message-column">
+            <div className="column-head">
+              <div>
+                <p className="eyebrow">YOUR DESK</p>
+                <h1>
+                  <CurrentIcon size={22} /> {currentLabel}
+                </h1>
+              </div>
+              <div className="head-actions">
+                <button
+                  className="icon-button"
+                  onClick={() => void loadMessages()}
+                  aria-label="Refresh messages"
+                >
+                  <RefreshCcw size={17} />
+                </button>
+                <button
+                  className="icon-button"
+                  onClick={() => setSettingsOpen(true)}
+                  aria-label="Settings"
+                >
+                  <Settings2 size={17} />
+                </button>
+              </div>
+            </div>
+            <div className="search-box">
+              <Search size={16} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search messages, people, or files"
+              />
+              <select
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                aria-label="Filter messages"
+              >
+                <option value="all">All mail</option>
+                <option value="unread">Unread</option>
+                <option value="starred">Starred</option>
+                <option value="attachments">Attachments</option>
+              </select>
+              <select
+                value={sort}
+                onChange={(event) => setSort(event.target.value)}
+                aria-label="Sort messages"
+              >
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+              </select>
+            </div>
+            {error && <div className="inline-error">{error}</div>}
+            <div className="message-list">
+              {loading ? (
+                <div className="list-empty">
+                  <div className="pulse-dot" />
+                  <p>Gathering your mail…</p>
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="list-empty">
+                  <div className="empty-glyph">
+                    <Mail size={22} />
+                  </div>
+                  <h3>
+                    {currentLabel === "Inbox"
+                      ? "A quiet inbox"
+                      : `No mail in ${currentLabel.toLowerCase()}`}
+                  </h3>
+                  <p>New messages and saved rules will appear here.</p>
+                  <button className="text-button" onClick={() => openCompose()}>
+                    Write the first message
+                  </button>
+                </div>
+              ) : (
+                messages.map((message) => (
+                  <button
+                    key={message.id}
+                    className={`message-row ${selectedId === message.id ? "selected" : ""} ${message.is_read ? "read" : "unread"}`}
+                    onClick={() => void openMessage(message)}
+                  >
+                    <div className="row-avatar">
+                      {displayName(
+                        message.direction === "inbound"
+                          ? message.from_address
+                          : message.to_addresses?.[0] || "sent",
+                      )
+                        .slice(0, 1)
+                        .toUpperCase()}
+                    </div>
+                    <div className="row-copy">
+                      <div className="row-top">
+                        <strong>
+                          {message.direction === "inbound"
+                            ? message.from_address
+                            : `To ${message.to_addresses?.[0] || "recipient"}`}
+                        </strong>
+                        <time>
+                          {formatDate(
+                            message.received_at ||
+                              message.sent_at ||
+                              message.created_at,
+                          )}
+                        </time>
+                      </div>
+                      <div className="row-subject">
+                        {message.subject || "(no subject)"}
+                        {message.has_attachment && <Paperclip size={13} />}
+                        {message.is_pinned && (
+                          <Pin size={13} fill="currentColor" />
+                        )}
+                      </div>
+                      <p>{message.snippet || "No preview available."}</p>
+                    </div>
+                    {message.spam_score && message.spam_score >= 0.35 ? (
+                      <span className="score-badge">
+                        {Math.round(message.spam_score * 100)}%
+                      </span>
+                    ) : null}
+                    {message.is_starred && (
+                      <Star
+                        className="row-star"
+                        size={15}
+                        fill="currentColor"
+                      />
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+          <section className="reading-pane">
+            {!selected ? (
+              <div className="reading-empty">
+                <div className="empty-glyph large">
+                  <Mail size={30} />
+                </div>
+                <p>Select a message to read it here.</p>
+                <span>Your inbox, without the noise.</span>
+              </div>
+            ) : (
+              <article className="message-detail">
+                <div className="detail-head">
+                  <div>
+                    <p className="eyebrow">
+                      {selected.direction === "inbound" ? "RECEIVED" : "SENT"} /{" "}
+                      {formatDate(
+                        selected.received_at ||
+                          selected.sent_at ||
+                          selected.created_at,
+                      )}
+                    </p>
+                    <h2>{selected.subject || "(no subject)"}</h2>
+                    <div className="detail-meta">
+                      <span>{selected.status}</span>
+                      {selected.spam_score !== undefined && (
+                        <span>
+                          spam risk {Math.round(selected.spam_score * 100)}%
+                        </span>
+                      )}
+                      {selected.focused_category && (
+                        <span>{selected.focused_category}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="head-actions">
+                    <button
+                      className="icon-button"
+                      onClick={() =>
+                        void mutateMessage({ isStarred: !selected.is_starred })
+                      }
+                      aria-label="Star message"
+                    >
+                      <Star
+                        size={17}
+                        fill={selected.is_starred ? "currentColor" : "none"}
+                      />
+                    </button>
+                    <button
+                      className="icon-button"
+                      onClick={() =>
+                        void mutateMessage({ isPinned: !selected.is_pinned })
+                      }
+                      aria-label="Pin message"
+                    >
+                      <Pin
+                        size={17}
+                        fill={selected.is_pinned ? "currentColor" : "none"}
+                      />
+                    </button>
+                    <button
+                      className="icon-button"
+                      onClick={() => void mutateMessage({ folder: "archive" })}
+                      aria-label="Archive message"
+                    >
+                      <Archive size={17} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      onClick={() => void mutateMessage({ folder: "trash" })}
+                      aria-label="Delete message"
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                </div>
+                <div className="sender-line">
+                  <div className="avatar large-avatar">
+                    {displayName(selected.from_address)
+                      .slice(0, 1)
+                      .toUpperCase()}
+                  </div>
+                  <div>
+                    <strong>{selected.from_address}</strong>
+                    <span>to {selected.to_addresses?.join(", ")}</span>
+                  </div>
+                </div>
+                {selected.spam_reasons && selected.spam_reasons.length > 0 && (
+                  <div className="signal-box">
+                    <ShieldAlert size={15} />
+                    <div>
+                      <strong>Why this was flagged</strong>
+                      <span>{selected.spam_reasons.join(" · ")}</span>
+                    </div>
+                  </div>
+                )}
+                {labels.length > 0 && (
+                  <div className="detail-labels">
+                    <span className="eyebrow">LABELS</span>
+                    {labels.map((label) => (
+                      <button
+                        key={label.id}
+                        className="label-chip"
+                        onClick={() => void assignLabel(label.id)}
+                        style={{ borderColor: label.color, color: label.color }}
+                      >
+                        <Tag size={12} /> {label.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="body-copy">
+                  {selected.text_body || selected.snippet || "No message body."}
+                </div>
+                {selected.attachments && selected.attachments.length > 0 && (
+                  <div className="attachments">
+                    <p className="eyebrow">ATTACHMENTS</p>
+                    {selected.attachments.map((attachment) => (
+                      <a
+                        key={attachment.id}
+                        href={`/api/attachments/${attachment.id}`}
+                      >
+                        <Paperclip size={14} />
+                        <span>{attachment.filename}</span>
+                        <small>{formatBytes(attachment.byte_size)}</small>
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {threadMessages.length > 1 && (
+                  <div className="thread-stack">
+                    <p className="eyebrow">
+                      THREAD / {threadMessages.length} MESSAGES
+                    </p>
+                    {threadMessages.map((threadMessage) => (
+                      <button
+                        key={threadMessage.id}
+                        className={
+                          threadMessage.id === selected.id ? "active" : ""
+                        }
+                        onClick={() => void openMessage(threadMessage)}
+                      >
+                        <span>{threadMessage.from_address}</span>
+                        <strong>{threadMessage.subject}</strong>
+                        <small>
+                          {formatDate(
+                            threadMessage.received_at ||
+                              threadMessage.sent_at ||
+                              threadMessage.created_at,
+                          )}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div className="detail-actions">
+                  <button
+                    className="secondary-button"
+                    onClick={() => openCompose(selectedReplySeed)}
+                  >
+                    <PenLine size={15} /> Reply
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={() => openCompose(selectedReplyAllSeed)}
+                  >
+                    <Users size={15} /> Reply all
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      openCompose({
+                        to: selected.to_addresses?.[0],
+                        subject: `Fwd: ${selected.subject}`,
+                        text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}`,
+                      })
+                    }
+                  >
+                    <Forward size={15} /> Forward
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={() => void mutateMessage({ isRead: false })}
+                  >
+                    <Eye size={15} /> Mark unread
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      void mutateMessage({
+                        folder: selected.folder === "spam" ? "inbox" : "spam",
+                      })
+                    }
+                  >
+                    <ShieldAlert size={15} />{" "}
+                    {selected.folder === "spam" ? "Not spam" : "Spam"}
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      void mutateMessage({
+                        snoozedUntil: new Date(
+                          Date.now() + 60 * 60 * 1000,
+                        ).toISOString(),
+                      })
+                    }
+                  >
+                    <Clock3 size={15} /> Snooze 1h
+                  </button>
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      void mutateMessage({ isFlagged: !selected.is_flagged })
+                    }
+                  >
+                    <Flag size={15} /> Flag
+                  </button>
+                </div>
+              </article>
+            )}
+          </section>
+        </>
+      ) : (
+        <Workspace
+          mode={view}
+          tasks={tasks}
+          events={events}
+          onRefresh={() => {
+            void loadWorkspace();
+          }}
+        />
+      )}
+      {composeOpen && (
+        <Compose
+          mailboxes={mailboxes}
+          signatures={signatures}
+          seed={composeSeed}
+          onClose={() => {
+            setComposeOpen(false);
+            setComposeSeed(undefined);
+          }}
+          onSent={() => {
+            void loadMessages("sent");
+          }}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsPanel
+          settings={settings}
+          folders={folders}
+          labels={labels}
+          mailboxes={mailboxes}
+          onClose={() => setSettingsOpen(false)}
+          onChanged={() => {
+            void loadMeta();
+          }}
+        />
+      )}
+    </main>
+  );
 }
 
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null); const [ready, setReady] = useState(false);
-  useEffect(() => { if (!supabase) { setReady(true); return; } void supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true); }); const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession)); return () => listener.subscription.unsubscribe(); }, []);
-  if (!ready) return <div className="loading-screen"><div className="brand-mark">P</div><p>Loading Parcel…</p></div>;
-  if (!supabase) return <div className="loading-screen"><div className="brand-mark">P</div><h2>Supabase is not configured</h2><p>Add the public project URL and key to the deployment environment.</p></div>;
+  const [session, setSession] = useState<Session | null>(null);
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!supabase) {
+      setReady(true);
+      return;
+    }
+    void supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setReady(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => setSession(nextSession),
+    );
+    return () => listener.subscription.unsubscribe();
+  }, []);
+  if (!ready)
+    return (
+      <div className="loading-screen">
+        <div className="brand-mark">P</div>
+        <p>Loading Parcel…</p>
+      </div>
+    );
+  if (!supabase)
+    return (
+      <div className="loading-screen">
+        <div className="brand-mark">P</div>
+        <h2>Supabase is not configured</h2>
+        <p>Add the public project URL and key to the deployment environment.</p>
+      </div>
+    );
   return session ? <MailboxApp session={session} /> : <AuthScreen />;
 }
