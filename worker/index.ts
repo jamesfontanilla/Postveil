@@ -343,7 +343,7 @@ async function api(request: Request, env: Env): Promise<Response> {
     const q = url.searchParams.get("q")?.trim();
     const parts = [`owner_id=eq.${encodeURIComponent(user.id)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,focused_score,focused_category,scheduled_at,snoozed_until,received_at,sent_at,created_at"];
     if (folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(folder.slice(7))}`); } else if (folder === "focused") parts.push("folder=eq.inbox", "focused_category=eq.focused"); else if (folder === "other") parts.push("folder=eq.inbox", "focused_category=eq.other"); else parts.push(`folder=eq.${encodeURIComponent(folder)}`);
-    if (q) { const safe = q.replace(/[*(),]/g, " "); parts.push(`or=${encodeURIComponent(`subject.ilike.*${safe}*,from_address.ilike.*${safe}*,text_body.ilike.*${safe}*`)}`); }
+    if (q) { const safe = q.replace(/[*(),]/g, " "); parts.push(`or=${encodeURIComponent(`(subject.ilike.*${safe}*,from_address.ilike.*${safe}*,text_body.ilike.*${safe}*,snippet.ilike.*${safe}*)`)}`); }
     if (url.searchParams.get("unread") === "true") parts.push("is_read=eq.false");
     if (url.searchParams.get("starred") === "true") parts.push("is_starred=eq.true");
     if (url.searchParams.get("pinned") === "true") parts.push("is_pinned=eq.true");
