@@ -1,5 +1,6 @@
 import {
   ChangeEvent,
+  DragEvent,
   FormEvent,
   useCallback,
   useEffect,
@@ -23,8 +24,10 @@ import {
   Inbox,
   ListTodo,
   LogOut,
+  Maximize2,
   Mail,
   Menu,
+  Minimize2,
   MoreHorizontal,
   Paperclip,
   Pencil,
@@ -41,6 +44,7 @@ import {
   Star,
   Tag,
   Trash2,
+  UploadCloud,
   Users,
   X,
 } from "lucide-react";
@@ -426,12 +430,25 @@ function Compose({
   const [scheduledAt, setScheduledAt] = useState("");
   const [draftId, setDraftId] = useState(seed?.draftId || "");
   const [attachments, setAttachments] = useState<
-    Array<{ filename: string; object_key: string; byte_size: number }>
+    Array<{
+      filename: string;
+      object_key: string;
+      byte_size: number;
+      content_type?: string;
+    }>
   >([]);
   const [signatureId, setSignatureId] = useState("");
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [uploading, setUploading] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showCcBcc, setShowCcBcc] = useState(Boolean(seed?.cc));
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [error, setError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const saveDraft = useCallback(async () => {
     if (!fromAddress || (!to.trim() && !subject.trim() && !text.trim())) return;
     setSaving(true);
@@ -449,6 +466,7 @@ function Compose({
         }),
       });
       if (saved?.id) setDraftId(saved.id);
+      setLastSavedAt(new Date());
     } catch (draftError) {
       setError(
         draftError instanceof Error
@@ -471,13 +489,17 @@ function Compose({
         (current) => `${current}${current ? "\n\n" : ""}${signature.text_body}`,
       );
   }
-  async function upload(event: ChangeEvent<HTMLInputElement>) {
-    for (const file of Array.from(event.target.files || [])) {
+  async function uploadFiles(files: File[]) {
+    if (!files.length) return;
+    setUploading((current) => current + files.length);
+    setError("");
+    for (const file of files) {
       try {
         const item = await apiUpload<{
           filename: string;
           object_key: string;
           byte_size: number;
+          content_type?: string;
         }>("/api/attachments", file);
         setAttachments((current) => [...current, item]);
       } catch (uploadError) {
@@ -486,9 +508,40 @@ function Compose({
             ? uploadError.message
             : "Attachment upload failed",
         );
+      } finally {
+        setUploading((current) => Math.max(0, current - 1));
       }
     }
+  }
+  async function upload(event: ChangeEvent<HTMLInputElement>) {
+    await uploadFiles(Array.from(event.target.files || []));
     event.target.value = "";
+  }
+  function removeAttachment(objectKey: string) {
+    setAttachments((current) =>
+      current.filter((attachment) => attachment.object_key !== objectKey),
+    );
+  }
+  function handleDragOver(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragging(true);
+  }
+  function handleDragLeave(event: DragEvent<HTMLElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+      setIsDragging(false);
+  }
+  async function handleDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+    await uploadFiles(Array.from(event.dataTransfer.files));
+  }
+  function draftStatus() {
+    if (saving) return "Saving draft…";
+    if (uploading) return `Uploading ${uploading} file${uploading === 1 ? "" : "s"}…`;
+    if (lastSavedAt) return `Saved ${lastSavedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+    if (draftId) return "Draft saved";
+    return "Draft saves automatically";
   }
   async function send(event: FormEvent) {
     event.preventDefault();
@@ -523,69 +576,148 @@ function Compose({
       setBusy(false);
     }
   }
+  if (isMinimized) {
+    return (
+      <div className="compose-minimized" role="dialog" aria-label="Minimized draft">
+        <button
+          type="button"
+          className="compose-minimized-main"
+          onClick={() => setIsMinimized(false)}
+        >
+          <span className="compose-minimized-dot" />
+          <span>
+            <strong>{subject.trim() || "New message"}</strong>
+            <small>{draftStatus()}</small>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onClose}
+          aria-label="Close draft"
+          title="Close draft"
+        >
+          <X size={16} />
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="compose-overlay" role="presentation">
-      <form className="compose-card" onSubmit={send}>
+      <form
+        className={`compose-card${isExpanded ? " compose-card-expanded" : ""}`}
+        onSubmit={send}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={(event) => void handleDrop(event)}
+      >
         <div className="compose-head">
           <div>
             <p className="eyebrow">
               {seed?.to ? "REPLY / FORWARD" : "NEW MESSAGE"}
             </p>
-            <h2>{seed?.to ? "Continue the thread" : "Write a note"}</h2>
+            <h2>{seed?.to ? "Continue the thread" : "New message"}</h2>
+            <span className="compose-subtitle">
+              {seed?.to ? "Your reply stays connected to this conversation." : "A private message from your mailbox."}
+            </span>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            aria-label="Close compose"
-          >
-            <X size={18} />
-          </button>
+          <div className="compose-head-actions">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setIsMinimized(true)}
+              aria-label="Minimize draft"
+              title="Minimize draft"
+            >
+              <Minimize2 size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-button compose-expand-button"
+              onClick={() => setIsExpanded((current) => !current)}
+              aria-label={isExpanded ? "Restore compose size" : "Expand compose"}
+              title={isExpanded ? "Restore compose size" : "Expand compose"}
+            >
+              <Maximize2 size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={onClose}
+              aria-label="Close draft"
+              title="Close draft"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
         <div className="compose-fields">
-          <label>
-            From
-            <select
-              value={fromAddress}
-              onChange={(event) => setFromAddress(event.target.value)}
+          <div className="compose-recipient-row">
+            <label className="compose-field-inline">
+              From
+              <select
+                value={fromAddress}
+                onChange={(event) => setFromAddress(event.target.value)}
+                name="from"
+              >
+                {mailboxes
+                  .filter((mailbox) => mailbox.can_send)
+                  .map((mailbox) => (
+                    <option key={mailbox.id} value={mailbox.address}>
+                      {mailbox.display_name ? `${mailbox.display_name} · ${mailbox.address}` : mailbox.address}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="compose-recipient-toggle"
+              onClick={() => setShowCcBcc((current) => !current)}
+              aria-expanded={showCcBcc}
             >
-              {mailboxes
-                .filter((mailbox) => mailbox.can_send)
-                .map((mailbox) => (
-                  <option key={mailbox.id} value={mailbox.address}>
-                    {mailbox.address}
-                  </option>
-                ))}
-            </select>
-          </label>
+              {showCcBcc ? "Hide Cc/Bcc" : "Cc / Bcc"}
+            </button>
+          </div>
           <label>
             To
             <input
               required
+              name="to"
+              type="email"
               value={to}
               onChange={(event) => setTo(event.target.value)}
-              placeholder="recipient@example.com"
+              placeholder="recipient@example.com…"
+              autoComplete="email"
             />
           </label>
-          <label>
-            CC
-            <input
-              value={cc}
-              onChange={(event) => setCc(event.target.value)}
-              placeholder="Optional"
-            />
-          </label>
-          <label>
-            BCC
-            <input
-              value={bcc}
-              onChange={(event) => setBcc(event.target.value)}
-              placeholder="Optional"
-            />
-          </label>
+          {showCcBcc && (
+            <div className="compose-recipient-grid">
+              <label>
+                Cc
+                <input
+                  name="cc"
+                  value={cc}
+                  onChange={(event) => setCc(event.target.value)}
+                  placeholder="Optional…"
+                  autoComplete="email"
+                />
+              </label>
+              <label>
+                Bcc
+                <input
+                  name="bcc"
+                  value={bcc}
+                  onChange={(event) => setBcc(event.target.value)}
+                  placeholder="Optional…"
+                  autoComplete="email"
+                />
+              </label>
+            </div>
+          )}
           <label>
             Subject
             <input
+              name="subject"
               value={subject}
               onChange={(event) => setSubject(event.target.value)}
               placeholder="What is this about?"
@@ -595,63 +727,97 @@ function Compose({
             Message
             <textarea
               required
+              name="message"
               value={text}
               onChange={(event) => setText(event.target.value)}
               placeholder="Start writing…"
-              rows={8}
+              rows={isExpanded ? 13 : 8}
             />
           </label>
         </div>
-        {signatures.length > 0 && (
-          <div className="compose-tools">
-            <Tag size={15} />
-            <select
-              value={signatureId}
-              onChange={(event) => chooseSignature(event.target.value)}
-            >
-              <option value="">Add signature</option>
-              {signatures.map((signature) => (
-                <option key={signature.id} value={signature.id}>
-                  {signature.name}
-                </option>
-              ))}
-            </select>
+        <div className="compose-option-row">
+          <button
+            type="button"
+            className="compose-option-button"
+            onClick={() => setShowMoreOptions((current) => !current)}
+            aria-expanded={showMoreOptions}
+          >
+            <MoreHorizontal size={15} /> More options
+          </button>
+          {showMoreOptions && signatures.length > 0 && (
+            <label className="compose-signature-select">
+              <Tag size={14} aria-hidden="true" />
+              <span className="sr-only">Signature</span>
+              <select
+                value={signatureId}
+                onChange={(event) => chooseSignature(event.target.value)}
+                aria-label="Add signature"
+              >
+                <option value="">Add signature</option>
+                {signatures.map((signature) => (
+                  <option key={signature.id} value={signature.id}>
+                    {signature.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {showMoreOptions && (
+            <label className="schedule-field">
+              <Clock3 size={14} aria-hidden="true" />
+              <span>Send later</span>
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(event) => setScheduledAt(event.target.value)}
+                aria-label="Schedule send"
+              />
+            </label>
+          )}
+        </div>
+        <div
+          className={`attachment-dropzone${isDragging ? " is-dragging" : ""}`}
+          aria-label="Attachment drop zone"
+        >
+          <UploadCloud size={18} aria-hidden="true" />
+          <div>
+            <strong>{isDragging ? "Drop files to attach" : "Add attachments"}</strong>
+            <span>Drag files here or choose from your device · 15 MB each</span>
           </div>
-        )}
-        <div className="attachment-strip">
+          <label className="file-button">
+            <Paperclip size={15} /> Attach files
+            <input ref={fileInputRef} type="file" multiple onChange={upload} />
+          </label>
+        </div>
+        <div className="attachment-strip" aria-live="polite">
           {attachments.map((attachment) => (
-            <span key={attachment.object_key}>
-              <Paperclip size={13} />
-              {attachment.filename}{" "}
-              <small>{formatBytes(attachment.byte_size)}</small>
+            <span className="attachment-chip" key={attachment.object_key}>
+              <Paperclip size={13} aria-hidden="true" />
+              <span className="attachment-chip-copy">
+                <strong>{attachment.filename}</strong>
+                <small>{formatBytes(attachment.byte_size)}</small>
+              </span>
+              <button
+                type="button"
+                className="attachment-remove"
+                onClick={() => removeAttachment(attachment.object_key)}
+                aria-label={`Remove ${attachment.filename}`}
+                title={`Remove ${attachment.filename}`}
+              >
+                <X size={13} />
+              </button>
             </span>
           ))}
         </div>
         {error && <div className="form-error compose-error">{error}</div>}
         <div className="compose-foot">
-          <label className="file-button">
-            <Paperclip size={15} /> Attach
-            <input type="file" multiple onChange={upload} />
-          </label>
-          <label className="schedule-field">
-            <Clock3 size={15} />
-            <input
-              type="datetime-local"
-              value={scheduledAt}
-              onChange={(event) => setScheduledAt(event.target.value)}
-              aria-label="Schedule send"
-            />
-          </label>
-          <span className="compose-hint">
-            {saving
-              ? "Saving draft…"
-              : draftId
-                ? "Draft saved"
-                : "Autosaves after you start writing"}
+          <span className="compose-hint" aria-live="polite">
+            <span className={`save-dot${saving ? " is-saving" : ""}`} />
+            {draftStatus()}
           </span>
-          <button className="primary-button" disabled={busy}>
+          <button className="primary-button" disabled={busy || uploading > 0}>
             <Send size={15} />{" "}
-            {busy ? "Sending…" : scheduledAt ? "Schedule" : "Send message"}
+            {busy ? "Sending…" : scheduledAt ? "Schedule send" : "Send"}
           </button>
         </div>
       </form>
