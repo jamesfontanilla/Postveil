@@ -245,6 +245,17 @@ function messageStatusLabel(message: Message) {
   if (message.status === "scheduled") return "Scheduled";
   return message.status;
 }
+function splitQuotedBody(value: string) {
+  const lines = value.split(/\r?\n/);
+  const quoteStart = lines.findIndex((line, index) =>
+    index > 0 && (/^On .+wrote:\s*$/i.test(line.trim()) || /^>/.test(line.trim())),
+  );
+  if (quoteStart < 0) return { body: value.trim(), quote: "" };
+  return {
+    body: lines.slice(0, quoteStart).join("\n").trim(),
+    quote: lines.slice(quoteStart).join("\n").trim(),
+  };
+}
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
@@ -1780,6 +1791,9 @@ function MailboxApp({ session }: { session: Session }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [liveState, setLiveState] = useState<"connecting" | "live" | "reconnecting" | "offline">("connecting");
+  const [showAllThreadMessages, setShowAllThreadMessages] = useState(false);
+  const [showMessageDetails, setShowMessageDetails] = useState(false);
+  const [showMoreActions, setShowMoreActions] = useState(false);
   const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
@@ -1927,6 +1941,9 @@ function MailboxApp({ session }: { session: Session }) {
   }, [query, filter, sort, folder, view, loadMessages]);
   async function openMessage(message: Message) {
     setSelectedId(message.id);
+    setShowAllThreadMessages(false);
+    setShowMessageDetails(false);
+    setShowMoreActions(false);
     try {
       const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
       setSelected(detail);
@@ -2050,6 +2067,9 @@ function MailboxApp({ session }: { session: Session }) {
           .join(", "),
       }
     : undefined;
+  const selectedBody = selected
+    ? splitQuotedBody(selected.text_body || selected.snippet || "")
+    : { body: "", quote: "" };
   return (
     <main
       className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
@@ -2357,34 +2377,28 @@ function MailboxApp({ session }: { session: Session }) {
               <article className="message-detail">
                 <div className="detail-head">
                   <div>
-                    <p className="eyebrow">
-                      {selected.direction === "inbound" ? "RECEIVED" : "SENT"} /{" "}
-                      {formatDate(
-                        selected.received_at ||
-                          selected.sent_at ||
-                          selected.created_at,
-                      )}
-                    </p>
+                    <p className="eyebrow">{selected.direction === "inbound" ? "RECEIVED" : "SENT"}</p>
                     <h2>{selected.subject || "(no subject)"}</h2>
                     <div className="detail-meta">
                       <span>{messageStatusLabel(selected)}</span>
-                      {selected.spam_score !== undefined && (
+                      {selected.spam_score !== undefined && selected.spam_score >= 0.35 && (
                         <span>
-                          spam risk {Math.round(selected.spam_score * 100)}%
+                          Spam risk {Math.round(selected.spam_score * 100)}%
                         </span>
                       )}
                       {selected.focused_category && (
-                        <span>{selected.focused_category}</span>
+                        <span>{selected.focused_category === "focused" ? "Focused" : "Other"}</span>
                       )}
                     </div>
                   </div>
                   <div className="head-actions">
                     <button
                       className="icon-button"
+                      title={selected.is_starred ? "Unstar message" : "Star message"}
                       onClick={() =>
                         void mutateMessage({ isStarred: !selected.is_starred })
                       }
-                      aria-label="Star message"
+                      aria-label={selected.is_starred ? "Unstar message" : "Star message"}
                     >
                       <Star
                         size={17}
@@ -2393,10 +2407,11 @@ function MailboxApp({ session }: { session: Session }) {
                     </button>
                     <button
                       className="icon-button"
+                      title={selected.is_pinned ? "Unpin message" : "Pin message"}
                       onClick={() =>
                         void mutateMessage({ isPinned: !selected.is_pinned })
                       }
-                      aria-label="Pin message"
+                      aria-label={selected.is_pinned ? "Unpin message" : "Pin message"}
                     >
                       <Pin
                         size={17}
@@ -2405,6 +2420,7 @@ function MailboxApp({ session }: { session: Session }) {
                     </button>
                     <button
                       className="icon-button"
+                      title="Archive message"
                       onClick={() => void mutateMessage({ folder: "archive" })}
                       aria-label="Archive message"
                     >
@@ -2412,6 +2428,7 @@ function MailboxApp({ session }: { session: Session }) {
                     </button>
                     <button
                       className="icon-button"
+                      title="Move message to trash"
                       onClick={() => void mutateMessage({ folder: "trash" })}
                       aria-label="Delete message"
                     >
@@ -2424,11 +2441,25 @@ function MailboxApp({ session }: { session: Session }) {
                     const sender = senderForMessage(selected, contacts, mailboxes);
                     return <SenderAvatar name={sender.name} email={sender.email} avatarUrl={sender.avatarUrl} large />;
                   })()}
-                  <div>
+                  <div className="sender-copy">
                     <strong>{senderForMessage(selected, contacts, mailboxes).name}</strong>
                     <small>{senderForMessage(selected, contacts, mailboxes).email}</small>
-                    <span>to {selected.to_addresses?.join(", ")}</span>
+                    <span>to {selected.to_addresses?.join(", ") || "your mailbox"}</span>
+                    {showMessageDetails && (
+                      <dl className="sender-details">
+                        <div><dt>Date</dt><dd>{new Date(selected.received_at || selected.sent_at || selected.created_at).toLocaleString()}</dd></div>
+                        <div><dt>Message ID</dt><dd>{selected.message_id_header || "Not available"}</dd></div>
+                      </dl>
+                    )}
                   </div>
+                  <button
+                    className="details-toggle"
+                    aria-expanded={showMessageDetails}
+                    onClick={() => setShowMessageDetails((current) => !current)}
+                  >
+                    {showMessageDetails ? "Hide details" : "Details"}
+                    <ChevronDown size={14} className={showMessageDetails ? "rotated" : ""} />
+                  </button>
                 </div>
                 {selected.spam_reasons && selected.spam_reasons.length > 0 && (
                   <div className="signal-box">
@@ -2455,8 +2486,14 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 )}
                 <div className="body-copy">
-                  {selected.text_body || selected.snippet || "No message body."}
+                  {selectedBody.body || "No message body."}
                 </div>
+                {selectedBody.quote && (
+                  <details className="quoted-block">
+                    <summary>Show quoted text</summary>
+                    <div className="quoted-content">{selectedBody.quote}</div>
+                  </details>
+                )}
                 {selected.attachments && selected.attachments.length > 0 && (
                   <div className="attachments">
                     <p className="eyebrow">ATTACHMENTS</p>
@@ -2474,93 +2511,78 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 )}
                 {threadMessages.length > 1 && (
-                  <div className="thread-stack">
-                    <p className="eyebrow">
-                      THREAD / {threadMessages.length} MESSAGES
-                    </p>
-                    {threadMessages.map((threadMessage) => (
+                  <div className="conversation-section">
+                    <div className="conversation-head">
+                      <p className="eyebrow">CONVERSATION</p>
+                      <span>{threadMessages.length} messages</span>
+                    </div>
+                    {!showAllThreadMessages && (
                       <button
-                        key={threadMessage.id}
-                        className={
-                          threadMessage.id === selected.id ? "active" : ""
-                        }
-                        onClick={() => void openMessage(threadMessage)}
+                        className="thread-expand"
+                        onClick={() => setShowAllThreadMessages(true)}
                       >
-                        <span>{senderForMessage(threadMessage, contacts, mailboxes).name}</span>
-                        <strong>{threadMessage.subject}</strong>
-                        <small>
-                          {formatDate(
-                            threadMessage.received_at ||
-                              threadMessage.sent_at ||
-                              threadMessage.created_at,
-                          )}
-                        </small>
+                        <ChevronDown size={15} /> Show {threadMessages.length - 1} earlier messages
                       </button>
-                    ))}
+                    )}
+                    <div className="thread-stack">
+                      {(showAllThreadMessages ? threadMessages : [selected]).map((threadMessage) => (
+                        <button
+                          key={threadMessage.id}
+                          className={threadMessage.id === selected.id ? "active" : ""}
+                          onClick={() => void openMessage(threadMessage)}
+                        >
+                          <span>{senderForMessage(threadMessage, contacts, mailboxes).name}</span>
+                          <strong>{threadMessage.snippet || threadMessage.subject || "No preview available."}</strong>
+                          <small>
+                            {formatDate(threadMessage.received_at || threadMessage.sent_at || threadMessage.created_at)}
+                          </small>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
                 <div className="detail-actions">
                   <button
-                    className="secondary-button"
+                    className="primary-button"
                     onClick={() => openCompose(selectedReplySeed)}
                   >
                     <PenLine size={15} /> Reply
                   </button>
                   <button
-                    className="secondary-button"
+                    className="secondary-button detail-quick-action"
                     onClick={() => openCompose(selectedReplyAllSeed)}
                   >
                     <Users size={15} /> Reply all
                   </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() =>
-                      openCompose({
-                        to: selected.to_addresses?.[0],
-                        subject: `Fwd: ${selected.subject}`,
-                        text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}`,
-                      })
-                    }
-                  >
-                    <Forward size={15} /> Forward
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() => void mutateMessage({ isRead: false })}
-                  >
-                    <Eye size={15} /> Mark unread
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() =>
-                      void mutateMessage({
-                        folder: selected.folder === "spam" ? "inbox" : "spam",
-                      })
-                    }
-                  >
-                    <ShieldAlert size={15} />{" "}
-                    {selected.folder === "spam" ? "Not spam" : "Spam"}
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() =>
-                      void mutateMessage({
-                        snoozedUntil: new Date(
-                          Date.now() + 60 * 60 * 1000,
-                        ).toISOString(),
-                      })
-                    }
-                  >
-                    <Clock3 size={15} /> Snooze 1h
-                  </button>
-                  <button
-                    className="secondary-button"
-                    onClick={() =>
-                      void mutateMessage({ isFlagged: !selected.is_flagged })
-                    }
-                  >
-                    <Flag size={15} /> Flag
-                  </button>
+                  <div className="more-actions">
+                    <button
+                      className="secondary-button"
+                      aria-expanded={showMoreActions}
+                      aria-haspopup="menu"
+                      onClick={() => setShowMoreActions((current) => !current)}
+                    >
+                      <MoreHorizontal size={15} /> More
+                    </button>
+                    {showMoreActions && (
+                      <div className="action-menu" role="menu">
+                        <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
+                          <Forward size={15} /> Forward
+                        </button>
+                        <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
+                          <Eye size={15} /> Mark unread
+                        </button>
+                        <button role="menuitem" onClick={() => void mutateMessage({ folder: selected.folder === "spam" ? "inbox" : "spam" })}>
+                          <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}
+                        </button>
+                        <button role="menuitem" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}>
+                          <Clock3 size={15} /> Snooze 1h
+                        </button>
+                        <button role="menuitem" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}>
+                          <Flag size={15} /> {selected.is_flagged ? "Unflag" : "Flag"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </article>
             )}
