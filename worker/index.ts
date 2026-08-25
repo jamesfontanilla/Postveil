@@ -270,7 +270,6 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
     method: "PATCH",
     body: JSON.stringify({ last_message_at: new Date().toISOString() }),
   });
-  await putObject(env, rawKey, new Uint8Array(raw), "message/rfc822");
 }
 
 async function sendViaBrevo(env: Env, input: {

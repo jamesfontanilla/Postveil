@@ -191,14 +191,15 @@ function MailboxApp({ session }: { session: Session }) {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const inboxPollIntervalMs = 5000;
 
   const visibleMessages = useMemo(() => messages.filter((message) => {
     const needle = query.trim().toLowerCase();
     return !needle || [message.subject, message.from_address, message.snippet].some((value) => value?.toLowerCase().includes(needle));
   }), [messages, query]);
 
-  async function loadMessages(targetFolder = folder) {
-    setLoading(true);
+  async function loadMessages(targetFolder = folder, showLoading = true) {
+    if (showLoading) setLoading(true);
     setError("");
     try {
       const [mail, addresses] = await Promise.all([apiFetch<Message[]>(`/api/mail?folder=${targetFolder}`), apiFetch<Mailbox[]>("/api/mailboxes")]);
@@ -225,7 +226,11 @@ function MailboxApp({ session }: { session: Session }) {
     }
   }
 
-  useEffect(() => { void loadMessages(); }, [folder]);
+  useEffect(() => {
+    void loadMessages(folder, true);
+    const interval = window.setInterval(() => { void loadMessages(folder, false); }, inboxPollIntervalMs);
+    return () => window.clearInterval(interval);
+  }, [folder]);
 
   async function signOut() { await requireSupabase().auth.signOut(); }
 
