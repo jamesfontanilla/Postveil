@@ -774,7 +774,9 @@ function Compose({
         </div>
         <div
           className={`attachment-dropzone${isDragging ? " is-dragging" : ""}`}
+          role="group"
           aria-label="Attachment drop zone"
+          aria-describedby="attachment-help"
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={(event) => void handleDrop(event)}
@@ -782,7 +784,7 @@ function Compose({
           <UploadCloud size={18} aria-hidden="true" />
           <div>
             <strong>{isDragging ? "Drop files to attach" : "Add attachments"}</strong>
-            <span>Drag files here or choose from your device · 15 MB each</span>
+            <span id="attachment-help">Drag files here or choose from your device · 15 MB each</span>
           </div>
           <label className="file-button">
             <Paperclip size={15} /> Attach files
