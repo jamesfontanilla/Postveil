@@ -168,38 +168,119 @@ async function assessInbound(env: Env, ownerId: string, envelopeFrom: string, he
   return { score, reasons, focusedScore, focusedCategory: focusedScore >= 0.5 ? "focused" : "other", authResults };
 }
 
-function ruleMatches(rule: Rule, context: { from: string; subject: string; body: string; hasAttachment: boolean }): boolean {
-  const conditions = rule.conditions || {};
-  const text = `${context.subject} ${context.body}`.toLowerCase();
-  if (conditions.fromContains && !context.from.toLowerCase().includes(String(conditions.fromContains).toLowerCase())) return false;
-  if (conditions.subjectContains && !context.subject.toLowerCase().includes(String(conditions.subjectContains).toLowerCase())) return false;
-  if (conditions.bodyContains && !text.includes(String(conditions.bodyContains).toLowerCase())) return false;
-  if (typeof conditions.hasAttachment === "boolean" && conditions.hasAttachment !== context.hasAttachment) return false;
+type RuleContext = {
+  from: string;
+  to?: string[];
+  cc?: string[];
+  subject: string;
+  body: string;
+  hasAttachment: boolean;
+  isRead?: boolean;
+  isFlagged?: boolean;
+  isPinned?: boolean;
+  priority?: number;
+  folder?: string;
+};
+
+function textIncludes(value: string | undefined, needle: unknown): boolean {
+  return Boolean(needle) && String(value || "").toLowerCase().includes(String(needle).toLowerCase());
+}
+
+function rulePartMatches(part: JsonRecord, context: RuleContext): boolean {
+  if (part.fromContains && !textIncludes(context.from, part.fromContains)) return false;
+  if (part.toContains && !(context.to || []).some((value) => textIncludes(value, part.toContains))) return false;
+  if (part.ccContains && !(context.cc || []).some((value) => textIncludes(value, part.ccContains))) return false;
+  if (part.subjectContains && !textIncludes(context.subject, part.subjectContains)) return false;
+  if (part.bodyContains && !textIncludes(context.body, part.bodyContains)) return false;
+  if (typeof part.hasAttachment === "boolean" && part.hasAttachment !== context.hasAttachment) return false;
+  if (typeof part.isRead === "boolean" && part.isRead !== context.isRead) return false;
+  if (typeof part.isFlagged === "boolean" && part.isFlagged !== context.isFlagged) return false;
+  if (typeof part.isPinned === "boolean" && part.isPinned !== context.isPinned) return false;
+  if (typeof part.priority === "number" && part.priority !== context.priority) return false;
+  if (typeof part.folder === "string" && part.folder !== context.folder) return false;
   return true;
 }
 
-async function applyInboundRules(env: Env, ownerId: string, messageId: string, context: { from: string; subject: string; body: string; hasAttachment: boolean }, forwardInbound?: (address: string) => Promise<void>): Promise<void> {
+function ruleMatches(rule: Rule, context: RuleContext): boolean {
+  const conditions = rule.conditions || {};
+  const exceptions = (conditions.exceptions && typeof conditions.exceptions === "object" && !Array.isArray(conditions.exceptions))
+    ? conditions.exceptions as JsonRecord
+    : {};
+  return rulePartMatches(conditions, context) && !rulePartMatches(exceptions, context);
+}
+
+async function applyRuleActions(env: Env, ownerId: string, messageId: string, actions: JsonRecord, forwardInbound?: (address: string) => Promise<void>): Promise<void> {
+  const patch: JsonRecord = {};
+  if (typeof actions.folder === "string" && SYSTEM_FOLDERS.includes(actions.folder as typeof SYSTEM_FOLDERS[number])) {
+    patch.folder = actions.folder;
+    patch.custom_folder_id = null;
+  }
+  if (typeof actions.customFolderId === "string") {
+    const folders = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(actions.customFolderId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+    if (folders[0]) {
+      patch.folder = "custom";
+      patch.custom_folder_id = actions.customFolderId;
+    }
+  }
+  if (typeof actions.markRead === "boolean") patch.is_read = actions.markRead;
+  if (typeof actions.star === "boolean") patch.is_starred = actions.star;
+  if (typeof actions.pin === "boolean") patch.is_pinned = actions.pin;
+  if (typeof actions.flag === "boolean") patch.is_flagged = actions.flag;
+  if (typeof actions.priority === "number") patch.priority = Math.max(0, Math.min(2, actions.priority));
+  if (Object.keys(patch).length) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+  if (typeof actions.label === "string" && actions.label.trim()) {
+    const name = actions.label.trim();
+    const labels = await dbRequest<Array<{ id: string }>>(env, `labels?owner_id=eq.${encodeURIComponent(ownerId)}&name=eq.${encodeURIComponent(name)}&limit=1`);
+    const label = labels[0] || (await dbRequest<Array<{ id: string }>>(env, "labels", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, name }) }))[0];
+    if (label) await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, label_id: label.id }) });
+  }
+  if (typeof actions.forwardTo === "string" && forwardInbound) await forwardInbound(cleanAddress(actions.forwardTo));
+}
+
+async function applyInboundRules(env: Env, ownerId: string, messageId: string, context: RuleContext, forwardInbound?: (address: string) => Promise<void>): Promise<void> {
   const rules = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&order=priority.asc`);
   for (const rule of rules) {
     if (!ruleMatches(rule, context)) continue;
     const actions = rule.actions || {};
-    const patch: JsonRecord = {};
-    if (typeof actions.folder === "string" && SYSTEM_FOLDERS.includes(actions.folder as typeof SYSTEM_FOLDERS[number])) patch.folder = actions.folder;
-    if (typeof actions.customFolderId === "string") { patch.folder = "custom"; patch.custom_folder_id = actions.customFolderId; }
-    if (typeof actions.markRead === "boolean") patch.is_read = actions.markRead;
-    if (typeof actions.star === "boolean") patch.is_starred = actions.star;
-    if (typeof actions.pin === "boolean") patch.is_pinned = actions.pin;
-    if (typeof actions.priority === "number") patch.priority = Math.max(0, Math.min(2, actions.priority));
-    if (Object.keys(patch).length) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify(patch) });
-    if (typeof actions.label === "string" && actions.label.trim()) {
-      const name = actions.label.trim();
-      const labels = await dbRequest<Array<{ id: string }>>(env, `labels?owner_id=eq.${encodeURIComponent(ownerId)}&name=eq.${encodeURIComponent(name)}&limit=1`);
-      const label = labels[0] || (await dbRequest<Array<{ id: string }>>(env, "labels", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, name }) }))[0];
-      if (label) await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, label_id: label.id }) });
-    }
-    if (typeof actions.forwardTo === "string" && forwardInbound) await forwardInbound(cleanAddress(actions.forwardTo));
+    await applyRuleActions(env, ownerId, messageId, actions, forwardInbound);
     if (actions.stopProcessing === true) break;
   }
+}
+
+function objectValue(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function buildRuleConditions(conditions: unknown, exceptions: unknown): JsonRecord {
+  const next = { ...objectValue(conditions) };
+  const exceptionObject = objectValue(exceptions);
+  if (Object.keys(exceptionObject).length) next.exceptions = exceptionObject;
+  else delete next.exceptions;
+  return next;
+}
+
+async function runRuleOnExistingMessages(env: Env, ownerId: string, rule: Rule): Promise<{ matched: number; forwarded: boolean }> {
+  const rows = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&order=created_at.desc&limit=100`);
+  let matched = 0;
+  for (const message of rows) {
+    const context: RuleContext = {
+      from: String(message.from_address || ""),
+      to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [],
+      cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [],
+      subject: String(message.subject || ""),
+      body: String(message.text_body || ""),
+      hasAttachment: message.has_attachment === true,
+      isRead: message.is_read === true,
+      isFlagged: message.is_flagged === true,
+      isPinned: message.is_pinned === true,
+      priority: typeof message.priority === "number" ? message.priority : 0,
+      folder: String(message.folder || ""),
+    };
+    if (!ruleMatches(rule, context)) continue;
+    await applyRuleActions(env, ownerId, String(message.id), rule.actions || {});
+    matched += 1;
+  }
+  return { matched, forwarded: typeof rule.actions?.forwardTo === "string" && Boolean(rule.actions.forwardTo.trim()) };
 }
 
 async function sendViaBrevo(env: Env, input: { fromAddress: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; html?: string; replyTo?: string; attachments?: Array<{ filename: string; object_key: string }> }): Promise<{ messageId?: string }> {
@@ -241,7 +322,19 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   if (!inserted[0]) throw new Error("Message insert returned no row");
   if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
   await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
-  await applyInboundRules(env, ownerId, messageId, { from: headerFrom, subject, body: textBody, hasAttachment: attachmentResult.stored.length > 0 }, forwardInbound);
+  await applyInboundRules(env, ownerId, messageId, {
+    from: headerFrom,
+    to: splitAddresses(headerValue(parsed, "to") || destination),
+    cc: splitAddresses(headerValue(parsed, "cc") || ""),
+    subject,
+    body: textBody,
+    hasAttachment: attachmentResult.stored.length > 0,
+    isRead: false,
+    isFlagged: false,
+    isPinned: false,
+    priority: 0,
+    folder,
+  }, forwardInbound);
   const autoReplies = await dbRequest<Array<{ enabled: boolean; subject: string; body: string; starts_at: string | null; ends_at: string | null }>>(env, `auto_replies?owner_id=eq.${encodeURIComponent(ownerId)}&mailbox_id=eq.${encodeURIComponent(mailbox.id)}&enabled=eq.true&limit=1`);
   const autoReply = autoReplies[0];
   const now = Date.now();
@@ -378,8 +471,58 @@ async function api(request: Request, env: Env): Promise<Response> {
   if (request.method === "POST" && url.pathname === "/api/labels/assign") { const body = (await request.json()) as JsonRecord; const labelId = String(body.labelId || ""); const messageId = String(body.messageId || ""); if (!labelId || !messageId) return error("Message and label are required"); await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, label_id: labelId }) }); return json({ ok: true }); }
   if (request.method === "GET" && url.pathname === "/api/contacts") { const q = url.searchParams.get("q")?.trim(); const path = `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc${q ? `&or=${encodeURIComponent(`email.ilike.*${q}*,display_name.ilike.*${q}*`)}` : ""}`; return json(await dbRequest(env, path)); }
   if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!email.includes("@")) return error("A valid email is required"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]), company: body.company || null, notes: body.notes || null }) }); return json(rows[0], 201); }
-  if (request.method === "GET" && url.pathname === "/api/rules") return json(await dbRequest(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc`));
-  if (request.method === "POST" && url.pathname === "/api/rules") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: String(body.name || "New rule"), priority: Number(body.priority || 100), enabled: body.enabled !== false, conditions: body.conditions || {}, actions: body.actions || {} }) }); return json(rows[0], 201); }
+  if (request.method === "GET" && url.pathname === "/api/rules") return json(await dbRequest(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`));
+  if (request.method === "POST" && url.pathname === "/api/rules") {
+    const body = (await request.json()) as JsonRecord;
+    const priority = Number.isFinite(Number(body.priority)) ? Number(body.priority) : 100;
+    const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        owner_id: user.id,
+        name: String(body.name || "New rule").trim().slice(0, 120),
+        priority,
+        enabled: body.enabled !== false,
+        conditions: buildRuleConditions(body.conditions, body.exceptions),
+        actions: objectValue(body.actions),
+      }),
+    });
+    return json(rows[0], 201);
+  }
+  const ruleMatch = url.pathname.match(/^\/api\/rules\/([^/]+)$/);
+  if (ruleMatch && request.method === "PATCH") {
+    const body = (await request.json()) as JsonRecord;
+    const existing = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    if (!existing[0]) return error("Rule not found", 404);
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 120);
+    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+    if (typeof body.priority === "number" && Number.isFinite(body.priority)) patch.priority = body.priority;
+    if (body.conditions !== undefined || body.exceptions !== undefined) patch.conditions = buildRuleConditions(body.conditions ?? existing[0].conditions, body.exceptions ?? objectValue(existing[0].conditions).exceptions);
+    if (body.actions !== undefined) patch.actions = objectValue(body.actions);
+    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+  if (ruleMatch && request.method === "DELETE") {
+    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE", headers: { Prefer: "return=representation" } });
+    return json({ ok: true, deleted: rows.length });
+  }
+  if (ruleMatch && request.method === "POST" && ruleMatch[1].endsWith(":run")) {
+    const ruleId = ruleMatch[1].slice(0, -4);
+    const rows = await dbRequest<Rule[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    if (!rows[0]) return error("Rule not found", 404);
+    const result = await runRuleOnExistingMessages(env, user.id, rows[0]);
+    return json({ ok: true, ...result, note: result.forwarded ? "Forwarding is skipped when running a rule on existing mail." : undefined });
+  }
+  if (request.method === "POST" && url.pathname === "/api/rules/reorder") {
+    const body = (await request.json()) as JsonRecord;
+    const ids = Array.isArray(body.ids) ? body.ids.map(String).filter(Boolean) : [];
+    const existing = await dbRequest<Array<{ id: string }>>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&select=id`);
+    const allowed = new Set(existing.map((row) => row.id));
+    const ordered = ids.filter((id) => allowed.has(id));
+    await Promise.all(ordered.map((id, index) => dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ priority: (index + 1) * 100, updated_at: new Date().toISOString() }) })));
+    return json({ ok: true });
+  }
   if (request.method === "GET" && url.pathname === "/api/signatures") return json(await dbRequest(env, `signatures?owner_id=eq.${encodeURIComponent(user.id)}&order=name.asc`));
   if (request.method === "POST" && url.pathname === "/api/signatures") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "signatures", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: body.mailboxId || mailbox.id, name: String(body.name || "Default"), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, is_default: body.isDefault === true }) }); return json(rows[0], 201); }
   if (request.method === "GET" && url.pathname === "/api/settings") { const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); return json(rows[0] || { owner_id: user.id }); }

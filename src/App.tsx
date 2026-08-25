@@ -9,6 +9,8 @@ import {
 } from "react";
 import {
   Archive,
+  ArrowDown,
+  ArrowUp,
   Bell,
   CalendarDays,
   Check,
@@ -25,8 +27,10 @@ import {
   Menu,
   MoreHorizontal,
   Paperclip,
+  Pencil,
   PenLine,
   Pin,
+  Play,
   Plus,
   RefreshCcw,
   Search,
@@ -100,6 +104,25 @@ type Signature = {
   name: string;
   text_body: string;
   is_default: boolean;
+};
+type RuleConditionType =
+  | "fromContains"
+  | "toContains"
+  | "ccContains"
+  | "subjectContains"
+  | "bodyContains"
+  | "hasAttachment"
+  | "isRead"
+  | "isFlagged"
+  | "isPinned";
+type RuleCondition = { type: RuleConditionType; value: string };
+type Rule = {
+  id: string;
+  name: string;
+  priority: number;
+  enabled: boolean;
+  conditions: Record<string, unknown>;
+  actions: Record<string, unknown>;
 };
 type AutoReply = {
   id?: string;
@@ -577,11 +600,55 @@ function Compose({
   );
 }
 
+const ruleConditionLabels: Record<RuleConditionType, string> = {
+  fromContains: "Sender contains",
+  toContains: "To contains",
+  ccContains: "Cc contains",
+  subjectContains: "Subject contains",
+  bodyContains: "Body contains",
+  hasAttachment: "Has attachment",
+  isRead: "Read status",
+  isFlagged: "Flagged",
+  isPinned: "Pinned",
+};
+const ruleConditionTypes = Object.keys(ruleConditionLabels) as RuleConditionType[];
+
+function ruleConditionsFromRecord(record: Record<string, unknown> | undefined): RuleCondition[] {
+  const source = record || {};
+  const rows = ruleConditionTypes
+    .filter((type) => source[type] !== undefined)
+    .map((type) => ({ type, value: String(source[type]) }));
+  return rows.length ? rows : [{ type: "fromContains", value: "" }];
+}
+
+function ruleConditionRecord(rows: RuleCondition[]): Record<string, unknown> {
+  return rows.reduce<Record<string, unknown>>((result, row) => {
+    const value = row.value.trim();
+    if (!value) return result;
+    result[row.type] = ["hasAttachment", "isRead", "isFlagged", "isPinned"].includes(row.type)
+      ? value === "true"
+      : value;
+    return result;
+  }, {});
+}
+
+function ruleSummary(part: Record<string, unknown>, empty: string): string {
+  const labels = ruleConditionTypes
+    .filter((type) => part[type] !== undefined)
+    .map((type) => `${ruleConditionLabels[type]} ${String(part[type])}`);
+  return labels.length ? labels.join(" · ") : empty;
+}
+
+function actionMode(actions: Record<string, unknown>, key: string): "ignore" | "true" | "false" {
+  return typeof actions[key] === "boolean" ? (actions[key] ? "true" : "false") : "ignore";
+}
+
 function SettingsPanel({
   settings,
   folders,
   labels,
   mailboxes,
+  rules,
   onClose,
   onChanged,
 }: {
@@ -589,6 +656,7 @@ function SettingsPanel({
   folders: CustomFolder[];
   labels: Label[];
   mailboxes: Mailbox[];
+  rules: Rule[];
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -604,9 +672,25 @@ function SettingsPanel({
   const [labelName, setLabelName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactName, setContactName] = useState("");
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleName, setRuleName] = useState("");
-  const [ruleFrom, setRuleFrom] = useState("");
-  const [ruleFolder, setRuleFolder] = useState("spam");
+  const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([
+    { type: "fromContains", value: "" },
+  ]);
+  const [ruleExceptions, setRuleExceptions] = useState<RuleCondition[]>([]);
+  const [ruleFolder, setRuleFolder] = useState("none");
+  const [ruleCustomFolderId, setRuleCustomFolderId] = useState("");
+  const [ruleMarkRead, setRuleMarkRead] = useState<"ignore" | "true" | "false">("ignore");
+  const [ruleStar, setRuleStar] = useState<"ignore" | "true" | "false">("ignore");
+  const [rulePin, setRulePin] = useState<"ignore" | "true" | "false">("ignore");
+  const [ruleFlag, setRuleFlag] = useState<"ignore" | "true" | "false">("ignore");
+  const [rulePriorityAction, setRulePriorityAction] = useState("ignore");
+  const [ruleLabel, setRuleLabel] = useState("");
+  const [ruleForwardTo, setRuleForwardTo] = useState("");
+  const [ruleStop, setRuleStop] = useState(true);
+  const [ruleEnabled, setRuleEnabled] = useState(true);
+  const [rulePosition, setRulePosition] = useState(100);
+  const [ruleBusy, setRuleBusy] = useState(false);
   const [signatureName, setSignatureName] = useState("");
   const [signatureText, setSignatureText] = useState("");
   const [mailboxAddress, setMailboxAddress] = useState("");
@@ -655,20 +739,148 @@ function SettingsPanel({
     setNotice("Contact saved");
     onChanged();
   }
-  async function createRule() {
-    if (!ruleName.trim() || !ruleFrom.trim()) return;
-    await apiFetch("/api/rules", {
-      method: "POST",
-      body: JSON.stringify({
-        name: ruleName,
-        conditions: { fromContains: ruleFrom },
-        actions: { folder: ruleFolder },
-      }),
-    });
+  function resetRuleEditor() {
+    setEditingRuleId(null);
     setRuleName("");
-    setRuleFrom("");
-    setNotice("Rule created");
-    onChanged();
+    setRuleConditions([{ type: "fromContains", value: "" }]);
+    setRuleExceptions([]);
+    setRuleFolder("none");
+    setRuleCustomFolderId("");
+    setRuleMarkRead("ignore");
+    setRuleStar("ignore");
+    setRulePin("ignore");
+    setRuleFlag("ignore");
+    setRulePriorityAction("ignore");
+    setRuleLabel("");
+    setRuleForwardTo("");
+    setRuleStop(true);
+    setRuleEnabled(true);
+    setRulePosition(Math.max(100, ...rules.map((rule) => rule.priority + 100)));
+  }
+  function editRule(rule: Rule) {
+    const conditions = rule.conditions || {};
+    const exceptions = conditions.exceptions && typeof conditions.exceptions === "object" && !Array.isArray(conditions.exceptions)
+      ? conditions.exceptions as Record<string, unknown>
+      : {};
+    const actions = rule.actions || {};
+    setEditingRuleId(rule.id);
+    setRuleName(rule.name);
+    setRuleConditions(ruleConditionsFromRecord(conditions));
+    setRuleExceptions(ruleConditionsFromRecord(exceptions).filter((row) => row.value));
+    setRuleFolder(typeof actions.customFolderId === "string" ? "custom" : typeof actions.folder === "string" ? actions.folder : "none");
+    setRuleCustomFolderId(typeof actions.customFolderId === "string" ? actions.customFolderId : "");
+    setRuleMarkRead(actionMode(actions, "markRead"));
+    setRuleStar(actionMode(actions, "star"));
+    setRulePin(actionMode(actions, "pin"));
+    setRuleFlag(actionMode(actions, "flag"));
+    setRulePriorityAction(typeof actions.priority === "number" ? String(actions.priority) : "ignore");
+    setRuleLabel(typeof actions.label === "string" ? actions.label : "");
+    setRuleForwardTo(typeof actions.forwardTo === "string" ? actions.forwardTo : "");
+    setRuleStop(actions.stopProcessing !== false);
+    setRuleEnabled(rule.enabled);
+    setRulePosition(rule.priority);
+  }
+  function updateCondition(setter: (value: RuleCondition[]) => void, rows: RuleCondition[], index: number, patch: Partial<RuleCondition>) {
+    setter(rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...patch } : row));
+  }
+  function addCondition(setter: (value: RuleCondition[]) => void, rows: RuleCondition[]) {
+    setter([...rows, { type: "subjectContains", value: "" }]);
+  }
+  function removeCondition(setter: (value: RuleCondition[]) => void, rows: RuleCondition[], index: number) {
+    setter(rows.filter((_, rowIndex) => rowIndex !== index));
+  }
+  async function saveRule() {
+    const conditions = ruleConditionRecord(ruleConditions);
+    const exceptions = ruleConditionRecord(ruleExceptions);
+    const actions: Record<string, unknown> = { stopProcessing: ruleStop };
+    if (ruleFolder === "custom" && ruleCustomFolderId) actions.customFolderId = ruleCustomFolderId;
+    else if (ruleFolder !== "none") actions.folder = ruleFolder;
+    if (ruleMarkRead !== "ignore") actions.markRead = ruleMarkRead === "true";
+    if (ruleStar !== "ignore") actions.star = ruleStar === "true";
+    if (rulePin !== "ignore") actions.pin = rulePin === "true";
+    if (ruleFlag !== "ignore") actions.flag = ruleFlag === "true";
+    if (rulePriorityAction !== "ignore") actions.priority = Number(rulePriorityAction);
+    if (ruleLabel.trim()) actions.label = ruleLabel.trim();
+    if (ruleForwardTo.trim()) actions.forwardTo = ruleForwardTo.trim();
+    if (!ruleName.trim()) {
+      setNotice("Name the rule before saving");
+      return;
+    }
+    if (!Object.keys(conditions).length) {
+      setNotice("Add at least one condition");
+      return;
+    }
+    if (ruleFolder === "custom" && !ruleCustomFolderId) {
+      setNotice("Choose a custom folder");
+      return;
+    }
+    if (Object.keys(actions).length === 1) {
+      setNotice("Choose at least one action");
+      return;
+    }
+    setRuleBusy(true);
+    try {
+      await apiFetch(editingRuleId ? `/api/rules/${editingRuleId}` : "/api/rules", {
+        method: editingRuleId ? "PATCH" : "POST",
+        body: JSON.stringify({
+          name: ruleName,
+          priority: rulePosition,
+          enabled: ruleEnabled,
+          conditions,
+          exceptions,
+          actions,
+        }),
+      });
+      resetRuleEditor();
+      setNotice(editingRuleId ? "Rule updated" : "Rule created");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not save rule");
+    } finally {
+      setRuleBusy(false);
+    }
+  }
+  async function updateRule(rule: Rule, patch: Record<string, unknown>, message: string) {
+    try {
+      await apiFetch(`/api/rules/${rule.id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      setNotice(message);
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not update rule");
+    }
+  }
+  async function deleteRule(rule: Rule) {
+    if (!window.confirm(`Delete the rule “${rule.name}”?`)) return;
+    try {
+      await apiFetch(`/api/rules/${rule.id}`, { method: "DELETE" });
+      if (editingRuleId === rule.id) resetRuleEditor();
+      setNotice("Rule deleted");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not delete rule");
+    }
+  }
+  async function reorderRule(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= rules.length) return;
+    const ids = rules.map((rule) => rule.id);
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    try {
+      await apiFetch("/api/rules/reorder", { method: "POST", body: JSON.stringify({ ids }) });
+      setNotice("Rule order updated");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not reorder rules");
+    }
+  }
+  async function runRule(rule: Rule) {
+    try {
+      const result = await apiFetch<{ matched: number; note?: string }>(`/api/rules/${rule.id}:run`, { method: "POST" });
+      setNotice(`${rule.name} matched ${result.matched} existing message${result.matched === 1 ? "" : "s"}.${result.note ? ` ${result.note}` : ""}`);
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not run rule");
+    }
   }
   async function createSignature() {
     if (!signatureName.trim()) return;
@@ -923,33 +1135,220 @@ function SettingsPanel({
         )}
         {tab === "automation" && (
           <div className="settings-grid">
-            <div className="setting-card">
-              <h3>Rules</h3>
+            <div className="setting-card rule-builder-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>{editingRuleId ? "Edit rule" : "New rule"}</h3>
+                  <p>Rules run from top to bottom when new mail arrives.</p>
+                </div>
+                {editingRuleId && (
+                  <button className="text-button" onClick={resetRuleEditor}>
+                    Cancel edit
+                  </button>
+                )}
+              </div>
               <input
                 value={ruleName}
                 onChange={(event) => setRuleName(event.target.value)}
-                placeholder="Rule name"
+                placeholder="Rule name, e.g. Finance invoices"
+                aria-label="Rule name"
               />
-              <input
-                value={ruleFrom}
-                onChange={(event) => setRuleFrom(event.target.value)}
-                placeholder="Sender contains"
-              />
-              <select
-                value={ruleFolder}
-                onChange={(event) => setRuleFolder(event.target.value)}
-              >
-                <option value="spam">Move to Spam</option>
-                <option value="archive">Archive</option>
-                <option value="trash">Delete</option>
-                <option value="inbox">Keep in Inbox</option>
-              </select>
-              <button
-                className="secondary-button"
-                onClick={() => void createRule()}
-              >
-                <SlidersHorizontal size={15} /> Add rule
-              </button>
+              <div className="rule-builder-section">
+                <div className="rule-section-label">When a message matches all of these</div>
+                {ruleConditions.map((condition, index) => (
+                  <div className="rule-condition-row" key={`condition-${index}`}>
+                    <select
+                      value={condition.type}
+                      onChange={(event) => updateCondition(setRuleConditions, ruleConditions, index, { type: event.target.value as RuleConditionType })}
+                      aria-label="Condition type"
+                    >
+                      {ruleConditionTypes.map((type) => <option key={type} value={type}>{ruleConditionLabels[type]}</option>)}
+                    </select>
+                    {["hasAttachment", "isRead", "isFlagged", "isPinned"].includes(condition.type) ? (
+                      <select
+                        value={condition.value}
+                        onChange={(event) => updateCondition(setRuleConditions, ruleConditions, index, { value: event.target.value })}
+                        aria-label="Condition value"
+                      >
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                      </select>
+                    ) : (
+                      <input
+                        value={condition.value}
+                        onChange={(event) => updateCondition(setRuleConditions, ruleConditions, index, { value: event.target.value })}
+                        placeholder="Value"
+                        aria-label="Condition value"
+                      />
+                    )}
+                    <button
+                      className="icon-button compact-icon"
+                      onClick={() => removeCondition(setRuleConditions, ruleConditions, index)}
+                      disabled={ruleConditions.length === 1}
+                      aria-label="Remove condition"
+                      title="Remove condition"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button className="text-button" onClick={() => addCondition(setRuleConditions, ruleConditions)}>
+                  <Plus size={13} /> Add condition
+                </button>
+              </div>
+              <div className="rule-builder-section">
+                <div className="rule-section-label">Except when any of these match</div>
+                {ruleExceptions.length === 0 && <small className="rule-muted">No exceptions</small>}
+                {ruleExceptions.map((condition, index) => (
+                  <div className="rule-condition-row" key={`exception-${index}`}>
+                    <select
+                      value={condition.type}
+                      onChange={(event) => updateCondition(setRuleExceptions, ruleExceptions, index, { type: event.target.value as RuleConditionType })}
+                      aria-label="Exception type"
+                    >
+                      {ruleConditionTypes.map((type) => <option key={type} value={type}>{ruleConditionLabels[type]}</option>)}
+                    </select>
+                    {["hasAttachment", "isRead", "isFlagged", "isPinned"].includes(condition.type) ? (
+                      <select
+                        value={condition.value}
+                        onChange={(event) => updateCondition(setRuleExceptions, ruleExceptions, index, { value: event.target.value })}
+                        aria-label="Exception value"
+                      >
+                        <option value="true">Yes</option>
+                        <option value="false">No</option>
+                      </select>
+                    ) : (
+                      <input
+                        value={condition.value}
+                        onChange={(event) => updateCondition(setRuleExceptions, ruleExceptions, index, { value: event.target.value })}
+                        placeholder="Value"
+                        aria-label="Exception value"
+                      />
+                    )}
+                    <button
+                      className="icon-button compact-icon"
+                      onClick={() => removeCondition(setRuleExceptions, ruleExceptions, index)}
+                      aria-label="Remove exception"
+                      title="Remove exception"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button className="text-button" onClick={() => addCondition(setRuleExceptions, ruleExceptions)}>
+                  <Plus size={13} /> Add exception
+                </button>
+              </div>
+              <div className="rule-builder-section">
+                <div className="rule-section-label">Do this</div>
+                <div className="rule-action-grid">
+                  <select value={ruleFolder} onChange={(event) => setRuleFolder(event.target.value)} aria-label="Move message">
+                    <option value="none">Do not move</option>
+                    <option value="inbox">Move to Inbox</option>
+                    <option value="archive">Move to Archive</option>
+                    <option value="spam">Move to Spam</option>
+                    <option value="trash">Move to Trash</option>
+                    <option value="custom">Move to custom folder…</option>
+                  </select>
+                  {ruleFolder === "custom" && (
+                    <select value={ruleCustomFolderId} onChange={(event) => setRuleCustomFolderId(event.target.value)} aria-label="Custom folder">
+                      <option value="">Choose folder</option>
+                      {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                    </select>
+                  )}
+                  <select value={ruleMarkRead} onChange={(event) => setRuleMarkRead(event.target.value as typeof ruleMarkRead)} aria-label="Read action">
+                    <option value="ignore">Leave read status</option>
+                    <option value="true">Mark as read</option>
+                    <option value="false">Mark as unread</option>
+                  </select>
+                  <select value={ruleStar} onChange={(event) => setRuleStar(event.target.value as typeof ruleStar)} aria-label="Star action">
+                    <option value="ignore">Leave star</option>
+                    <option value="true">Star it</option>
+                    <option value="false">Remove star</option>
+                  </select>
+                  <select value={rulePin} onChange={(event) => setRulePin(event.target.value as typeof rulePin)} aria-label="Pin action">
+                    <option value="ignore">Leave pin</option>
+                    <option value="true">Pin it</option>
+                    <option value="false">Unpin it</option>
+                  </select>
+                  <select value={ruleFlag} onChange={(event) => setRuleFlag(event.target.value as typeof ruleFlag)} aria-label="Flag action">
+                    <option value="ignore">Leave flag</option>
+                    <option value="true">Flag it</option>
+                    <option value="false">Clear flag</option>
+                  </select>
+                  <select value={rulePriorityAction} onChange={(event) => setRulePriorityAction(event.target.value)} aria-label="Priority action">
+                    <option value="ignore">Leave priority</option>
+                    <option value="0">Set low priority</option>
+                    <option value="1">Set normal priority</option>
+                    <option value="2">Set high priority</option>
+                  </select>
+                  <input
+                    value={ruleLabel}
+                    onChange={(event) => setRuleLabel(event.target.value)}
+                    placeholder="Add label (optional)"
+                    list="rule-labels"
+                  />
+                  <datalist id="rule-labels">{labels.map((label) => <option key={label.id} value={label.name} />)}</datalist>
+                  <input
+                    value={ruleForwardTo}
+                    onChange={(event) => setRuleForwardTo(event.target.value)}
+                    placeholder="Forward to (optional)"
+                    type="email"
+                  />
+                </div>
+                <label className="toggle-row">
+                  <input type="checkbox" checked={ruleStop} onChange={(event) => setRuleStop(event.target.checked)} /> Stop processing more rules
+                </label>
+                <label className="toggle-row">
+                  <input type="checkbox" checked={ruleEnabled} onChange={(event) => setRuleEnabled(event.target.checked)} /> Rule is enabled
+                </label>
+              </div>
+              <div className="rule-builder-footer">
+                <small className="rule-muted">Rules are evaluated from top to bottom.</small>
+                <button className="secondary-button" onClick={() => void saveRule()} disabled={ruleBusy}>
+                  <SlidersHorizontal size={15} /> {ruleBusy ? "Saving…" : editingRuleId ? "Save changes" : "Add rule"}
+                </button>
+              </div>
+            </div>
+            <div className="setting-card rules-list-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Rules in order</h3>
+                  <p>Disable, reorder, edit, or run a rule against recent mail.</p>
+                </div>
+                <span className="rule-count">{rules.length}</span>
+              </div>
+              {rules.length === 0 ? (
+                <div className="rule-empty">No rules yet. Build your first one on the left.</div>
+              ) : rules.map((rule, index) => {
+                const exceptions = rule.conditions?.exceptions && typeof rule.conditions.exceptions === "object" && !Array.isArray(rule.conditions.exceptions)
+                  ? rule.conditions.exceptions as Record<string, unknown>
+                  : {};
+                const actionText = rule.actions?.customFolderId
+                  ? `Move to ${folders.find((folder) => folder.id === rule.actions.customFolderId)?.name || "custom folder"}`
+                  : rule.actions?.folder
+                    ? `Move to ${String(rule.actions.folder)}`
+                    : "Metadata only";
+                return (
+                  <article className={`rule-list-item ${rule.enabled ? "" : "disabled"}`} key={rule.id}>
+                    <div className="rule-list-copy">
+                      <div className="rule-list-title"><span className="rule-order">{index + 1}</span><strong>{rule.name}</strong>{!rule.enabled && <span className="rule-disabled-badge">Disabled</span>}</div>
+                      <small>{ruleSummary(rule.conditions, "Every message")} → {actionText}{Object.keys(exceptions).length ? " · with exception" : ""}</small>
+                    </div>
+                    <div className="rule-list-actions">
+                      <label className="rule-toggle" title={rule.enabled ? "Disable rule" : "Enable rule"}>
+                        <input type="checkbox" checked={rule.enabled} onChange={(event) => void updateRule(rule, { enabled: event.target.checked }, event.target.checked ? "Rule enabled" : "Rule disabled")} />
+                        <span />
+                      </label>
+                      <button className="icon-button compact-icon" disabled={index === 0} onClick={() => void reorderRule(index, -1)} aria-label="Move rule up" title="Move up"><ArrowUp size={14} /></button>
+                      <button className="icon-button compact-icon" disabled={index === rules.length - 1} onClick={() => void reorderRule(index, 1)} aria-label="Move rule down" title="Move down"><ArrowDown size={14} /></button>
+                      <button className="icon-button compact-icon" onClick={() => editRule(rule)} aria-label="Edit rule" title="Edit"><Pencil size={14} /></button>
+                      <button className="icon-button compact-icon" onClick={() => void runRule(rule)} aria-label="Run rule now" title="Run on existing mail"><Play size={14} /></button>
+                      <button className="icon-button compact-icon danger-icon" onClick={() => void deleteRule(rule)} aria-label="Delete rule" title="Delete"><Trash2 size={14} /></button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
             <div className="setting-card">
               <h3>Signatures</h3>
@@ -1302,6 +1701,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [folders, setFolders] = useState<CustomFolder[]>([]);
   const [labels, setLabels] = useState<Label[]>([]);
   const [signatures, setSignatures] = useState<Signature[]>([]);
+  const [rules, setRules] = useState<Rule[]>([]);
   const [settings, setSettings] = useState<AppSettings>({
     theme: "light",
     density: "comfortable",
@@ -1324,18 +1724,20 @@ function MailboxApp({ session }: { session: Session }) {
   const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
-      const [addresses, customFolders, labelRows, signatureRows, preference] =
+      const [addresses, customFolders, labelRows, signatureRows, ruleRows, preference] =
         await Promise.all([
           apiFetch<Mailbox[]>("/api/mailboxes"),
           apiFetch<CustomFolder[]>("/api/folders"),
           apiFetch<Label[]>("/api/labels"),
           apiFetch<Signature[]>("/api/signatures"),
+          apiFetch<Rule[]>("/api/rules"),
           apiFetch<AppSettings>("/api/settings"),
         ]);
       setMailboxes(addresses);
       setFolders(customFolders);
       setLabels(labelRows);
       setSignatures(signatureRows);
+      setRules(ruleRows);
       setSettings(preference);
     } catch (loadError) {
       setError(
@@ -2119,6 +2521,7 @@ function MailboxApp({ session }: { session: Session }) {
           folders={folders}
           labels={labels}
           mailboxes={mailboxes}
+          rules={rules}
           onClose={() => setSettingsOpen(false)}
           onChanged={() => {
             void loadMeta();
