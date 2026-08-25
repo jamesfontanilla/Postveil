@@ -607,9 +607,6 @@ function Compose({
       <form
         className={`compose-card${isExpanded ? " compose-card-expanded" : ""}`}
         onSubmit={send}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={(event) => void handleDrop(event)}
       >
         <div className="compose-head">
           <div>
@@ -778,6 +775,9 @@ function Compose({
         <div
           className={`attachment-dropzone${isDragging ? " is-dragging" : ""}`}
           aria-label="Attachment drop zone"
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={(event) => void handleDrop(event)}
         >
           <UploadCloud size={18} aria-hidden="true" />
           <div>
