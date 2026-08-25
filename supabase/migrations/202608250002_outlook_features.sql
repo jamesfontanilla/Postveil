@@ -25,6 +25,7 @@ alter table public.messages add column if not exists focused_score numeric(5,4) 
 alter table public.messages add column if not exists focused_category text not null default 'focused';
 alter table public.messages add column if not exists auth_results jsonb not null default '{}'::jsonb;
 alter table public.messages add column if not exists search_vector tsvector;
+alter table public.messages add column if not exists updated_at timestamptz not null default now();
 
 create table if not exists public.mail_folders (
   id uuid primary key default gen_random_uuid(),

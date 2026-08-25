@@ -20,7 +20,12 @@ The full server requires the Worker secrets in `wrangler secret` or the Cloudfla
 
 ## Supabase setup
 
-Run `supabase/migrations/202608250001_initial.sql` once in the Supabase SQL Editor. It creates the mailbox, thread, message, attachment, and delivery-event tables with owner-based RLS policies.
+Run `supabase/migrations/202608250001_initial.sql` followed by
+`supabase/migrations/202608250002_outlook_features.sql` in the Supabase SQL
+Editor. The second migration adds custom folders, labels, contacts, rules,
+signatures, automatic replies, calendar events, tasks, mailbox membership,
+integrations, spam feedback, full-text search, threading metadata, scheduled
+send, snooze, message flags, and owner-based RLS policies.
 
 ## Worker secrets
 
@@ -48,10 +53,30 @@ The Backblaze bucket should be private. The application uses short-lived signed 
 ## Routes
 
 - `/api/health` — configuration health check
-- `/api/mail` — authenticated message list
-- `/api/mail/:id` — authenticated message detail/state
-- `/api/send` — authenticated Brevo send with sent-message persistence
-- `/api/attachments` — authenticated draft attachment upload
+- `/api/mailboxes` — mailbox list and mailbox settings
+- `/api/mail` and `/api/mail/:id` — search, folders, filters, message detail, flags, snooze, spam feedback, and soft-delete state
+- `/api/threads/:id` — conversation view
+- `/api/folders`, `/api/labels`, `/api/labels/assign` — custom folders and colored labels
+- `/api/contacts` — contacts and autocomplete data
+- `/api/rules` — sender/subject/body/attachment rules and actions
+- `/api/signatures` — per-mailbox signatures
+- `/api/settings` — theme, density, reading pane, notification, timezone, and push settings
+- `/api/calendar` — calendar events and attendees
+- `/api/tasks` — linked To Do tasks
+- `/api/auto-replies` — vacation-response configuration
+- `/api/integrations` — provider connection metadata
+- `/api/drafts` — autosaved drafts
+- `/api/send` — authenticated Brevo send with threading, CC/BCC, attachments, and scheduled send
+- `/api/attachments` — private B2 upload and signed download URLs
 - `/api/webhooks/brevo` — delivery-status callback
 - `/api/internal/send-test` — secret-protected smoke test only
 
+## Current feature boundaries
+
+The application implements the mail workflow, local spam scoring, static
+attachment safety checks, custom organization, scheduled send, snooze, PWA
+shell, polling, and optional Supabase Realtime updates. Provider-specific
+Google/Microsoft calendar, OneDrive, Teams, AI, push delivery, and third-party
+antivirus scanning still require provider credentials or a separately operated
+service; the UI exposes these as integration points rather than pretending they
+are connected.
