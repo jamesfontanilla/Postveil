@@ -110,6 +110,14 @@ type Mailbox = {
 };
 type CustomFolder = { id: string; name: string; color: string; slug: string };
 type Label = { id: string; name: string; color: string };
+type SenderPolicy = {
+  id: string;
+  mailbox_id?: string | null;
+  match_type: "address" | "domain";
+  match_value: string;
+  action: "inbox" | "spam";
+  enabled: boolean;
+};
 type Signature = {
   id: string;
   name: string;
@@ -876,6 +884,7 @@ function SettingsPanel({
   labels,
   mailboxes,
   rules,
+  senderPolicies,
   onClose,
   onChanged,
 }: {
@@ -884,6 +893,7 @@ function SettingsPanel({
   labels: Label[];
   mailboxes: Mailbox[];
   rules: Rule[];
+  senderPolicies: SenderPolicy[];
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -891,6 +901,7 @@ function SettingsPanel({
     | "appearance"
     | "organize"
     | "contacts"
+    | "spam"
     | "automation"
     | "mailboxes"
     | "integrations"
@@ -900,6 +911,10 @@ function SettingsPanel({
   const [contactEmail, setContactEmail] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactAvatarUrl, setContactAvatarUrl] = useState("");
+  const [policyType, setPolicyType] = useState<"address" | "domain">("address");
+  const [policyValue, setPolicyValue] = useState("");
+  const [policyAction, setPolicyAction] = useState<"inbox" | "spam">("inbox");
+  const [policyBusy, setPolicyBusy] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleName, setRuleName] = useState("");
   const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([
@@ -967,6 +982,52 @@ function SettingsPanel({
     setContactAvatarUrl("");
     setNotice("Contact saved");
     onChanged();
+  }
+  async function createSenderPolicy() {
+    if (!policyValue.trim()) {
+      setNotice(`Enter a ${policyType === "domain" ? "domain" : "sender address"}`);
+      return;
+    }
+    setPolicyBusy(true);
+    try {
+      await apiFetch("/api/sender-policies", {
+        method: "POST",
+        body: JSON.stringify({
+          matchType: policyType,
+          matchValue: policyValue,
+          action: policyAction,
+        }),
+      });
+      setPolicyValue("");
+      setNotice(policyAction === "inbox" ? "Trusted sender saved" : "Blocked sender saved");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not save sender policy");
+    } finally {
+      setPolicyBusy(false);
+    }
+  }
+  async function toggleSenderPolicy(policy: SenderPolicy) {
+    try {
+      await apiFetch(`/api/sender-policies/${policy.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !policy.enabled }),
+      });
+      setNotice(policy.enabled ? "Sender policy paused" : "Sender policy enabled");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not update sender policy");
+    }
+  }
+  async function deleteSenderPolicy(policy: SenderPolicy) {
+    if (!window.confirm(`Remove this ${policy.action === "inbox" ? "trusted" : "blocked"} ${policy.match_type}?`)) return;
+    try {
+      await apiFetch(`/api/sender-policies/${policy.id}`, { method: "DELETE" });
+      setNotice("Sender policy removed");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not remove sender policy");
+    }
   }
   function resetRuleEditor() {
     setEditingRuleId(null);
@@ -1202,6 +1263,7 @@ function SettingsPanel({
               ["appearance", "Appearance"],
               ["organize", "Folders & labels"],
               ["contacts", "Contacts"],
+              ["spam", "Spam & trust"],
               ["automation", "Rules & signatures"],
               ["mailboxes", "Mailboxes"],
               ["integrations", "Integrations"],
@@ -1366,6 +1428,78 @@ function SettingsPanel({
               >
                 <Users size={15} /> Save contact
               </button>
+            </div>
+          </div>
+        )}
+        {tab === "spam" && (
+          <div className="settings-grid spam-settings-grid">
+            <div className="setting-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Sender decisions</h3>
+                  <p>Trust a sender you know or block mail before it reaches the Inbox.</p>
+                </div>
+                <ShieldAlert size={18} aria-hidden="true" />
+              </div>
+              <div className="policy-form">
+                <select value={policyAction} onChange={(event) => setPolicyAction(event.target.value as typeof policyAction)} aria-label="Sender decision">
+                  <option value="inbox">Always trust</option>
+                  <option value="spam">Always block</option>
+                </select>
+                <select value={policyType} onChange={(event) => setPolicyType(event.target.value as typeof policyType)} aria-label="Sender match type">
+                  <option value="address">This email address</option>
+                  <option value="domain">This domain</option>
+                </select>
+                <input
+                  value={policyValue}
+                  onChange={(event) => setPolicyValue(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") void createSenderPolicy(); }}
+                  placeholder={policyType === "domain" ? "example.com" : "sender@example.com"}
+                  aria-label={policyType === "domain" ? "Domain" : "Email address"}
+                  type={policyType === "domain" ? "text" : "email"}
+                />
+                <button className="secondary-button" onClick={() => void createSenderPolicy()} disabled={policyBusy}>
+                  {policyAction === "inbox" ? <Check size={15} /> : <ShieldAlert size={15} />}
+                  {policyBusy ? "Saving…" : policyAction === "inbox" ? "Trust" : "Block"}
+                </button>
+              </div>
+              <small className="field-help">A trusted sender still cannot bypass confirmed malware or a dangerous attachment.</small>
+            </div>
+            <div className="setting-card policy-list-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Saved decisions</h3>
+                  <p>These choices override the normal spam score for matching mail.</p>
+                </div>
+                <span className="rule-count">{senderPolicies.length}</span>
+              </div>
+              {senderPolicies.length === 0 ? (
+                <div className="rule-empty">No sender decisions yet.</div>
+              ) : senderPolicies.map((policy) => (
+                <div className={`settings-item policy-item ${policy.enabled ? "" : "disabled"}`} key={policy.id}>
+                  <div className="policy-copy">
+                    <strong>{policy.match_value}</strong>
+                    <small>{policy.action === "inbox" ? "Trusted" : "Blocked"} · {policy.match_type}</small>
+                  </div>
+                  <div className="rule-list-actions">
+                    <label className="rule-toggle" title={policy.enabled ? "Pause policy" : "Enable policy"}>
+                      <input type="checkbox" checked={policy.enabled} onChange={() => void toggleSenderPolicy(policy)} aria-label={`${policy.enabled ? "Disable" : "Enable"} ${policy.match_value}`} />
+                      <span />
+                    </label>
+                    <button className="icon-button compact-icon danger-icon" onClick={() => void deleteSenderPolicy(policy)} aria-label={`Remove ${policy.match_value}`} title="Remove"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="setting-card spam-explainer-card">
+              <h3>How screening works</h3>
+              <p>Parcel combines authentication alignment, sender history, user feedback, links, risky requests, and attachments.</p>
+              <div className="screening-legend">
+                <span><i className="legend-dot safe" /> Inbox</span>
+                <span><i className="legend-dot review" /> Warning</span>
+                <span><i className="legend-dot danger" /> Spam</span>
+              </div>
+              <small className="field-help">One failed authentication check is only a signal. Messages need multiple risk signals before automatic Spam placement.</small>
             </div>
           </div>
         )}
@@ -1939,6 +2073,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [labels, setLabels] = useState<Label[]>([]);
   const [signatures, setSignatures] = useState<Signature[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
+  const [senderPolicies, setSenderPolicies] = useState<SenderPolicy[]>([]);
   const [settings, setSettings] = useState<AppSettings>({
     theme: "light",
     density: "comfortable",
@@ -1965,7 +2100,7 @@ function MailboxApp({ session }: { session: Session }) {
   const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
-      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, preference] =
+      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, policyRows, preference] =
         await Promise.all([
           apiFetch<Mailbox[]>("/api/mailboxes"),
           apiFetch<Contact[]>("/api/contacts"),
@@ -1973,6 +2108,7 @@ function MailboxApp({ session }: { session: Session }) {
           apiFetch<Label[]>("/api/labels"),
           apiFetch<Signature[]>("/api/signatures"),
           apiFetch<Rule[]>("/api/rules"),
+          apiFetch<SenderPolicy[]>("/api/sender-policies").catch(() => []),
           apiFetch<AppSettings>("/api/settings"),
         ]);
       setMailboxes(addresses);
@@ -1981,6 +2117,7 @@ function MailboxApp({ session }: { session: Session }) {
       setLabels(labelRows);
       setSignatures(signatureRows);
       setRules(ruleRows);
+      setSenderPolicies(policyRows);
       setSettings(preference);
     } catch (loadError) {
       setError(
@@ -2787,6 +2924,7 @@ function MailboxApp({ session }: { session: Session }) {
           labels={labels}
           mailboxes={mailboxes}
           rules={rules}
+          senderPolicies={senderPolicies}
           onClose={() => setSettingsOpen(false)}
           onChanged={() => {
             void loadMeta();
