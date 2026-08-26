@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { requireSupabase, supabase } from "./lib/supabase";
+import { qrImageSource } from "./lib/qr";
 
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam";
 type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
@@ -1162,6 +1163,7 @@ function SettingsPanel({
   const [verificationCode, setVerificationCode] = useState("");
   const [mfaFactors, setMfaFactors] = useState<MfaFactor[]>([]);
   const [mfaSetup, setMfaSetup] = useState<{ id: string; qrCode: string; secret: string; uri: string } | null>(null);
+  const [mfaQrFailed, setMfaQrFailed] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
   const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
   const [ruleLabBusy, setRuleLabBusy] = useState(false);
@@ -1591,6 +1593,7 @@ function SettingsPanel({
       const result = await requireSupabase().auth.mfa.enroll({ factorType: "totp", friendlyName: "Parcel authenticator" });
       if (result.error) throw result.error;
       setMfaSetup({ id: result.data.id, qrCode: result.data.totp.qr_code, secret: result.data.totp.secret, uri: result.data.totp.uri });
+      setMfaQrFailed(false);
       setMfaCode("");
     } catch (enrollError) {
       setSecurityError(enrollError instanceof Error ? enrollError.message : "Could not start authenticator setup");
@@ -1610,6 +1613,7 @@ function SettingsPanel({
       const refreshed = await requireSupabase().auth.refreshSession();
       if (refreshed.error) throw refreshed.error;
       setMfaSetup(null);
+      setMfaQrFailed(false);
       setMfaCode("");
       setNotice("Two-step verification is now on");
       await loadSecurity();
@@ -1625,6 +1629,7 @@ function SettingsPanel({
     try {
       await requireSupabase().auth.mfa.unenroll({ factorId: mfaSetup.id });
       setMfaSetup(null);
+      setMfaQrFailed(false);
       setMfaCode("");
       setNotice("Authenticator setup cancelled");
       await loadSecurity();
@@ -1730,8 +1735,8 @@ function SettingsPanel({
               {mfaSetup && <div className="mfa-enrollment">
                 <strong>Scan this QR code</strong>
                 <small>Use Google Authenticator, Microsoft Authenticator, 1Password, or another TOTP app.</small>
-                <img className="mfa-qr" src={`data:image/svg+xml;utf8,${encodeURIComponent(mfaSetup.qrCode)}`} alt="QR code for authenticator setup" />
-                <details><summary>Can’t scan? Use the setup key</summary><code>{mfaSetup.secret}</code></details>
+                {mfaQrFailed || !qrImageSource(mfaSetup.qrCode) ? <div className="mfa-qr-fallback" role="status">The QR preview could not be rendered. Use the setup key below instead.</div> : <img className="mfa-qr" src={qrImageSource(mfaSetup.qrCode)} onError={() => setMfaQrFailed(true)} alt="QR code for authenticator setup" />}
+                <details><summary>Can’t scan? Use the setup key</summary><code>{mfaSetup.secret}</code><small>Or use this authenticator URI:</small><code>{mfaSetup.uri}</code></details>
                 <input inputMode="numeric" autoComplete="one-time-code" value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Enter the six-digit code" aria-label="Authenticator verification code" />
                 <div className="security-actions"><button className="primary-button" onClick={() => void verifyMfaSetup()} disabled={securityBusy || mfaCode.length !== 6}>Verify and turn on</button><button className="text-button" onClick={() => void cancelMfaSetup()} disabled={securityBusy}>Cancel</button></div>
               </div>}
