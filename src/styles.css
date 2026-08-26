@@ -446,6 +446,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .theme-dark .sender-line, .theme-dark .quoted-block, .theme-dark .action-menu { background: var(--surface); border-color: var(--line); }
 .theme-dark .quoted-content, .theme-dark .sender-details { border-color: var(--line); }
 .theme-dark .action-menu button:hover, .theme-dark .action-menu button:focus-visible { background: var(--surface-muted); }
+.trash-empty-button { max-width: 100%; padding: 8px 10px; font-size: 11px; }
+.trash-empty-button:disabled { cursor: not-allowed; opacity: .55; }
+.danger-button { color: var(--danger) !important; }
+.danger-button:hover { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
+.trash-notice { display: flex; align-items: flex-start; gap: 9px; max-width: 68ch; margin-top: 18px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line)); border-radius: 7px; background: color-mix(in srgb, var(--danger) 6%, var(--surface)); color: var(--danger); padding: 11px 12px; font-size: 11px; line-height: 1.5; }
+.trash-notice svg { flex: 0 0 auto; margin-top: 1px; }
+.trash-notice span { min-width: 0; overflow-wrap: anywhere; }
+.theme-dark .trash-notice { background: color-mix(in srgb, var(--danger) 13%, var(--surface)); }
 
 @media (max-width: 720px) {
   .message-detail { padding: 24px 16px calc(86px + env(safe-area-inset-bottom)); }
@@ -456,6 +464,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .details-toggle { align-self: flex-start; }
   .detail-actions { position: sticky; z-index: 3; bottom: 0; margin: 28px -16px calc(-1 * (18px + env(safe-area-inset-bottom))); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--canvas) 94%, transparent); backdrop-filter: blur(10px); }
   .detail-actions .primary-button { flex: 1 1 120px; }
+  .detail-actions .danger-button { flex: 1 1 150px; }
   .detail-quick-action { display: none; }
   .more-actions { flex: 0 0 auto; }
   .action-menu { right: 0; left: auto; }

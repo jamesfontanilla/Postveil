@@ -44,6 +44,7 @@ import {
   Star,
   Tag,
   Trash2,
+  Undo2,
   UploadCloud,
   Users,
   X,
@@ -61,6 +62,7 @@ type Message = {
   folder: string;
   status: string;
   custom_folder_id?: string | null;
+  previous_folder?: string | null;
   from_name?: string | null;
   from_address: string;
   to_addresses: string[];
@@ -2097,6 +2099,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [showAllThreadMessages, setShowAllThreadMessages] = useState(false);
   const [showMessageDetails, setShowMessageDetails] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
+  const [trashBusy, setTrashBusy] = useState(false);
   const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
@@ -2280,12 +2283,75 @@ function MailboxApp({ session }: { session: Session }) {
         body: JSON.stringify(body),
       });
       await loadMessages(folder, false);
+      if (typeof body.folder === "string" || typeof body.snoozedUntil === "string") {
+        setSelected(null);
+        setSelectedId(null);
+        setThreadMessages([]);
+        return;
+      }
       const detail = await apiFetch<Message>(`/api/mail/${selected.id}`);
       setSelected(detail);
     } catch (actionError) {
       setError(
         actionError instanceof Error ? actionError.message : "Action failed",
       );
+    }
+  }
+  function clearMessageSelection() {
+    setSelected(null);
+    setSelectedId(null);
+    setThreadMessages([]);
+    setShowMoreActions(false);
+  }
+  async function restoreSelected() {
+    if (!selected || selected.folder !== "trash") return;
+    setTrashBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/api/mail/${selected.id}`, {
+        method: "POST",
+        body: JSON.stringify({ action: "restore" }),
+      });
+      clearMessageSelection();
+      await loadMessages(folder, false);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Restore failed");
+    } finally {
+      setTrashBusy(false);
+    }
+  }
+  async function permanentlyDeleteSelected() {
+    if (!selected || selected.folder !== "trash") return;
+    if (!window.confirm("Delete this message permanently? This cannot be undone.")) return;
+    setTrashBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/api/mail/${selected.id}`, {
+        method: "POST",
+        body: JSON.stringify({ action: "permanent_delete" }),
+      });
+      clearMessageSelection();
+      await loadMessages(folder, false);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Permanent delete failed");
+    } finally {
+      setTrashBusy(false);
+    }
+  }
+  async function emptyTrash() {
+    if (!window.confirm("Empty Trash permanently? Messages and attachments in Trash cannot be recovered.")) return;
+    setTrashBusy(true);
+    setError("");
+    try {
+      await apiFetch<{ ok: boolean; deleted: number }>("/api/trash/empty", {
+        method: "POST",
+      });
+      clearMessageSelection();
+      await loadMessages("trash", false);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Trash could not be emptied");
+    } finally {
+      setTrashBusy(false);
     }
   }
   async function assignLabel(labelId: string) {
@@ -2541,6 +2607,16 @@ function MailboxApp({ session }: { session: Session }) {
                 </h1>
               </div>
               <div className="head-actions">
+                {folder === "trash" && (
+                  <button
+                    className="secondary-button trash-empty-button"
+                    onClick={() => void emptyTrash()}
+                    disabled={trashBusy || messages.length === 0}
+                    title="Permanently delete every message in Trash"
+                  >
+                    <Trash2 size={14} /> Empty trash
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   onClick={() => void loadMessages()}
@@ -2600,14 +2676,22 @@ function MailboxApp({ session }: { session: Session }) {
                     <Mail size={22} />
                   </div>
                   <h3>
-                    {currentLabel === "Inbox"
+                    {folder === "trash"
+                      ? "Trash is empty"
+                      : currentLabel === "Inbox"
                       ? "A quiet inbox"
                       : `No mail in ${currentLabel.toLowerCase()}`}
                   </h3>
-                  <p>New messages and saved rules will appear here.</p>
-                  <button className="text-button" onClick={() => openCompose()}>
-                    Write the first message
-                  </button>
+                  <p>
+                    {folder === "trash"
+                      ? "Deleted messages stay here until you restore or permanently remove them."
+                      : "New messages and saved rules will appear here."}
+                  </p>
+                  {folder !== "trash" && (
+                    <button className="text-button" onClick={() => openCompose()}>
+                      Write the first message
+                    </button>
+                  )}
                 </div>
               ) : (
                 messages.map((message) => (
@@ -2723,24 +2807,55 @@ function MailboxApp({ session }: { session: Session }) {
                         fill={selected.is_pinned ? "currentColor" : "none"}
                       />
                     </button>
-                    <button
-                      className="icon-button"
-                      title="Archive message"
-                      onClick={() => void mutateMessage({ folder: "archive" })}
-                      aria-label="Archive message"
-                    >
-                      <Archive size={17} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      title="Move message to trash"
-                      onClick={() => void mutateMessage({ folder: "trash" })}
-                      aria-label="Delete message"
-                    >
-                      <Trash2 size={17} />
-                    </button>
+                    {selected.folder === "trash" ? (
+                      <>
+                        <button
+                          className="icon-button"
+                          title="Restore to previous folder"
+                          onClick={() => void restoreSelected()}
+                          aria-label="Restore message"
+                          disabled={trashBusy}
+                        >
+                          <Undo2 size={17} />
+                        </button>
+                        <button
+                          className="icon-button danger-icon"
+                          title="Delete permanently"
+                          onClick={() => void permanentlyDeleteSelected()}
+                          aria-label="Delete message permanently"
+                          disabled={trashBusy}
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className="icon-button"
+                          title="Archive message"
+                          onClick={() => void mutateMessage({ folder: "archive" })}
+                          aria-label="Archive message"
+                        >
+                          <Archive size={17} />
+                        </button>
+                        <button
+                          className="icon-button"
+                          title="Move message to trash"
+                          onClick={() => void mutateMessage({ folder: "trash" })}
+                          aria-label="Delete message"
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
+                {selected.folder === "trash" && (
+                  <div className="trash-notice" role="status">
+                    <Trash2 size={15} />
+                    <span>This message is in Trash. Restore it to its previous folder or delete it permanently.</span>
+                  </div>
+                )}
                 <div className="sender-line">
                   {(() => {
                     const sender = senderForMessage(selected, contacts, mailboxes);
@@ -2847,47 +2962,68 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 )}
                 <div className="detail-actions">
-                  <button
-                    className="primary-button"
-                    onClick={() => openCompose(selectedReplySeed)}
-                  >
-                    <PenLine size={15} /> Reply
-                  </button>
-                  <button
-                    className="secondary-button detail-quick-action"
-                    onClick={() => openCompose(selectedReplyAllSeed)}
-                  >
-                    <Users size={15} /> Reply all
-                  </button>
-                  <div className="more-actions">
-                    <button
-                      className="secondary-button"
-                      aria-expanded={showMoreActions}
-                      aria-haspopup="menu"
-                      onClick={() => setShowMoreActions((current) => !current)}
-                    >
-                      <MoreHorizontal size={15} /> More
-                    </button>
-                    {showMoreActions && (
-                      <div className="action-menu" role="menu">
-                        <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
-                          <Forward size={15} /> Forward
+                  {selected.folder === "trash" ? (
+                    <>
+                      <button
+                        className="primary-button"
+                        onClick={() => void restoreSelected()}
+                        disabled={trashBusy}
+                      >
+                        <Undo2 size={15} /> Restore
+                      </button>
+                      <button
+                        className="secondary-button danger-button"
+                        onClick={() => void permanentlyDeleteSelected()}
+                        disabled={trashBusy}
+                      >
+                        <Trash2 size={15} /> Delete forever
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="primary-button"
+                        onClick={() => openCompose(selectedReplySeed)}
+                      >
+                        <PenLine size={15} /> Reply
+                      </button>
+                      <button
+                        className="secondary-button detail-quick-action"
+                        onClick={() => openCompose(selectedReplyAllSeed)}
+                      >
+                        <Users size={15} /> Reply all
+                      </button>
+                      <div className="more-actions">
+                        <button
+                          className="secondary-button"
+                          aria-expanded={showMoreActions}
+                          aria-haspopup="menu"
+                          onClick={() => setShowMoreActions((current) => !current)}
+                        >
+                          <MoreHorizontal size={15} /> More
                         </button>
-                        <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
-                          <Eye size={15} /> Mark unread
-                        </button>
-                        <button role="menuitem" onClick={() => void mutateMessage({ folder: selected.folder === "spam" ? "inbox" : "spam" })}>
-                          <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}
-                        </button>
-                        <button role="menuitem" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}>
-                          <Clock3 size={15} /> Snooze 1h
-                        </button>
-                        <button role="menuitem" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}>
-                          <Flag size={15} /> {selected.is_flagged ? "Unflag" : "Flag"}
-                        </button>
+                        {showMoreActions && (
+                          <div className="action-menu" role="menu">
+                            <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
+                              <Forward size={15} /> Forward
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
+                              <Eye size={15} /> Mark unread
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ folder: selected.folder === "spam" ? "inbox" : "spam" })}>
+                              <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}>
+                              <Clock3 size={15} /> Snooze 1h
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}>
+                              <Flag size={15} /> {selected.is_flagged ? "Unflag" : "Flag"}
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
                 </div>
               </article>
             )}

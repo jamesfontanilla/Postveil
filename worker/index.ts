@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import PostalMime from "postal-mime";
 
@@ -101,8 +101,44 @@ async function putObject(env: Env, key: string, body: Uint8Array | string, conte
   await storageClient(env).send(new PutObjectCommand({ Bucket: env.B2_BUCKET, Key: key, Body: body, ContentType: contentType }));
 }
 
+async function deleteObject(env: Env, key: string): Promise<void> {
+  await storageClient(env).send(new DeleteObjectCommand({ Bucket: env.B2_BUCKET, Key: key }));
+}
+
 async function signedObjectUrl(env: Env, key: string): Promise<string> {
   return getSignedUrl(storageClient(env), new GetObjectCommand({ Bucket: env.B2_BUCKET, Key: key }), { expiresIn: 600 });
+}
+
+function trashRestoreTarget(message: JsonRecord): { folder: string; custom_folder_id: string | null } {
+  const previous = typeof message.previous_folder === "string" ? message.previous_folder : "";
+  if (previous.startsWith("custom:")) {
+    const customFolderId = previous.slice("custom:".length);
+    if (customFolderId) return { folder: "custom", custom_folder_id: customFolderId };
+  }
+  if (SYSTEM_FOLDERS.includes(previous as typeof SYSTEM_FOLDERS[number]) && previous !== "trash") {
+    return { folder: previous, custom_folder_id: null };
+  }
+  return { folder: "inbox", custom_folder_id: null };
+}
+
+async function permanentlyDeleteMessage(env: Env, ownerId: string, messageId: string): Promise<void> {
+  const rows = await dbRequest<Array<{ id: string; raw_object_key?: string | null }>>(
+    env,
+    `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}&folder=eq.trash&select=id,raw_object_key&limit=1`,
+  );
+  if (!rows[0]) throw new Error("Only messages in Trash can be deleted permanently");
+  const attachments = await dbRequest<Array<{ object_key?: string | null }>>(
+    env,
+    `attachments?message_id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=object_key`,
+  );
+  const objectKeys = [rows[0].raw_object_key, ...attachments.map((attachment) => attachment.object_key)]
+    .filter((key): key is string => typeof key === "string" && Boolean(key));
+  await dbRequest(
+    env,
+    `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}&folder=eq.trash`,
+    { method: "DELETE" },
+  );
+  await Promise.allSettled(objectKeys.map((key) => deleteObject(env, key)));
 }
 
 async function ensureProfileAndMailbox(env: Env, user: User): Promise<Mailbox> {
@@ -565,10 +601,27 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   const mailboxMatch = url.pathname.match(/^\/api\/mailboxes\/([^/]+)$/);
   if (request.method === "PATCH" && mailboxMatch) { const body = (await request.json()) as JsonRecord; const patch: JsonRecord = {}; for (const key of ["display_name", "can_send", "can_receive", "is_default", "reply_to", "settings"]) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || null); }
 
+  if (request.method === "POST" && url.pathname === "/api/trash/empty") {
+    let deleted = 0;
+    while (true) {
+      const rows = await dbRequest<Array<{ id: string }>>(
+        env,
+        `messages?owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.trash&select=id&limit=100`,
+      );
+      if (!rows.length) break;
+      for (const row of rows) {
+        await permanentlyDeleteMessage(env, user.id, row.id);
+        deleted += 1;
+      }
+      if (rows.length < 100) break;
+    }
+    return json({ ok: true, deleted });
+  }
+
   if (request.method === "GET" && url.pathname === "/api/mail") {
     const folder = url.searchParams.get("folder") || "inbox";
     const q = url.searchParams.get("q")?.trim();
-     const parts = [`owner_id=eq.${encodeURIComponent(user.id)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,focused_score,focused_category,scheduled_at,snoozed_until,received_at,sent_at,created_at"];
+     const parts = [`owner_id=eq.${encodeURIComponent(user.id)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,focused_score,focused_category,scheduled_at,snoozed_until,received_at,sent_at,created_at"];
     if (folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(folder.slice(7))}`); } else if (folder === "focused") parts.push("folder=eq.inbox", "focused_category=eq.focused"); else if (folder === "other") parts.push("folder=eq.inbox", "focused_category=eq.other"); else parts.push(`folder=eq.${encodeURIComponent(folder)}`);
     if (q) { const safe = q.replace(/[*(),]/g, " "); parts.push(`or=${encodeURIComponent(`(subject.ilike.*${safe}*,from_name.ilike.*${safe}*,from_address.ilike.*${safe}*,text_body.ilike.*${safe}*,snippet.ilike.*${safe}*)`)}`); }
     if (url.searchParams.get("unread") === "true") parts.push("is_read=eq.false");
@@ -583,7 +636,23 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "GET" && messageMatch) { const id = messageMatch[1]; const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!rows[0]) return error("Message not found", 404); const attachments = await dbRequest<JsonRecord[]>(env, `attachments?message_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`); const labels = await dbRequest<JsonRecord[]>(env, `message_labels?message_id=eq.${encodeURIComponent(id)}&select=label_id`); return json({ ...rows[0], attachments, labels }); }
   if (request.method === "GET" && url.pathname.startsWith("/api/threads/")) { const id = url.pathname.split("/").pop() || ""; return json(await dbRequest(env, `messages?thread_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`)); }
   if (request.method === "POST" && messageMatch) {
-    const id = messageMatch[1]; const body = (await request.json()) as JsonRecord; const existing = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!existing[0]) return error("Message not found", 404); const patch: JsonRecord = {};
+    const id = messageMatch[1]; const body = (await request.json()) as JsonRecord; const existing = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!existing[0]) return error("Message not found", 404);
+    if (body.action === "restore") {
+      if (existing[0].folder !== "trash") return error("Only messages in Trash can be restored");
+      let target = trashRestoreTarget(existing[0]);
+      if (target.folder === "custom") {
+        const customFolder = await dbRequest<JsonRecord[]>(env, `mail_folders?id=eq.${encodeURIComponent(target.custom_folder_id || "")}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+        if (!customFolder[0]) target = { folder: "inbox", custom_folder_id: null };
+      }
+      const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.trash`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ folder: target.folder, custom_folder_id: target.custom_folder_id, previous_folder: null, snoozed_until: null, updated_at: new Date().toISOString() }) });
+      await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: id, decision: "restored", previous_folder: "trash", restored_at: new Date().toISOString() }) }).catch(() => undefined);
+      return json(Array.isArray(rows) ? rows[0] : rows);
+    }
+    if (body.action === "permanent_delete") {
+      await permanentlyDeleteMessage(env, user.id, id);
+      return json({ ok: true, deleted: id });
+    }
+    const patch: JsonRecord = {};
     if (typeof body.isRead === "boolean") patch.is_read = body.isRead;
     if (typeof body.isStarred === "boolean") patch.is_starred = body.isStarred;
     if (typeof body.isPinned === "boolean") patch.is_pinned = body.isPinned;
@@ -591,7 +660,14 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (typeof body.priority === "number") patch.priority = Math.max(0, Math.min(2, body.priority));
     if (typeof body.snoozedUntil === "string" && body.snoozedUntil) { patch.previous_folder = existing[0].folder; patch.snoozed_until = body.snoozedUntil; patch.folder = "archive"; }
     if (body.snoozedUntil === null) { patch.snoozed_until = null; patch.folder = existing[0].previous_folder || "inbox"; patch.previous_folder = null; }
-    if (typeof body.folder === "string" && SYSTEM_FOLDERS.includes(body.folder as typeof SYSTEM_FOLDERS[number])) { patch.folder = body.folder; patch.custom_folder_id = null; }
+    if (typeof body.folder === "string" && SYSTEM_FOLDERS.includes(body.folder as typeof SYSTEM_FOLDERS[number])) {
+      if (body.folder === "trash" && existing[0].folder !== "trash") {
+        patch.previous_folder = existing[0].folder === "custom" && existing[0].custom_folder_id ? `custom:${existing[0].custom_folder_id}` : existing[0].folder;
+      }
+      if (existing[0].folder === "trash" && body.folder !== "trash") patch.previous_folder = null;
+      patch.folder = body.folder;
+      patch.custom_folder_id = null;
+    }
     if (body.folder === "custom" && typeof body.customFolderId === "string") { patch.folder = "custom"; patch.custom_folder_id = body.customFolderId; }
     const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
     if (body.folder === "spam" || body.folder === "inbox") await dbRequest(env, "spam_feedback", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: id, feedback: body.folder === "spam" ? "spam" : "not_spam" }) }).catch(() => undefined);
