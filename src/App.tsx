@@ -1162,6 +1162,7 @@ function SettingsPanel({
   const [verificationId, setVerificationId] = useState<string | null>(null);
   const [verificationCode, setVerificationCode] = useState("");
   const [mfaFactors, setMfaFactors] = useState<MfaFactor[]>([]);
+  const [mfaPendingFactor, setMfaPendingFactor] = useState<MfaFactor | null>(null);
   const [mfaSetup, setMfaSetup] = useState<{ id: string; qrCode: string; secret: string; uri: string } | null>(null);
   const [mfaQrFailed, setMfaQrFailed] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
@@ -1521,7 +1522,9 @@ function SettingsPanel({
       ]);
       if (factorsResult.error) throw factorsResult.error;
       setRecoveryMethods(methods);
-      setMfaFactors(([...(factorsResult.data?.totp || []), ...(factorsResult.data?.phone || [])] as MfaFactor[]).filter((factor) => factor.status === "verified"));
+      const factors = [...(factorsResult.data?.totp || []), ...(factorsResult.data?.phone || [])] as MfaFactor[];
+      setMfaFactors(factors.filter((factor) => factor.status === "verified"));
+      setMfaPendingFactor(factors.find((factor) => factor.factor_type === "totp" && factor.status === "unverified") || null);
     } catch (loadError) {
       setSecurityError(loadError instanceof Error ? loadError.message : "Security settings unavailable");
     }
@@ -1590,9 +1593,11 @@ function SettingsPanel({
     setSecurityBusy(true);
     setSecurityError("");
     try {
+      if (mfaPendingFactor) throw new Error("An unfinished authenticator setup is already waiting. Discard it below before starting a new one.");
       const result = await requireSupabase().auth.mfa.enroll({ factorType: "totp", friendlyName: "Parcel authenticator" });
       if (result.error) throw result.error;
       setMfaSetup({ id: result.data.id, qrCode: result.data.totp.qr_code, secret: result.data.totp.secret, uri: result.data.totp.uri });
+      setMfaPendingFactor(null);
       setMfaQrFailed(false);
       setMfaCode("");
     } catch (enrollError) {
@@ -1613,6 +1618,7 @@ function SettingsPanel({
       const refreshed = await requireSupabase().auth.refreshSession();
       if (refreshed.error) throw refreshed.error;
       setMfaSetup(null);
+      setMfaPendingFactor(null);
       setMfaQrFailed(false);
       setMfaCode("");
       setNotice("Two-step verification is now on");
@@ -1626,15 +1632,34 @@ function SettingsPanel({
   async function cancelMfaSetup() {
     if (!mfaSetup) return;
     setSecurityBusy(true);
+    setSecurityError("");
     try {
-      await requireSupabase().auth.mfa.unenroll({ factorId: mfaSetup.id });
+      const result = await requireSupabase().auth.mfa.unenroll({ factorId: mfaSetup.id });
+      if (result.error) throw result.error;
       setMfaSetup(null);
+      setMfaPendingFactor(null);
       setMfaQrFailed(false);
       setMfaCode("");
       setNotice("Authenticator setup cancelled");
       await loadSecurity();
     } catch (cancelError) {
       setSecurityError(cancelError instanceof Error ? cancelError.message : "Could not cancel authenticator setup");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function discardPendingMfaSetup() {
+    if (!mfaPendingFactor || !window.confirm("Discard the unfinished authenticator setup?")) return;
+    setSecurityBusy(true);
+    setSecurityError("");
+    try {
+      const result = await requireSupabase().auth.mfa.unenroll({ factorId: mfaPendingFactor.id });
+      if (result.error) throw result.error;
+      setMfaPendingFactor(null);
+      setNotice("Unfinished authenticator setup discarded");
+      await loadSecurity();
+    } catch (discardError) {
+      setSecurityError(discardError instanceof Error ? discardError.message : "Could not discard the unfinished authenticator setup");
     } finally {
       setSecurityBusy(false);
     }
@@ -1709,6 +1734,7 @@ function SettingsPanel({
             </button>
           ))}
         </div>
+        {tab === "security" && securityError && <div className="settings-alert settings-error" role="alert">{securityError}</div>}
         {tab === "security" && (
           <div className="settings-grid security-settings-grid">
             <div className="setting-card">
@@ -1728,9 +1754,10 @@ function SettingsPanel({
                   <h3>Two-step verification</h3>
                   <p>Use an authenticator app after your password. Parcel will require it at every new sign-in.</p>
                 </div>
-                <span className={`security-status ${mfaFactors.length ? "enabled" : ""}`}>{mfaFactors.length ? "On" : "Off"}</span>
+                <span className={`security-status ${mfaFactors.length ? "enabled" : mfaPendingFactor ? "pending" : ""}`}>{mfaFactors.length ? "On" : mfaPendingFactor ? "Setup paused" : "Off"}</span>
               </div>
-              {mfaFactors.length === 0 && !mfaSetup && <button className="secondary-button" onClick={() => void beginMfaSetup()} disabled={securityBusy}><ShieldAlert size={15} /> Set up authenticator app</button>}
+              {mfaFactors.length === 0 && !mfaSetup && !mfaPendingFactor && <button className="secondary-button" onClick={() => void beginMfaSetup()} disabled={securityBusy}><ShieldAlert size={15} /> Set up authenticator app</button>}
+              {mfaPendingFactor && !mfaSetup && <div className="mfa-pending"><strong>Authenticator setup is waiting</strong><small>You closed setup before verifying the code. Discard this unfinished setup to generate a fresh QR code.</small><button className="secondary-button" onClick={() => void discardPendingMfaSetup()} disabled={securityBusy}>Discard unfinished setup</button></div>}
               {mfaFactors.map((factor) => <div className="settings-item security-factor" key={factor.id}><div><strong>{factor.friendly_name || (factor.factor_type === "totp" ? "Authenticator app" : "Phone")}</strong><small>Verified · {factor.factor_type.toUpperCase()}</small></div><button className="text-button danger-text-button" onClick={() => void removeMfaFactor(factor)} disabled={securityBusy}>Remove</button></div>)}
               {mfaSetup && <div className="mfa-enrollment">
                 <strong>Scan this QR code</strong>
