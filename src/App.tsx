@@ -1601,7 +1601,22 @@ function SettingsPanel({
       setMfaQrFailed(false);
       setMfaCode("");
     } catch (enrollError) {
-      setSecurityError(enrollError instanceof Error ? enrollError.message : "Could not start authenticator setup");
+      const message = enrollError instanceof Error ? enrollError.message : "";
+      if (/friendly name.*already exists/i.test(message)) {
+        let pendingFactor: MfaFactor | null = null;
+        try {
+          const factorsResult = await requireSupabase().auth.mfa.listFactors();
+          if (!factorsResult.error) {
+            pendingFactor = ([...(factorsResult.data?.totp || []), ...(factorsResult.data?.phone || [])] as MfaFactor[]).find((factor) => factor.factor_type === "totp" && factor.status === "unverified") || null;
+          }
+        } catch {
+          // Keep the actionable duplicate-name message even if the refresh fails.
+        }
+        setMfaPendingFactor(pendingFactor);
+        setSecurityError(pendingFactor ? "An unfinished authenticator setup already exists. Discard it below, then start again." : "An authenticator with this name already exists. Refresh Security & access before starting again.");
+      } else {
+        setSecurityError(message || "Could not start authenticator setup");
+      }
     } finally {
       setSecurityBusy(false);
     }
@@ -1761,7 +1776,7 @@ function SettingsPanel({
               {mfaFactors.map((factor) => <div className="settings-item security-factor" key={factor.id}><div><strong>{factor.friendly_name || (factor.factor_type === "totp" ? "Authenticator app" : "Phone")}</strong><small>Verified · {factor.factor_type.toUpperCase()}</small></div><button className="text-button danger-text-button" onClick={() => void removeMfaFactor(factor)} disabled={securityBusy}>Remove</button></div>)}
               {mfaSetup && <div className="mfa-enrollment">
                 <strong>Scan this QR code</strong>
-                <small>Use Google Authenticator, Microsoft Authenticator, 1Password, or another TOTP app.</small>
+                <small>Use Google Authenticator, Microsoft Authenticator, 1Password, or another TOTP app. Setup stays off until you enter a valid six-digit code.</small>
                 {mfaQrFailed || !qrImageSource(mfaSetup.qrCode) ? <div className="mfa-qr-fallback" role="status">The QR preview could not be rendered. Use the setup key below instead.</div> : <img className="mfa-qr" src={qrImageSource(mfaSetup.qrCode)} onError={() => setMfaQrFailed(true)} alt="QR code for authenticator setup" />}
                 <details><summary>Can’t scan? Use the setup key</summary><code>{mfaSetup.secret}</code><small>Or use this authenticator URI:</small><code>{mfaSetup.uri}</code></details>
                 <input inputMode="numeric" autoComplete="one-time-code" value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Enter the six-digit code" aria-label="Authenticator verification code" />
