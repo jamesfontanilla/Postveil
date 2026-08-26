@@ -52,19 +52,19 @@ listed tests before moving to the next phase.
 
 ## Phase 2 — Rule Lab and work queues
 
-- [ ] P2.1 [R-004] Extract the current rule matching code into a pure evaluator.
-- [ ] P2.2 [R-004] Add preview endpoint returning matches, reasons, and planned
+- [x] P2.1 [R-004] Extract the current rule matching code into a pure evaluator.
+- [x] P2.2 [R-004] Add preview endpoint returning matches, reasons, and planned
        actions without mutation.
-- [ ] P2.3 [R-004] Add dry-run endpoint and impact summary.
-- [ ] P2.4 [R-004] Add rule conflict checks, execution metadata, and audit API.
-- [ ] P2.5 [R-004] Add JSON rule import/export with schema validation.
-- [ ] P2.6 [R-004] Replace the current rule editor’s run action with preview,
+- [x] P2.3 [R-004] Add dry-run endpoint and impact summary.
+- [x] P2.4 [R-004] Add rule conflict checks, execution metadata, and audit API.
+- [x] P2.5 [R-004] Add JSON rule import/export with schema validation.
+- [x] P2.6 [R-004] Replace the current rule editor’s run action with preview,
        dry-run, apply, and undo states.
-- [ ] P2.7 [R-005] Add work-state API and message detail actions for Reply Later,
+- [x] P2.7 [R-005] Add work-state API and message detail actions for Reply Later,
        Waiting On, and I Owe.
-- [ ] P2.8 [R-005] Add Work navigation with counts, overdue state, and task link.
-- [ ] P2.9 [R-005] Add cron activation for due follow-ups and sync events.
-- [ ] P2.10 [R-004,R-005] Test rule replay, work-state persistence, and mobile
+- [x] P2.8 [R-005] Add Work navigation with counts, overdue state, and task link.
+- [x] P2.9 [R-005] Add cron activation for due follow-ups and sync events.
+- [x] P2.10 [R-004,R-005] Test rule replay, work-state persistence, and mobile
        queue behavior.
 
 ## Phase 3 — Safe sending and attachments

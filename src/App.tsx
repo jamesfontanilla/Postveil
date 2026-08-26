@@ -10,18 +10,22 @@ import {
 } from "react";
 import {
   Archive,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Bell,
   Bookmark,
+  Briefcase,
   CalendarDays,
   Check,
   ChevronDown,
   Clock3,
+  Download,
   Eye,
   Flag,
   FolderPlus,
   Forward,
+  History,
   Inbox,
   ListTodo,
   LogOut,
@@ -34,9 +38,9 @@ import {
   Pencil,
   PenLine,
   Pin,
-  Play,
   Plus,
   RefreshCcw,
+  RotateCcw,
   Search,
   Send,
   Settings2,
@@ -47,6 +51,7 @@ import {
   Trash2,
   Undo2,
   UploadCloud,
+  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -87,6 +92,9 @@ type Message = {
   focused_category?: string;
   scheduled_at?: string | null;
   snoozed_until?: string | null;
+  work_state?: "none" | "reply_later" | "waiting_on" | "i_owe" | string | null;
+  follow_up_at?: string | null;
+  work_note?: string | null;
   received_at?: string;
   sent_at?: string;
   created_at: string;
@@ -162,6 +170,26 @@ type Rule = {
   conditions: Record<string, unknown>;
   actions: Record<string, unknown>;
 };
+type RuleLabMatch = {
+  id: string;
+  subject: string;
+  fromAddress: string;
+  snippet: string;
+  folder: string;
+  reasons: string[];
+  plannedActions: Record<string, unknown>;
+};
+type RuleLabResult = {
+  runId: string;
+  mode: "preview" | "dry_run" | "apply";
+  matchedCount: number;
+  changedCount: number;
+  matches?: RuleLabMatch[];
+  impact?: { folders: Record<string, number>; labels: number; markRead: number; forwardCount: number; total: number };
+  conflicts?: Array<{ severity: "error" | "warning"; message: string }>;
+  failures?: Array<{ id: string; error: string }>;
+  undoable?: boolean;
+};
 type AutoReply = {
   id?: string;
   mailbox_id?: string;
@@ -186,6 +214,15 @@ type Task = {
   due_at?: string | null;
   priority: number;
   completed: boolean;
+  source_message_id?: string | null;
+};
+type WorkItem = Message & { overdue?: boolean };
+type WorkSummary = {
+  reply_later: number;
+  waiting_on: number;
+  i_owe: number;
+  overdue: number;
+  total: number;
 };
 type CalendarEvent = {
   id: string;
@@ -275,6 +312,17 @@ function messageStatusLabel(message: Message) {
   if (message.status === "bounced") return "Bounced";
   if (message.status === "scheduled") return "Scheduled";
   return message.status;
+}
+function workStateLabel(state?: string | null) {
+  if (state === "reply_later") return "Reply later";
+  if (state === "waiting_on") return "Waiting on";
+  if (state === "i_owe") return "I owe";
+  return "No work state";
+}
+function workDueLabel(value?: string | null) {
+  if (!value) return "No follow-up date";
+  const date = new Date(value);
+  return date.getTime() <= Date.now() ? `Overdue · ${date.toLocaleString()}` : `Follow up · ${date.toLocaleString()}`;
 }
 function splitQuotedBody(value: string) {
   const lines = value.split(/\r?\n/);
@@ -963,6 +1011,9 @@ function SettingsPanel({
     body: "",
   });
   const [notice, setNotice] = useState("");
+  const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
+  const [ruleLabBusy, setRuleLabBusy] = useState(false);
+  const ruleImportRef = useRef<HTMLInputElement>(null);
   async function updateSettings(patch: JsonSettings) {
     await apiFetch("/api/settings", {
       method: "PATCH",
@@ -1182,13 +1233,74 @@ function SettingsPanel({
       setNotice(caught instanceof Error ? caught.message : "Could not reorder rules");
     }
   }
-  async function runRule(rule: Rule) {
+  async function runRuleLab(rule: Rule, mode: "preview" | "dry-run") {
+    setRuleLabBusy(true);
     try {
-      const result = await apiFetch<{ matched: number; note?: string }>(`/api/rules/${rule.id}:run`, { method: "POST" });
-      setNotice(`${rule.name} matched ${result.matched} existing message${result.matched === 1 ? "" : "s"}.${result.note ? ` ${result.note}` : ""}`);
+      const result = await apiFetch<RuleLabResult>(`/api/rules/${rule.id}/${mode}`, { method: "POST" });
+      setRuleLab({ rule, result });
+      setNotice(mode === "preview" ? "Preview ready — no messages changed" : "Dry-run ready — review the impact before applying");
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not preview this rule");
+    } finally {
+      setRuleLabBusy(false);
+    }
+  }
+  async function applyRuleLab() {
+    if (!ruleLab) return;
+    setRuleLabBusy(true);
+    try {
+      const result = await apiFetch<RuleLabResult>(`/api/rules/${ruleLab.rule.id}/apply`, { method: "POST", body: JSON.stringify({ runId: ruleLab.result.runId }) });
+      setRuleLab({ rule: ruleLab.rule, result });
+      setNotice(`${result.changedCount} message${result.changedCount === 1 ? "" : "s"} updated. Undo is available for 30 seconds.`);
       onChanged();
     } catch (caught) {
-      setNotice(caught instanceof Error ? caught.message : "Could not run rule");
+      setNotice(caught instanceof Error ? caught.message : "Could not apply this rule");
+    } finally {
+      setRuleLabBusy(false);
+    }
+  }
+  async function undoRuleLab() {
+    if (!ruleLab) return;
+    setRuleLabBusy(true);
+    try {
+      await apiFetch(`/api/rule-runs/${ruleLab.result.runId}/undo`, { method: "POST" });
+      setRuleLab(null);
+      setNotice("Rule changes undone");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Rule undo is no longer available");
+    } finally {
+      setRuleLabBusy(false);
+    }
+  }
+  async function exportRules() {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch("/api/rules/export", { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "parcel-rules.json";
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice("Rules exported");
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Rules could not be exported");
+    }
+  }
+  async function importRules(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text()) as Record<string, unknown>;
+      const result = await apiFetch<{ imported: number; failures: Array<{ index: number; error: string }> }>("/api/rules/import", { method: "POST", body: JSON.stringify(payload) });
+      setNotice(`${result.imported} rule${result.imported === 1 ? "" : "s"} imported${result.failures.length ? ` · ${result.failures.length} skipped` : ""}`);
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Rules file could not be imported");
     }
   }
   async function createSignature() {
@@ -1703,9 +1815,14 @@ function SettingsPanel({
               <div className="setting-card-head">
                 <div>
                   <h3>Rules in order</h3>
-                  <p>Disable, reorder, edit, or run a rule against recent mail.</p>
+                  <p>Preview a rule first, then apply it with a short undo window.</p>
                 </div>
-                <span className="rule-count">{rules.length}</span>
+                <div className="rule-list-head-actions">
+                  <button className="text-button" onClick={() => void exportRules()} title="Download rules as JSON"><Download size={13} /> Export</button>
+                  <button className="text-button" onClick={() => ruleImportRef.current?.click()} title="Import rules from JSON"><Upload size={13} /> Import</button>
+                  <input ref={ruleImportRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void importRules(event)} />
+                  <span className="rule-count">{rules.length}</span>
+                </div>
               </div>
               {rules.length === 0 ? (
                 <div className="rule-empty">No rules yet. Build your first one on the left.</div>
@@ -1732,13 +1849,57 @@ function SettingsPanel({
                       <button className="icon-button compact-icon" disabled={index === 0} onClick={() => void reorderRule(index, -1)} aria-label="Move rule up" title="Move up"><ArrowUp size={14} /></button>
                       <button className="icon-button compact-icon" disabled={index === rules.length - 1} onClick={() => void reorderRule(index, 1)} aria-label="Move rule down" title="Move down"><ArrowDown size={14} /></button>
                       <button className="icon-button compact-icon" onClick={() => editRule(rule)} aria-label="Edit rule" title="Edit"><Pencil size={14} /></button>
-                      <button className="icon-button compact-icon" onClick={() => void runRule(rule)} aria-label="Run rule now" title="Run on existing mail"><Play size={14} /></button>
+                      <button className="icon-button compact-icon" onClick={() => void runRuleLab(rule, "preview")} aria-label="Preview rule" title="Preview existing mail"><Eye size={14} /></button>
                       <button className="icon-button compact-icon danger-icon" onClick={() => void deleteRule(rule)} aria-label="Delete rule" title="Delete"><Trash2 size={14} /></button>
                     </div>
                   </article>
                 );
               })}
             </div>
+            {ruleLab && (
+              <div className="setting-card rule-lab-panel" aria-live="polite">
+                <div className="setting-card-head">
+                  <div>
+                    <p className="eyebrow">RULE LAB</p>
+                    <h3>{ruleLab.rule.name}</h3>
+                    <p>{ruleLab.result.mode === "apply" ? `${ruleLab.result.changedCount} changed` : `${ruleLab.result.matchedCount} matching messages`} · {ruleLab.result.mode === "preview" ? "Preview only" : ruleLab.result.mode === "dry_run" ? "Dry-run only" : "Applied"}</p>
+                  </div>
+                  <button className="icon-button compact-icon" onClick={() => setRuleLab(null)} aria-label="Close rule lab"><X size={14} /></button>
+                </div>
+                {(ruleLab.result.conflicts || []).length > 0 && (
+                  <div className="rule-conflicts">
+                    {(ruleLab.result.conflicts || []).map((conflict, index) => (
+                      <div className={conflict.severity === "error" ? "rule-conflict error" : "rule-conflict"} key={`${conflict.message}-${index}`}>
+                        <AlertTriangle size={14} /> <span>{conflict.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {ruleLab.result.impact && (
+                  <div className="rule-impact-grid">
+                    <div><strong>{ruleLab.result.impact.total}</strong><span>matches</span></div>
+                    <div><strong>{Object.values(ruleLab.result.impact.folders).reduce((total, count) => total + count, 0)}</strong><span>folder moves</span></div>
+                    <div><strong>{ruleLab.result.impact.labels}</strong><span>labels</span></div>
+                    <div><strong>{ruleLab.result.impact.forwardCount}</strong><span>forwards skipped</span></div>
+                  </div>
+                )}
+                {ruleLab.result.matches && ruleLab.result.matches.length > 0 ? (
+                  <div className="rule-match-list">
+                    {ruleLab.result.matches.slice(0, 5).map((match) => (
+                      <div className="rule-match-item" key={match.id}>
+                        <div><strong>{match.subject}</strong><small>{match.fromAddress} · {match.folder}</small></div>
+                        <span title={match.reasons.join(" · ")}>{match.reasons[0] || "Matched"}</span>
+                      </div>
+                    ))}
+                    {ruleLab.result.matches.length > 5 && <small className="rule-muted">Showing 5 of {ruleLab.result.matches.length} matches.</small>}
+                  </div>
+                ) : <div className="rule-empty">No existing messages match this rule.</div>}
+                <div className="rule-lab-actions">
+                  <button className="secondary-button" onClick={() => void runRuleLab(ruleLab.rule, "dry-run")} disabled={ruleLabBusy}><History size={14} /> Dry-run</button>
+                  {ruleLab.result.mode !== "apply" ? <button className="primary-button" onClick={() => { if (window.confirm(`Apply “${ruleLab.rule.name}” to ${ruleLab.result.matchedCount} existing message${ruleLab.result.matchedCount === 1 ? "" : "s"}?`)) void applyRuleLab(); }} disabled={ruleLabBusy || !ruleLab.result.matchedCount || (ruleLab.result.conflicts || []).some((conflict) => conflict.severity === "error")}><Check size={14} /> Apply changes</button> : ruleLab.result.undoable ? <button className="secondary-button" onClick={() => void undoRuleLab()} disabled={ruleLabBusy}><RotateCcw size={14} /> Undo changes</button> : null}
+                </div>
+              </div>
+            )}
             <div className="setting-card">
               <h3>Signatures</h3>
               <input
@@ -1916,11 +2077,17 @@ function Workspace({
   mode,
   tasks,
   events,
+  workItems,
+  workSummary,
+  onOpenMessage,
   onRefresh,
 }: {
   mode: "calendar" | "tasks";
   tasks: Task[];
   events: CalendarEvent[];
+  workItems: WorkItem[];
+  workSummary: WorkSummary;
+  onOpenMessage: (message: Message) => void;
   onRefresh: () => void;
 }) {
   const [title, setTitle] = useState("");
@@ -1997,7 +2164,7 @@ function Workspace({
               </>
             ) : (
               <>
-                <ListTodo size={23} /> To Do
+                <Briefcase size={23} /> Work
               </>
             )}
           </h1>
@@ -2005,10 +2172,18 @@ function Workspace({
         <div className="workspace-stamp">
           {mode === "calendar"
             ? "Events from email can become appointments."
-            : "Turn a message into a next action."}
+            : "Keep promises, follow-ups, and next actions in one queue."}
         </div>
       </div>
       {error && <div className="inline-error workspace-error">{error}</div>}
+      {mode === "tasks" && (
+        <div className="work-summary" aria-label="Work summary">
+          <div className="work-summary-card"><span>Reply later</span><strong>{workSummary.reply_later}</strong></div>
+          <div className="work-summary-card"><span>Waiting on</span><strong>{workSummary.waiting_on}</strong></div>
+          <div className="work-summary-card"><span>I owe</span><strong>{workSummary.i_owe}</strong></div>
+          <div className={`work-summary-card ${workSummary.overdue ? "overdue" : ""}`}><span>Overdue</span><strong>{workSummary.overdue}</strong></div>
+        </div>
+      )}
       <div className="workspace-grid">
         <div className="setting-card workspace-create">
           <h3>{mode === "calendar" ? "Add an event" : "Add a task"}</h3>
@@ -2049,32 +2224,28 @@ function Workspace({
                 <p>No events yet.</p>
               </div>
             )
-          ) : tasks.length ? (
-            tasks.map((task) => (
-              <label
-                className={`task-card ${task.completed ? "completed" : ""}`}
-                key={task.id}
-              >
-                <input
-                  type="checkbox"
-                  checked={task.completed}
-                  onChange={() => void toggleTask(task)}
-                />
-                <span>
-                  <strong>{task.title}</strong>
-                  <small>
-                    {task.due_at
-                      ? `Due ${new Date(task.due_at).toLocaleString()}`
-                      : "No due date"}
-                  </small>
-                </span>
-              </label>
-            ))
           ) : (
-            <div className="list-empty">
-              <ListTodo size={25} />
-              <p>No tasks yet.</p>
-            </div>
+            <>
+              <div className="work-queue-head"><div><p className="eyebrow">MESSAGE QUEUE</p><h3>Follow-ups</h3></div><span>{workItems.length} open</span></div>
+              {workItems.length ? workItems.map((item) => (
+                <article className={`work-item ${item.overdue ? "overdue" : ""}`} key={item.id}>
+                  <button onClick={() => onOpenMessage(item)} className="work-item-main">
+                    <span className="work-state-label">{workStateLabel(item.work_state)}</span>
+                    <strong>{item.subject || "(no subject)"}</strong>
+                    <small>{item.from_address} · {workDueLabel(item.follow_up_at)}</small>
+                    {item.work_note && <em>{item.work_note}</em>}
+                  </button>
+                  <button className="icon-button compact-icon" onClick={() => onOpenMessage(item)} aria-label={`Open ${item.subject || "message"}`} title="Open message"><ArrowDown size={14} className="open-work-icon" /></button>
+                </article>
+              )) : <div className="list-empty compact-empty"><Briefcase size={25} /><p>No message follow-ups yet.</p><small>Use Reply later, Waiting on, or I owe from a message.</small></div>}
+              <div className="work-queue-head task-queue-head"><div><p className="eyebrow">TASKS</p><h3>To Do</h3></div><span>{tasks.filter((task) => !task.completed).length} open</span></div>
+              {tasks.length ? tasks.map((task) => (
+                <label className={`task-card ${task.completed ? "completed" : ""}`} key={task.id}>
+                  <input type="checkbox" checked={task.completed} onChange={() => void toggleTask(task)} />
+                  <span><strong>{task.title}</strong><small>{task.due_at ? `Due ${new Date(task.due_at).toLocaleString()}` : "No due date"}</small></span>
+                </label>
+              )) : <div className="list-empty compact-empty"><ListTodo size={25} /><p>No tasks yet.</p></div>}
+            </>
           )}
         </div>
       </div>
@@ -2101,6 +2272,8 @@ function MailboxApp({ session }: { session: Session }) {
   });
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
+  const [workSummary, setWorkSummary] = useState<WorkSummary>({ reply_later: 0, waiting_on: 0, i_owe: 0, overdue: 0, total: 0 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
@@ -2206,12 +2379,16 @@ function MailboxApp({ session }: { session: Session }) {
   }, [bulkUndo]);
   const loadWorkspace = useCallback(async () => {
     try {
-      const [taskRows, eventRows] = await Promise.all([
+      const [taskRows, eventRows, workRows, summary] = await Promise.all([
         apiFetch<Task[]>("/api/tasks"),
         apiFetch<CalendarEvent[]>("/api/calendar"),
+        apiFetch<WorkItem[]>("/api/work"),
+        apiFetch<WorkSummary>("/api/work/summary"),
       ]);
       setTasks(taskRows);
       setEvents(eventRows);
+      setWorkItems(workRows);
+      setWorkSummary(summary);
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -2453,6 +2630,8 @@ function MailboxApp({ session }: { session: Session }) {
     return () => window.clearTimeout(timer);
   }, [query, filter, sort, folder, view, loadMessages]);
   async function openMessage(message: Message) {
+    setView("mail");
+    if (["inbox", "sent", "drafts", "archive", "trash", "spam"].includes(message.folder)) setFolder(message.folder as ViewKey);
     setSelectedId(message.id);
     setShowAllThreadMessages(false);
     setShowMessageDetails(false);
@@ -2488,6 +2667,7 @@ function MailboxApp({ session }: { session: Session }) {
         body: JSON.stringify(body),
       });
       await loadMessages(folder, false);
+      if (body.workState !== undefined || body.followUpAt !== undefined || body.workNote !== undefined) void loadWorkspace();
       if (typeof body.folder === "string" || typeof body.snoozedUntil === "string") {
         setSelected(null);
         setSelectedId(null);
@@ -2808,8 +2988,10 @@ function MailboxApp({ session }: { session: Session }) {
             className={view === "tasks" ? "active folder-link" : "folder-link"}
             onClick={() => setView("tasks")}
           >
-            <ListTodo size={17} />
-            <span>To Do</span>
+            <Briefcase size={17} />
+            <span>Work</span>
+            {workSummary.total > 0 && <em className="nav-count">{workSummary.total}</em>}
+            {workSummary.overdue > 0 && <em className="nav-overdue">{workSummary.overdue} due</em>}
           </button>
         </nav>
         <div className="sidebar-spacer" />
@@ -3191,6 +3373,13 @@ function MailboxApp({ session }: { session: Session }) {
                     <span>This message is in Trash. Restore it to its previous folder or delete it permanently.</span>
                   </div>
                 )}
+                {selected.work_state && selected.work_state !== "none" && (
+                  <div className={`work-state-callout ${selected.follow_up_at && new Date(selected.follow_up_at).getTime() <= Date.now() ? "overdue" : ""}`}>
+                    <Briefcase size={15} />
+                    <div><strong>{workStateLabel(selected.work_state)}</strong><span>{workDueLabel(selected.follow_up_at)}{selected.work_note ? ` · ${selected.work_note}` : ""}</span></div>
+                    <button className="text-button" onClick={() => void mutateMessage({ workState: "none" })}>Clear</button>
+                  </div>
+                )}
                 <div className="sender-line">
                   {(() => {
                     const sender = senderForMessage(selected, contacts, mailboxes);
@@ -3354,6 +3543,18 @@ function MailboxApp({ session }: { session: Session }) {
                             <button role="menuitem" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}>
                               <Flag size={15} /> {selected.is_flagged ? "Unflag" : "Flag"}
                             </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "reply_later" })}>
+                              <Clock3 size={15} /> Reply later
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "waiting_on" })}>
+                              <Users size={15} /> Waiting on
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "i_owe" })}>
+                              <Briefcase size={15} /> I owe
+                            </button>
+                            {selected.work_state && selected.work_state !== "none" && <button role="menuitem" onClick={() => void mutateMessage({ workState: "none" })}>
+                              <Check size={15} /> Clear work state
+                            </button>}
                           </div>
                         )}
                       </div>
@@ -3369,6 +3570,9 @@ function MailboxApp({ session }: { session: Session }) {
           mode={view}
           tasks={tasks}
           events={events}
+          workItems={workItems}
+          workSummary={workSummary}
+          onOpenMessage={(message) => void openMessage(message)}
           onRefresh={() => {
             void loadWorkspace();
           }}
