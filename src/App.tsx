@@ -395,8 +395,18 @@ async function apiUpload<T>(path: string, file: File): Promise<T> {
   return payload as T;
 }
 
+async function publicApiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
+  return payload as T;
+}
+
 function AuthScreen() {
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -409,15 +419,23 @@ function AuthScreen() {
     setNotice("");
     try {
       const client = requireSupabase();
-      const result =
-        mode === "signin"
+      if (mode === "forgot") {
+        const redirectTo = window.location.origin;
+        const reset = await client.auth.resetPasswordForEmail(email, { redirectTo });
+        if (reset.error) throw reset.error;
+        await publicApiFetch("/api/auth/recovery-request", {
+          method: "POST",
+          body: JSON.stringify({ email }),
+        }).catch(() => undefined);
+        setNotice("If that address is registered, a reset link will arrive shortly. Check your inbox and spam folder.");
+      } else {
+        const result = mode === "signin"
           ? await client.auth.signInWithPassword({ email, password })
           : await client.auth.signUp({ email, password });
-      if (result.error) throw result.error;
-      if (mode === "signup" && !result.data.session)
-        setNotice(
-          "Check your inbox to confirm the account, then sign in here.",
-        );
+        if (result.error) throw result.error;
+        if (mode === "signup" && !result.data.session)
+          setNotice("Check your inbox to confirm the account, then sign in here.");
+      }
     } catch (authError) {
       setError(
         authError instanceof Error
@@ -433,10 +451,11 @@ function AuthScreen() {
       <section className="auth-card">
         <div className="brand-mark">P</div>
         <p className="eyebrow">PRIVATE MAIL / {new Date().getFullYear()}</p>
-        <h1>Keep your address close.</h1>
+        <h1>{mode === "forgot" ? "Get back in safely." : "Keep your address close."}</h1>
         <p className="auth-copy">
-          A focused mailbox for your custom domain. Sign in to open messages
-          across desktop and mobile.
+          {mode === "forgot"
+            ? "We’ll send a one-time reset link to your sign-in address or a verified recovery email."
+            : "A focused mailbox for your custom domain. Sign in to open messages across desktop and mobile."}
         </p>
         <form onSubmit={submit} className="auth-form">
           <label>
@@ -450,38 +469,29 @@ function AuthScreen() {
               autoComplete="email"
             />
           </label>
-          <label>
-            Password
-            <input
-              type="password"
-              required
-              minLength={6}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 6 characters"
-              autoComplete={
-                mode === "signin" ? "current-password" : "new-password"
-              }
-            />
-          </label>
+          {mode !== "forgot" && <label>
+              Password
+              <input
+                type="password"
+                required
+                minLength={mode === "signup" ? 12 : 6}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder={mode === "signup" ? "12+ characters with a number" : "Your password"}
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              />
+            </label>}
           {error && <div className="form-error">{error}</div>}
           {notice && <div className="form-notice">{notice}</div>}
           <button className="primary-button" disabled={busy}>
-            {busy
-              ? "Opening…"
-              : mode === "signin"
-                ? "Open mailbox"
-                : "Create account"}
+            {busy ? "Working…" : mode === "forgot" ? "Send reset link" : mode === "signin" ? "Open mailbox" : "Create account"}
           </button>
         </form>
-        <button
-          className="text-button"
-          onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-        >
-          {mode === "signin"
-            ? "Need an account? Create one"
-            : "Already have an account? Sign in"}
+        {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("forgot"); setError(""); setNotice(""); }}>Forgot your password?</button>}
+        <button className="text-button" onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setNotice(""); }}>
+          {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
         </button>
+        {mode === "forgot" && <button className="text-button" onClick={() => { setMode("signin"); setError(""); setNotice(""); }}>Back to sign in</button>}
       </section>
       <aside className="auth-aside">
         <div className="aside-note">
@@ -497,6 +507,98 @@ function AuthScreen() {
         </p>
       </aside>
     </main>
+  );
+}
+
+function PasswordResetScreen({ onComplete }: { onComplete: () => void }) {
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [completed, setCompleted] = useState(false);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    if (password.length < 12 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      setError("Use at least 12 characters with at least one letter and one number.");
+      return;
+    }
+    if (password !== confirmation) {
+      setError("The passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await requireSupabase().auth.updateUser({ password });
+      if (result.error) throw result.error;
+      setNotice("Password updated. Sign in again with your new password.");
+      setCompleted(true);
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : "Could not update your password");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="brand-mark">P</div>
+        <p className="eyebrow">ACCOUNT RECOVERY</p>
+        <h1>Choose a new password.</h1>
+        <p className="auth-copy">This link is temporary. Set a strong password, then sign in again on your other devices.</p>
+        <form onSubmit={submit} className="auth-form">
+          <label>New password<input type="password" required minLength={12} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" placeholder="12+ characters with a number" /></label>
+          <label>Confirm new password<input type="password" required minLength={12} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" placeholder="Type it again" /></label>
+          {error && <div className="form-error">{error}</div>}
+          {notice && <div className="form-notice">{notice}</div>}
+          {completed ? <button type="button" className="primary-button" onClick={onComplete}>Continue to mailbox</button> : <button className="primary-button" disabled={busy}>{busy ? "Updating…" : "Update password"}</button>}
+        </form>
+      </section>
+      <aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> protected recovery</div><p className="aside-quote">One link. One new password. Back to your mailbox.</p><p className="aside-meta">Parcel never reveals whether an email address has an account.</p></aside>
+    </main>
+  );
+}
+
+type MfaFactor = { id: string; friendly_name?: string; factor_type: "totp" | "phone"; status: "verified" | "unverified" | string };
+type RecoveryMethod = { id: string; email_masked: string; verified_at: string | null; pending: boolean; last_sent_at?: string | null };
+
+function MfaChallengeScreen({ onVerified }: { onVerified: () => void }) {
+  const [factors, setFactors] = useState<MfaFactor[]>([]);
+  const [factorId, setFactorId] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    void requireSupabase().auth.mfa.listFactors().then(({ data, error: loadError }) => {
+      if (loadError) setError(loadError.message);
+      const verified = ([...(data?.totp || []), ...(data?.phone || [])] as MfaFactor[]).filter((item) => item.status === "verified");
+      setFactors(verified);
+      setFactorId(verified[0]?.id || "");
+    });
+  }, []);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!factorId || code.replace(/\D/g, "").length !== 6) { setError("Enter the six-digit code from your authenticator app."); return; }
+    setBusy(true);
+    setError("");
+    try {
+      const challenge = await requireSupabase().auth.mfa.challenge({ factorId });
+      if (challenge.error) throw challenge.error;
+      const verified = await requireSupabase().auth.mfa.verify({ factorId, challengeId: challenge.data.id, code: code.replace(/\D/g, "") });
+      if (verified.error) throw verified.error;
+      const refreshed = await requireSupabase().auth.refreshSession();
+      if (refreshed.error) throw refreshed.error;
+      onVerified();
+    } catch (mfaError) {
+      setError(mfaError instanceof Error ? mfaError.message : "That code was not accepted");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <main className="auth-shell"><section className="auth-card"><div className="brand-mark">P</div><p className="eyebrow">SECOND STEP</p><h1>Confirm it’s you.</h1><p className="auth-copy">Open your authenticator app and enter the six-digit code to continue to Parcel.</p>{factors.length > 1 && <label>Authenticator<select value={factorId} onChange={(event) => setFactorId(event.target.value)}>{factors.map((factor) => <option key={factor.id} value={factor.id}>{factor.friendly_name || "Authenticator app"}</option>)}</select></label>}<form onSubmit={submit} className="auth-form"><label>Authentication code<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" /></label>{error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={busy || !factorId}>{busy ? "Checking…" : "Verify and open mailbox"}</button></form><button className="text-button" onClick={() => void requireSupabase().auth.signOut()}>Sign out</button></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> two-step verification</div><p className="aside-quote">Your password is only the first lock.</p><p className="aside-meta">Keep your authenticator app available. Recovery email is for resetting access, not a replacement for the second factor.</p></aside></main>
   );
 }
 
@@ -984,6 +1086,7 @@ function actionMode(actions: Record<string, unknown>, key: string): "ignore" | "
 }
 
 function SettingsPanel({
+  session,
   settings,
   folders,
   labels,
@@ -993,6 +1096,7 @@ function SettingsPanel({
   onClose,
   onChanged,
 }: {
+  session: Session;
   settings: AppSettings;
   folders: CustomFolder[];
   labels: Label[];
@@ -1004,6 +1108,7 @@ function SettingsPanel({
 }) {
   const [tab, setTab] = useState<
     | "appearance"
+    | "security"
     | "organize"
     | "contacts"
     | "spam"
@@ -1049,6 +1154,15 @@ function SettingsPanel({
     body: "",
   });
   const [notice, setNotice] = useState("");
+  const [securityError, setSecurityError] = useState("");
+  const [securityBusy, setSecurityBusy] = useState(false);
+  const [recoveryMethods, setRecoveryMethods] = useState<RecoveryMethod[]>([]);
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [verificationId, setVerificationId] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState("");
+  const [mfaFactors, setMfaFactors] = useState<MfaFactor[]>([]);
+  const [mfaSetup, setMfaSetup] = useState<{ id: string; qrCode: string; secret: string; uri: string } | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
   const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
   const [ruleLabBusy, setRuleLabBusy] = useState(false);
   const ruleImportRef = useRef<HTMLInputElement>(null);
@@ -1396,6 +1510,145 @@ function SettingsPanel({
     });
     setNotice("Automatic reply saved");
   }
+  async function loadSecurity() {
+    setSecurityError("");
+    try {
+      const [methods, factorsResult] = await Promise.all([
+        apiFetch<RecoveryMethod[]>("/api/recovery-methods"),
+        requireSupabase().auth.mfa.listFactors(),
+      ]);
+      if (factorsResult.error) throw factorsResult.error;
+      setRecoveryMethods(methods);
+      setMfaFactors(([...(factorsResult.data?.totp || []), ...(factorsResult.data?.phone || [])] as MfaFactor[]).filter((factor) => factor.status === "verified"));
+    } catch (loadError) {
+      setSecurityError(loadError instanceof Error ? loadError.message : "Security settings unavailable");
+    }
+  }
+  async function sendPrimaryReset() {
+    setSecurityBusy(true);
+    setSecurityError("");
+    try {
+      const result = await requireSupabase().auth.resetPasswordForEmail(session.user.email || "", { redirectTo: window.location.origin });
+      if (result.error) throw result.error;
+      setNotice("A password reset link was sent to your sign-in email");
+    } catch (resetError) {
+      setSecurityError(resetError instanceof Error ? resetError.message : "Could not send a reset link");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function addRecoveryEmail() {
+    if (!recoveryEmail.trim()) return;
+    setSecurityBusy(true);
+    setSecurityError("");
+    try {
+      const method = await apiFetch<RecoveryMethod>("/api/recovery-methods", { method: "POST", body: JSON.stringify({ email: recoveryEmail }) });
+      setRecoveryEmail("");
+      setVerificationId(method.id);
+      setVerificationCode("");
+      setNotice(`Verification code sent to ${method.email_masked}`);
+      await loadSecurity();
+    } catch (addError) {
+      setSecurityError(addError instanceof Error ? addError.message : "Could not add that recovery email");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function verifyRecoveryEmail() {
+    if (!verificationId) return;
+    setSecurityBusy(true);
+    setSecurityError("");
+    try {
+      await apiFetch(`/api/recovery-methods/${verificationId}/verify`, { method: "POST", body: JSON.stringify({ code: verificationCode }) });
+      setVerificationId(null);
+      setVerificationCode("");
+      setNotice("Recovery email verified");
+      await loadSecurity();
+    } catch (verifyError) {
+      setSecurityError(verifyError instanceof Error ? verifyError.message : "Could not verify that code");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function removeRecoveryEmail(method: RecoveryMethod) {
+    if (!window.confirm(`Remove ${method.email_masked} as a recovery email?`)) return;
+    setSecurityBusy(true);
+    try {
+      await apiFetch(`/api/recovery-methods/${method.id}`, { method: "DELETE" });
+      if (verificationId === method.id) setVerificationId(null);
+      setNotice("Recovery email removed");
+      await loadSecurity();
+    } catch (removeError) {
+      setSecurityError(removeError instanceof Error ? removeError.message : "Could not remove that recovery email");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function beginMfaSetup() {
+    setSecurityBusy(true);
+    setSecurityError("");
+    try {
+      const result = await requireSupabase().auth.mfa.enroll({ factorType: "totp", friendlyName: "Parcel authenticator" });
+      if (result.error) throw result.error;
+      setMfaSetup({ id: result.data.id, qrCode: result.data.totp.qr_code, secret: result.data.totp.secret, uri: result.data.totp.uri });
+      setMfaCode("");
+    } catch (enrollError) {
+      setSecurityError(enrollError instanceof Error ? enrollError.message : "Could not start authenticator setup");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function verifyMfaSetup() {
+    if (!mfaSetup) return;
+    setSecurityBusy(true);
+    setSecurityError("");
+    try {
+      const challenge = await requireSupabase().auth.mfa.challenge({ factorId: mfaSetup.id });
+      if (challenge.error) throw challenge.error;
+      const result = await requireSupabase().auth.mfa.verify({ factorId: mfaSetup.id, challengeId: challenge.data.id, code: mfaCode.replace(/\D/g, "") });
+      if (result.error) throw result.error;
+      const refreshed = await requireSupabase().auth.refreshSession();
+      if (refreshed.error) throw refreshed.error;
+      setMfaSetup(null);
+      setMfaCode("");
+      setNotice("Two-step verification is now on");
+      await loadSecurity();
+    } catch (verifyError) {
+      setSecurityError(verifyError instanceof Error ? verifyError.message : "That authenticator code was not accepted");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function cancelMfaSetup() {
+    if (!mfaSetup) return;
+    setSecurityBusy(true);
+    try {
+      await requireSupabase().auth.mfa.unenroll({ factorId: mfaSetup.id });
+      setMfaSetup(null);
+      setMfaCode("");
+      setNotice("Authenticator setup cancelled");
+      await loadSecurity();
+    } catch (cancelError) {
+      setSecurityError(cancelError instanceof Error ? cancelError.message : "Could not cancel authenticator setup");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+  async function removeMfaFactor(factor: MfaFactor) {
+    if (!window.confirm(`Remove ${factor.friendly_name || "this authenticator"}? You will need to set up 2FA again to protect the account.`)) return;
+    setSecurityBusy(true);
+    try {
+      const result = await requireSupabase().auth.mfa.unenroll({ factorId: factor.id });
+      if (result.error) throw result.error;
+      await requireSupabase().auth.refreshSession();
+      setNotice("Authenticator removed");
+      await loadSecurity();
+    } catch (removeError) {
+      setSecurityError(removeError instanceof Error ? removeError.message : "Could not remove that authenticator");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
   useEffect(() => {
     if (tab !== "automation") return;
     void apiFetch<AutoReply[]>("/api/auto-replies")
@@ -1409,6 +1662,9 @@ function SettingsPanel({
             : "Automatic reply unavailable",
         ),
       );
+  }, [tab]);
+  useEffect(() => {
+    if (tab === "security") void loadSecurity();
   }, [tab]);
   return (
     <div className="modal-backdrop">
@@ -1430,6 +1686,7 @@ function SettingsPanel({
           {(
             [
               ["appearance", "Appearance"],
+              ["security", "Security & access"],
               ["organize", "Folders & labels"],
               ["contacts", "Contacts"],
               ["spam", "Spam & trust"],
@@ -1447,6 +1704,58 @@ function SettingsPanel({
             </button>
           ))}
         </div>
+        {tab === "security" && (
+          <div className="settings-grid security-settings-grid">
+            <div className="setting-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Password</h3>
+                  <p>Send a one-time password reset link to your sign-in email.</p>
+                </div>
+                <ShieldAlert size={18} aria-hidden="true" />
+              </div>
+              <div className="security-email">{session.user.email || "Your sign-in email"}</div>
+              <button className="secondary-button" onClick={() => void sendPrimaryReset()} disabled={securityBusy}><Mail size={15} /> Send reset link</button>
+            </div>
+            <div className="setting-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Two-step verification</h3>
+                  <p>Use an authenticator app after your password. Parcel will require it at every new sign-in.</p>
+                </div>
+                <span className={`security-status ${mfaFactors.length ? "enabled" : ""}`}>{mfaFactors.length ? "On" : "Off"}</span>
+              </div>
+              {mfaFactors.length === 0 && !mfaSetup && <button className="secondary-button" onClick={() => void beginMfaSetup()} disabled={securityBusy}><ShieldAlert size={15} /> Set up authenticator app</button>}
+              {mfaFactors.map((factor) => <div className="settings-item security-factor" key={factor.id}><div><strong>{factor.friendly_name || (factor.factor_type === "totp" ? "Authenticator app" : "Phone")}</strong><small>Verified · {factor.factor_type.toUpperCase()}</small></div><button className="text-button danger-text-button" onClick={() => void removeMfaFactor(factor)} disabled={securityBusy}>Remove</button></div>)}
+              {mfaSetup && <div className="mfa-enrollment">
+                <strong>Scan this QR code</strong>
+                <small>Use Google Authenticator, Microsoft Authenticator, 1Password, or another TOTP app.</small>
+                <img className="mfa-qr" src={`data:image/svg+xml;utf8,${encodeURIComponent(mfaSetup.qrCode)}`} alt="QR code for authenticator setup" />
+                <details><summary>Can’t scan? Use the setup key</summary><code>{mfaSetup.secret}</code></details>
+                <input inputMode="numeric" autoComplete="one-time-code" value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Enter the six-digit code" aria-label="Authenticator verification code" />
+                <div className="security-actions"><button className="primary-button" onClick={() => void verifyMfaSetup()} disabled={securityBusy || mfaCode.length !== 6}>Verify and turn on</button><button className="text-button" onClick={() => void cancelMfaSetup()} disabled={securityBusy}>Cancel</button></div>
+              </div>}
+            </div>
+            <div className="setting-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Recovery emails</h3>
+                  <p>Add other working addresses for password recovery. Every address must be verified before it can be used.</p>
+                </div>
+                <span className="rule-count">{recoveryMethods.filter((method) => method.verified_at).length}/5</span>
+              </div>
+              <div className="inline-form security-recovery-form"><input type="email" value={recoveryEmail} onChange={(event) => setRecoveryEmail(event.target.value)} placeholder="backup@example.com" aria-label="Recovery email address" /><button className="secondary-button" onClick={() => void addRecoveryEmail()} disabled={securityBusy}><Plus size={15} /> Add</button></div>
+              {recoveryMethods.length === 0 && <div className="rule-empty">No recovery email added yet.</div>}
+              {recoveryMethods.map((method) => <div className="settings-item security-factor" key={method.id}><div><strong>{method.email_masked}</strong><small>{method.verified_at ? "Verified recovery email" : "Verification needed"}</small></div><div className="security-actions"><button className="text-button danger-text-button" onClick={() => void removeRecoveryEmail(method)} disabled={securityBusy}>Remove</button>{!method.verified_at && <button className="text-button" onClick={() => { setVerificationId(method.id); setVerificationCode(""); }}>Verify</button>}</div></div>)}
+              {verificationId && <div className="verification-box"><strong>Enter the code we sent</strong><small>Check the recovery inbox for a six-digit code.</small><input inputMode="numeric" autoComplete="one-time-code" value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" aria-label="Recovery email verification code" /><button className="primary-button" onClick={() => void verifyRecoveryEmail()} disabled={securityBusy || verificationCode.length !== 6}>Verify recovery email</button></div>}
+            </div>
+            <div className="setting-card">
+              <h3>How recovery works</h3>
+              <p>Parcel keeps your recovery addresses separate from your sign-in email. A recovery request never reveals whether an account exists, and every reset link is one-time.</p>
+              <small className="field-help">Keep at least one recovery address available and store your authenticator app on a device you control. Recovery email can reset access; it cannot bypass an enabled authenticator challenge.</small>
+            </div>
+          </div>
+        )}
         {tab === "appearance" && (
           <div className="settings-grid">
             <div className="setting-card">
@@ -3692,6 +4001,7 @@ function MailboxApp({ session }: { session: Session }) {
       )}
       {settingsOpen && (
         <SettingsPanel
+          session={session}
           settings={settings}
           folders={folders}
           labels={labels}
@@ -3711,6 +4021,8 @@ function MailboxApp({ session }: { session: Session }) {
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
+  const [recovering, setRecovering] = useState(false);
+  const [mfaRequired, setMfaRequired] = useState(false);
   useEffect(() => {
     if (!supabase) {
       setReady(true);
@@ -3718,13 +4030,33 @@ export default function App() {
     }
     void supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      setRecovering(hashParams.get("type") === "recovery");
       setReady(true);
     });
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, nextSession) => setSession(nextSession),
+      (event, nextSession) => {
+        if (event === "PASSWORD_RECOVERY") setRecovering(true);
+        if (event === "SIGNED_OUT") {
+          setRecovering(false);
+          setMfaRequired(false);
+        }
+        setSession(nextSession);
+      },
     );
     return () => listener.subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!session || recovering || !supabase) {
+      setMfaRequired(false);
+      return;
+    }
+    let active = true;
+    void supabase.auth.mfa.getAuthenticatorAssuranceLevel().then(({ data, error }) => {
+      if (active && !error) setMfaRequired(data.currentLevel === "aal1" && data.nextLevel === "aal2");
+    });
+    return () => { active = false; };
+  }, [session, recovering]);
   if (!ready)
     return (
       <div className="loading-screen">
@@ -3740,5 +4072,8 @@ export default function App() {
         <p>Add the public project URL and key to the deployment environment.</p>
       </div>
     );
-  return session ? <MailboxApp session={session} /> : <AuthScreen />;
+  if (recovering) return <PasswordResetScreen onComplete={() => setRecovering(false)} />;
+  if (!session) return <AuthScreen />;
+  if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
+  return <MailboxApp session={session} />;
 }
