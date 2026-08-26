@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { createClient } from "@supabase/supabase-js";
 import PostalMime from "postal-mime";
 import {
   buildWorkStatePatch,
@@ -24,6 +25,12 @@ import {
   normalizedSendFingerprint,
   type SendWarning,
 } from "./phase3.ts";
+import {
+  isRecent,
+  isValidRecoveryEmail,
+  maskRecoveryEmail,
+  normalizeRecoveryEmail,
+} from "./security.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -41,10 +48,11 @@ interface Env {
   BREVO_WEBHOOK_SECRET?: string;
   INTERNAL_TEST_TOKEN?: string;
   OUTLOOK_FORWARD_TO?: string;
+  DEFAULT_FROM_EMAIL?: string;
 }
 
 type JsonRecord = Record<string, unknown>;
-type User = { id: string; email?: string };
+type User = { id: string; email?: string; accessToken?: string; mfaRequired?: boolean };
 type Mailbox = { id: string; owner_id: string; address: string; display_name: string; is_default: boolean; can_send: boolean; can_receive: boolean; settings?: JsonRecord };
 type Rule = RuleDefinition & { id: string; owner_id: string; conditions: JsonRecord; actions: JsonRecord; enabled: boolean; priority: number };
 type StoredAttachment = { object_key: string; filename: string; content_type: string; detected_content_type: string; byte_size: number; sha256: string; preview_state: "ready" | "not_available"; safety_status: "unknown" | "suspicious" | "blocked"; safety_reasons: string[]; content_id?: string; disposition?: string | null };
@@ -99,6 +107,27 @@ async function dbRequest<T = unknown>(env: Env, path: string, init: RequestInit 
   return JSON.parse(body) as T;
 }
 
+function jwtPayload(token: string): JsonRecord {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return {};
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    return JSON.parse(atob(normalized)) as JsonRecord;
+  } catch {
+    return {};
+  }
+}
+
+async function verifiedFactorCount(env: Env, userId: string, token: string): Promise<number> {
+  void token;
+  const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+  const result = await client.auth.admin.mfa.listFactors({ userId });
+  if (result.error) throw result.error;
+  return (result.data?.factors || []).filter((factor) => factor.status === "verified").length;
+}
+
 async function probeSupabase(env: Env): Promise<{ ok: boolean; status: number; detail?: string }> {
   try {
     const response = await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?select=id&limit=1`, { headers: supabaseHeaders(env) });
@@ -113,7 +142,11 @@ async function getUser(request: Request, env: Env): Promise<User | null> {
   if (!authorization?.toLowerCase().startsWith("bearer ")) return null;
   const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: authorization } });
   if (!response.ok) return null;
-  return (await response.json()) as User;
+  const token = authorization.slice(7).trim();
+  const user = (await response.json()) as User;
+  const aal = jwtPayload(token).aal;
+  const mfaRequired = aal !== "aal2" && (await verifiedFactorCount(env, user.id, token)) > 0;
+  return { ...user, accessToken: token, mfaRequired };
 }
 
 function storageClient(env: Env): S3Client {
@@ -483,6 +516,140 @@ async function sendViaBrevo(env: Env, input: { fromAddress: string; to: string[]
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`Brevo ${response.status}: ${JSON.stringify(result).slice(0, 500)}`);
   return result as { messageId?: string };
+}
+
+type RecoveryMethodRow = {
+  id: string;
+  owner_id: string;
+  email: string;
+  verified_at: string | null;
+  verification_code_hash: string | null;
+  verification_expires_at: string | null;
+  verification_attempts: number;
+  last_sent_at: string | null;
+};
+
+type RecoveryRateLimitRow = {
+  email_hash: string;
+  window_started_at: string;
+  sent_count: number;
+  last_sent_at: string | null;
+};
+
+function recoveryMethodView(row: RecoveryMethodRow): JsonRecord {
+  return {
+    id: row.id,
+    email_masked: maskRecoveryEmail(row.email),
+    verified_at: row.verified_at,
+    pending: !row.verified_at,
+    last_sent_at: row.last_sent_at,
+  };
+}
+
+function recoveryCode(): string {
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return String(bytes[0] % 1_000_000).padStart(6, "0");
+}
+
+async function defaultFromAddress(env: Env, ownerId?: string): Promise<string> {
+  if (ownerId) {
+    const rows = await dbRequest<Array<{ address: string }>>(
+      env,
+      `mailboxes?owner_id=eq.${encodeURIComponent(ownerId)}&is_default=eq.true&select=address&limit=1`,
+    );
+    if (rows[0]?.address) return rows[0].address;
+  }
+  return env.DEFAULT_FROM_EMAIL || "james@jamesfontanilla.com";
+}
+
+async function generateRecoveryLink(env: Env, email: string, redirectTo: string): Promise<string> {
+  const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+  const result = await client.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo },
+  });
+  if (result.error) throw result.error;
+  const data = result.data as unknown as JsonRecord;
+  const properties = data.properties as JsonRecord | undefined;
+  const actionLink = String(properties?.action_link || data.action_link || "");
+  if (!actionLink) throw new Error("Supabase did not return a recovery link");
+  return actionLink;
+}
+
+async function recoveryRateLimit(env: Env, email: string): Promise<{ allowed: boolean; row: RecoveryRateLimitRow | null }> {
+  const emailHash = await sha256Hex(new TextEncoder().encode(email));
+  const rows = await dbRequest<RecoveryRateLimitRow[]>(
+    env,
+    `account_recovery_rate_limits?email_hash=eq.${encodeURIComponent(emailHash)}&limit=1`,
+  );
+  const row = rows[0] || null;
+  if (!row) return { allowed: true, row: null };
+  const windowActive = isRecent(row.window_started_at, 60 * 60 * 1000);
+  if (!windowActive) return { allowed: true, row };
+  return { allowed: row.sent_count < 5 && !isRecent(row.last_sent_at, 60 * 1000), row };
+}
+
+async function recordRecoverySend(env: Env, email: string, previous: RecoveryRateLimitRow | null): Promise<void> {
+  const emailHash = await sha256Hex(new TextEncoder().encode(email));
+  const activeWindow = previous && isRecent(previous.window_started_at, 60 * 60 * 1000);
+  await dbRequest(env, "account_recovery_rate_limits", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      email_hash: emailHash,
+      window_started_at: activeWindow ? previous.window_started_at : new Date().toISOString(),
+      sent_count: activeWindow ? previous.sent_count + 1 : 1,
+      last_sent_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }),
+  });
+}
+
+async function handleRecoveryRequest(request: Request, env: Env): Promise<Response> {
+  const generic = json({ ok: true, message: "If that address is registered, a recovery link will arrive shortly." }, 202);
+  let body: JsonRecord;
+  try {
+    body = (await request.json()) as JsonRecord;
+  } catch {
+    return generic;
+  }
+  const email = normalizeRecoveryEmail(String(body.email || ""));
+  if (!isValidRecoveryEmail(email)) return generic;
+  try {
+    const methods = await dbRequest<RecoveryMethodRow[]>(
+      env,
+      `account_recovery_methods?email=eq.${encodeURIComponent(email)}&verified_at=not.is.null&select=id,owner_id,email,verified_at,verification_code_hash,verification_expires_at,verification_attempts,last_sent_at&limit=1`,
+    );
+    const method = methods[0];
+    if (!method) return generic;
+    const rate = await recoveryRateLimit(env, email);
+    if (!rate.allowed) return generic;
+    const userResponse = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(method.owner_id)}`, {
+      headers: supabaseHeaders(env),
+    });
+    if (!userResponse.ok) return generic;
+    const authUser = await userResponse.json() as { email?: string };
+    const primaryEmail = normalizeRecoveryEmail(String(authUser.email || ""));
+    if (!isValidRecoveryEmail(primaryEmail)) return generic;
+    const redirectTo = new URL("/", request.url).toString();
+    const link = await generateRecoveryLink(env, primaryEmail, redirectTo);
+    const fromAddress = await defaultFromAddress(env, method.owner_id);
+    await sendViaBrevo(env, {
+      fromAddress,
+      to: [email],
+      subject: "Your Parcel password recovery link",
+      text: `Use this one-time link to reset your Parcel password:\n\n${link}\n\nIf you did not request this, you can ignore this email.`,
+      html: `<p>Use this one-time link to reset your Parcel password:</p><p><a href="${link}">Reset your Parcel password</a></p><p>If you did not request this, you can ignore this email.</p>`,
+    });
+    await recordRecoverySend(env, email, rate.row);
+  } catch {
+    // Keep this response indistinguishable from an unknown address.
+  }
+  return generic;
 }
 
 async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, envelopeTo: string, forwardInbound?: (address: string) => Promise<void>, ctx?: ExecutionContext): Promise<void> {
@@ -1010,10 +1177,88 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (rows[0]) { const status = statusMap[String(event.event || "").toLowerCase()]; if (status) await dbRequest(env, `messages?id=eq.${encodeURIComponent(rows[0].id)}`, { method: "PATCH", body: JSON.stringify({ status }) }); await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: rows[0].owner_id, message_id: rows[0].id, provider: "brevo", event_type: String(event.event || "unknown"), provider_message_id: providerMessageId, payload: event }) }); }
     return json({ ok: true });
   }
+  if (request.method === "POST" && url.pathname === "/api/auth/recovery-request") return handleRecoveryRequest(request, env);
   if (url.pathname === "/api/internal/send-test") { if (!env.INTERNAL_TEST_TOKEN || request.headers.get("x-internal-test-token") !== env.INTERNAL_TEST_TOKEN) return error("Unauthorized", 401); try { return await handleSend(env, null, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
   const user = await getUser(request, env);
   if (!user) return error("Sign in required", 401);
+  if (user.mfaRequired) return error("Complete two-step verification to continue", 401);
   const mailbox = await ensureProfileAndMailbox(env, user);
+
+  if (request.method === "GET" && url.pathname === "/api/recovery-methods") {
+    const rows = await dbRequest<RecoveryMethodRow[]>(
+      env,
+      `account_recovery_methods?owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`,
+    );
+    return json(rows.map(recoveryMethodView));
+  }
+  if (request.method === "POST" && url.pathname === "/api/recovery-methods") {
+    const body = (await request.json()) as JsonRecord;
+    const email = normalizeRecoveryEmail(String(body.email || ""));
+    if (!isValidRecoveryEmail(email)) return error("Enter a valid recovery email address");
+    if (email === normalizeRecoveryEmail(String(user.email || ""))) return error("Use an email address different from your sign-in email");
+    const existingRows = await dbRequest<RecoveryMethodRow[]>(
+      env,
+      `account_recovery_methods?owner_id=eq.${encodeURIComponent(user.id)}&email=eq.${encodeURIComponent(email)}&limit=1`,
+    );
+    const existing = existingRows[0];
+    if (existing?.verified_at) return error("That recovery email is already verified");
+    if (existing?.last_sent_at && isRecent(existing.last_sent_at, 60 * 1000)) return error("Wait a minute before sending another verification code");
+    if (!existing) {
+      const countRows = await dbRequest<Array<{ id: string }>>(
+        env,
+        `account_recovery_methods?owner_id=eq.${encodeURIComponent(user.id)}&select=id&limit=6`,
+      );
+      if (countRows.length >= 5) return error("You can add up to five recovery emails");
+    }
+    const code = recoveryCode();
+    const now = new Date().toISOString();
+    const patch: JsonRecord = {
+      email,
+      verification_code_hash: await sha256Hex(new TextEncoder().encode(code)),
+      verification_expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      verification_attempts: 0,
+      last_sent_at: now,
+      updated_at: now,
+    };
+    const rows = existing
+      ? await dbRequest<RecoveryMethodRow[]>(env, `account_recovery_methods?id=eq.${encodeURIComponent(existing.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) })
+      : await dbRequest<RecoveryMethodRow[]>(env, "account_recovery_methods", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, ...patch }) });
+    await sendViaBrevo(env, {
+      fromAddress: await defaultFromAddress(env, user.id),
+      to: [email],
+      subject: "Verify your Parcel recovery email",
+      text: `Your Parcel recovery email verification code is ${code}. It expires in 15 minutes. If you did not request this, you can ignore this email.`,
+      html: `<p>Your Parcel recovery email verification code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>It expires in 15 minutes. If you did not request this, you can ignore this email.</p>`,
+    });
+    return json(recoveryMethodView(rows[0] || { ...(existing || {}), ...patch, id: existing?.id || "", owner_id: user.id } as RecoveryMethodRow), existing ? 200 : 201);
+  }
+  const recoveryVerifyMatch = url.pathname.match(/^\/api\/recovery-methods\/([^/]+)\/verify$/);
+  if (request.method === "POST" && recoveryVerifyMatch) {
+    const rows = await dbRequest<RecoveryMethodRow[]>(
+      env,
+      `account_recovery_methods?id=eq.${encodeURIComponent(recoveryVerifyMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`,
+    );
+    const method = rows[0];
+    if (!method) return error("Recovery email not found", 404);
+    if (method.verified_at) return json(recoveryMethodView(method));
+    if (!method.verification_expires_at || new Date(method.verification_expires_at).getTime() <= Date.now()) return error("That code has expired. Send a new one.");
+    if (method.verification_attempts >= 5) return error("Too many attempts. Send a new code.");
+    const body = (await request.json()) as JsonRecord;
+    const code = String(body.code || "").replace(/\D/g, "");
+    if (code.length !== 6) return error("Enter the six-digit code");
+    const candidate = await sha256Hex(new TextEncoder().encode(code));
+    if (candidate !== method.verification_code_hash) {
+      await dbRequest(env, `account_recovery_methods?id=eq.${encodeURIComponent(method.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ verification_attempts: method.verification_attempts + 1, updated_at: new Date().toISOString() }) });
+      return error("That code is not correct");
+    }
+    const verifiedRows = await dbRequest<RecoveryMethodRow[]>(env, `account_recovery_methods?id=eq.${encodeURIComponent(method.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ verified_at: new Date().toISOString(), verification_code_hash: null, verification_expires_at: null, verification_attempts: 0, updated_at: new Date().toISOString() }) });
+    return json(recoveryMethodView(verifiedRows[0] || { ...method, verified_at: new Date().toISOString() }));
+  }
+  const recoveryMethodMatch = url.pathname.match(/^\/api\/recovery-methods\/([^/]+)$/);
+  if (request.method === "DELETE" && recoveryMethodMatch) {
+    await dbRequest(env, `account_recovery_methods?id=eq.${encodeURIComponent(recoveryMethodMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" });
+    return json({ ok: true });
+  }
 
   if (request.method === "GET" && url.pathname === "/api/mailboxes") return json(await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&order=is_default.desc,created_at.asc`));
   if (request.method === "POST" && url.pathname === "/api/mailboxes") { const body = (await request.json()) as JsonRecord; const address = cleanAddress(String(body.address || "")); if (!address.includes("@")) return error("Enter a valid email address"); const rows = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: false }) }); return json(rows[0], 201); }
