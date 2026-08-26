@@ -13,6 +13,7 @@ import {
   ArrowDown,
   ArrowUp,
   Bell,
+  Bookmark,
   CalendarDays,
   Check,
   ChevronDown,
@@ -112,6 +113,22 @@ type Mailbox = {
 };
 type CustomFolder = { id: string; name: string; color: string; slug: string };
 type Label = { id: string; name: string; color: string };
+type SavedSearch = {
+  id: string;
+  name: string;
+  query: string;
+  color: string;
+  sort_order: number;
+  result_count?: number | null;
+};
+type MailPage = {
+  items: Message[];
+  total: number | null;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  normalizedQuery?: string;
+};
 type SenderPolicy = {
   id: string;
   mailbox_id?: string | null;
@@ -2076,6 +2093,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [signatures, setSignatures] = useState<Signature[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [senderPolicies, setSenderPolicies] = useState<SenderPolicy[]>([]);
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [settings, setSettings] = useState<AppSettings>({
     theme: "light",
     density: "comfortable",
@@ -2100,10 +2118,26 @@ function MailboxApp({ session }: { session: Session }) {
   const [showMessageDetails, setShowMessageDetails] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [trashBusy, setTrashBusy] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectAllResults, setSelectAllResults] = useState(false);
+  const [bulkAction, setBulkAction] = useState("archive");
+  const [bulkFolder, setBulkFolder] = useState("archive");
+  const [bulkLabelId, setBulkLabelId] = useState("");
+  const [bulkPriority, setBulkPriority] = useState("1");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkNotice, setBulkNotice] = useState("");
+  const [bulkUndo, setBulkUndo] = useState<{ requestId: string; label: string } | null>(null);
+  const [savedSearchFormOpen, setSavedSearchFormOpen] = useState(false);
+  const [savedSearchName, setSavedSearchName] = useState("");
+  const [savedSearchBusy, setSavedSearchBusy] = useState(false);
+  const [activeSavedSearchId, setActiveSavedSearchId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [resultTotal, setResultTotal] = useState<number | null>(null);
   const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
-      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, policyRows, preference] =
+      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, policyRows, preference, savedRows] =
         await Promise.all([
           apiFetch<Mailbox[]>("/api/mailboxes"),
           apiFetch<Contact[]>("/api/contacts"),
@@ -2113,6 +2147,7 @@ function MailboxApp({ session }: { session: Session }) {
           apiFetch<Rule[]>("/api/rules"),
           apiFetch<SenderPolicy[]>("/api/sender-policies").catch(() => []),
           apiFetch<AppSettings>("/api/settings"),
+          apiFetch<SavedSearch[]>("/api/saved-searches?counts=true").catch(() => []),
         ]);
       setMailboxes(addresses);
       setContacts(contactRows);
@@ -2122,6 +2157,7 @@ function MailboxApp({ session }: { session: Session }) {
       setRules(ruleRows);
       setSenderPolicies(policyRows);
       setSettings(preference);
+      setSavedSearches(savedRows);
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -2131,22 +2167,26 @@ function MailboxApp({ session }: { session: Session }) {
     }
   }, []);
   const loadMessages = useCallback(
-    async (target: ViewKey = folder, showLoading = true) => {
+    async (target: ViewKey = folder, showLoading = true, pageNumber = 1, append = false) => {
       if (showLoading) setLoading(true);
       setError("");
       try {
         const params = new URLSearchParams({
           folder: target,
-          limit: "80",
+          page: String(pageNumber),
+          page_size: "80",
+          filter,
           sort,
         });
         if (query.trim()) params.set("q", query.trim());
-        if (filter === "unread") params.set("unread", "true");
-        if (filter === "starred") params.set("starred", "true");
-        if (filter === "attachments") params.set("attachments", "true");
-        setMessages(
-          await apiFetch<Message[]>(`/api/mail?${params.toString()}`),
-        );
+        params.set("meta", "true");
+        const payload = await apiFetch<MailPage | Message[]>(`/api/mail?${params.toString()}`);
+        const nextPage = Array.isArray(payload) ? { items: payload, total: null, page: pageNumber, hasMore: payload.length >= 80 } : payload;
+        setMessages((current) => (append ? [...current, ...nextPage.items] : nextPage.items));
+        setPage(nextPage.page);
+        setHasMore(nextPage.hasMore);
+        setResultTotal(nextPage.total);
+        if (pageNumber === 1 && !append) void apiFetch<SavedSearch[]>("/api/saved-searches?counts=true").then(setSavedSearches).catch(() => undefined);
       } catch (loadError) {
         setError(
           loadError instanceof Error
@@ -2159,6 +2199,11 @@ function MailboxApp({ session }: { session: Session }) {
     },
     [filter, folder, query, sort],
   );
+  useEffect(() => {
+    if (!bulkUndo) return;
+    const timer = window.setTimeout(() => setBulkUndo(null), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [bulkUndo]);
   const loadWorkspace = useCallback(async () => {
     try {
       const [taskRows, eventRows] = await Promise.all([
@@ -2175,6 +2220,166 @@ function MailboxApp({ session }: { session: Session }) {
       );
     }
   }, []);
+  function clearListSelection() {
+    setSelectedIds(new Set());
+    setSelectAllResults(false);
+  }
+  function openMailFolder(target: ViewKey) {
+    setView("mail");
+    setFolder(target);
+    setActiveSavedSearchId(null);
+    setSelected(null);
+    setSelectedId(null);
+    setThreadMessages([]);
+    clearListSelection();
+    setMobileNav(false);
+  }
+  function toggleMessageSelection(id: string) {
+    if (selectAllResults) {
+      setSelectedIds(new Set(messages.map((message) => message.id).filter((messageId) => messageId !== id)));
+      setSelectAllResults(false);
+      return;
+    }
+    setSelectAllResults(false);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function selectCurrentPage() {
+    setSelectedIds(new Set(messages.map((message) => message.id)));
+    setSelectAllResults(false);
+  }
+  async function createSavedSearch() {
+    const queryText = query.trim();
+    const name = savedSearchName.trim();
+    if (!name) { setError("Enter a name for the saved search"); return; }
+    if (!queryText) { setError("Enter a search query before saving it"); return; }
+    setSavedSearchBusy(true);
+    setError("");
+    try {
+      const saved = await apiFetch<SavedSearch>("/api/saved-searches", { method: "POST", body: JSON.stringify({ name, query: queryText }) });
+      setSavedSearches((current) => [...current, saved].sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name)));
+      setSavedSearchName("");
+      setSavedSearchFormOpen(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Saved search could not be created");
+    } finally {
+      setSavedSearchBusy(false);
+    }
+  }
+  async function renameSavedSearch(saved: SavedSearch) {
+    const name = window.prompt("Rename saved search", saved.name)?.trim();
+    if (!name || name === saved.name) return;
+    try {
+      const updated = await apiFetch<SavedSearch>(`/api/saved-searches/${saved.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      setSavedSearches((current) => current.map((item) => item.id === saved.id ? { ...item, ...updated } : item));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Saved search could not be renamed");
+    }
+  }
+  async function deleteSavedSearch(saved: SavedSearch) {
+    if (!window.confirm(`Delete saved search “${saved.name}”? Your messages will not be changed.`)) return;
+    try {
+      await apiFetch(`/api/saved-searches/${saved.id}`, { method: "DELETE" });
+      setSavedSearches((current) => current.filter((item) => item.id !== saved.id));
+      if (activeSavedSearchId === saved.id) {
+        setActiveSavedSearchId(null);
+        setQuery("");
+      }
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Saved search could not be deleted");
+    }
+  }
+  async function reorderSavedSearch(saved: SavedSearch, direction: -1 | 1) {
+    const ordered = [...savedSearches].sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name));
+    const index = ordered.findIndex((item) => item.id === saved.id);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= ordered.length) return;
+    [ordered[index], ordered[nextIndex]] = [ordered[nextIndex], ordered[index]];
+    setSavedSearches(ordered.map((item, itemIndex) => ({ ...item, sort_order: itemIndex })));
+    try {
+      await apiFetch("/api/saved-searches/reorder", { method: "POST", body: JSON.stringify({ ids: ordered.map((item) => item.id) }) });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Saved searches could not be reordered");
+    }
+  }
+  function openSavedSearch(saved: SavedSearch) {
+    openMailFolder("inbox");
+    setQuery(saved.query);
+    setActiveSavedSearchId(saved.id);
+  }
+  async function undoBulkAction() {
+    if (!bulkUndo) return;
+    const requestId = bulkUndo.requestId;
+    try {
+      await apiFetch("/api/mail/bulk/undo", { method: "POST", body: JSON.stringify({ requestId }) });
+      setBulkUndo(null);
+      setBulkNotice("Bulk change undone");
+      await loadMessages(folder, false);
+    } catch (undoError) {
+      setError(undoError instanceof Error ? undoError.message : "Undo is no longer available");
+    }
+  }
+  async function runBulkAction() {
+    const allResults = selectAllResults;
+    const visibleSelection = allResults ? messages.map((message) => message.id) : [...selectedIds];
+    if (!visibleSelection.length && !allResults) { setError("Select at least one message"); return; }
+    const countLabel = allResults ? `${resultTotal ?? "all"} matching messages` : `${visibleSelection.length} message${visibleSelection.length === 1 ? "" : "s"}`;
+    if (bulkAction === "trash" && !window.confirm(`Move ${countLabel} to Trash? You can restore them later.`)) return;
+    setBulkBusy(true);
+    setError("");
+    setBulkNotice("");
+    const action: JsonSettings = { type: bulkAction };
+    if (bulkAction === "move") {
+      if (bulkFolder.startsWith("custom:")) {
+        action.folder = "custom";
+        action.customFolderId = bulkFolder.slice(7);
+      } else {
+        action.folder = bulkFolder;
+      }
+    }
+    if (bulkAction === "label") {
+      if (!bulkLabelId) { setError("Choose a label first"); setBulkBusy(false); return; }
+      action.labelId = bulkLabelId;
+    }
+    if (bulkAction === "priority") action.priority = Number(bulkPriority);
+    const idempotencyKey = crypto.randomUUID();
+    try {
+      const payload = await apiFetch<{ requestId: string; changedIds: string[]; exported?: JsonSettings[]; failures: Array<{ id: string; error: string }>; undoable: boolean; truncated?: boolean }>("/api/mail/bulk", {
+        method: "POST",
+        body: JSON.stringify({ messageIds: visibleSelection, scope: allResults ? "all_results" : "selected", query: query.trim(), folder, action, idempotencyKey }),
+      });
+      const movedOut = ["archive", "move", "trash", "spam", "restore", "snooze"].includes(bulkAction);
+      const selectedSet = new Set(payload.changedIds);
+      setMessages((current) => movedOut ? current.filter((message) => !selectedSet.has(message.id)) : current.map((message) => {
+        if (!selectedSet.has(message.id)) return message;
+        if (bulkAction === "mark_read" || bulkAction === "mark_unread") return { ...message, is_read: bulkAction === "mark_read" };
+        if (bulkAction === "star" || bulkAction === "unstar") return { ...message, is_starred: bulkAction === "star" };
+        if (bulkAction === "pin" || bulkAction === "unpin") return { ...message, is_pinned: bulkAction === "pin" };
+        if (bulkAction === "flag" || bulkAction === "unflag") return { ...message, is_flagged: bulkAction === "flag" };
+        return message;
+      }));
+      clearListSelection();
+      await loadMessages(folder, false);
+      if (bulkAction === "export" && payload.exported?.length) {
+        const download = document.createElement("a");
+        download.href = URL.createObjectURL(new Blob([JSON.stringify(payload.exported, null, 2)], { type: "application/json" }));
+        download.download = `parcel-export-${new Date().toISOString().slice(0, 10)}.json`;
+        download.click();
+        URL.revokeObjectURL(download.href);
+      }
+      if (payload.failures.length) setError(`${payload.changedIds.length} changed; ${payload.failures.length} failed. ${payload.failures[0].error}`);
+      else setBulkNotice(`${payload.changedIds.length || (bulkAction === "export" ? visibleSelection.length : 0)} message${payload.changedIds.length === 1 ? "" : "s"} updated${payload.truncated ? " (first 500 matching messages)" : ""}`);
+      if (payload.undoable && payload.changedIds.length) setBulkUndo({ requestId: payload.requestId, label: "Undo change" });
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Bulk action failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
   useEffect(() => {
     void loadMeta();
     void loadWorkspace();
@@ -2388,8 +2593,10 @@ function MailboxApp({ session }: { session: Session }) {
     setComposeSeed(seed);
     setComposeOpen(true);
   }
-  const currentLabel =
-    folder === "focused"
+  const activeSavedSearch = activeSavedSearchId ? savedSearches.find((item) => item.id === activeSavedSearchId) : undefined;
+  const currentLabel = activeSavedSearch
+    ? activeSavedSearch.name
+    : folder === "focused"
       ? "Focused"
       : folder === "other"
         ? "Other"
@@ -2397,8 +2604,9 @@ function MailboxApp({ session }: { session: Session }) {
           ? folders.find((item) => item.id === folder.slice(7))?.name ||
             "Folder"
           : folderNames[folder as SystemFolder];
-  const CurrentIcon =
-    folder === "focused" || folder === "other" || folder.startsWith("custom:")
+  const CurrentIcon = activeSavedSearch
+    ? Bookmark
+    : folder === "focused" || folder === "other" || folder.startsWith("custom:")
       ? Mail
       : folderIcons[folder as SystemFolder];
   const unread = messages.filter((message) => !message.is_read).length;
@@ -2493,11 +2701,7 @@ function MailboxApp({ session }: { session: Session }) {
         <nav className="folder-nav" aria-label="Mailbox folders">
           <button
             className={`folder-link ${view === "mail" && folder === "inbox" ? "active" : ""}`}
-            onClick={() => {
-              setView("mail");
-              setFolder("inbox");
-              setMobileNav(false);
-            }}
+            onClick={() => openMailFolder("inbox")}
           >
             <Inbox size={17} />
             <span>Inbox</span>
@@ -2505,22 +2709,14 @@ function MailboxApp({ session }: { session: Session }) {
           </button>
           <button
             className={`folder-link ${view === "mail" && folder === "focused" ? "active" : ""}`}
-            onClick={() => {
-              setView("mail");
-              setFolder("focused");
-              setMobileNav(false);
-            }}
+            onClick={() => openMailFolder("focused")}
           >
             <Eye size={17} />
             <span>Focused</span>
           </button>
           <button
             className={`folder-link ${view === "mail" && folder === "other" ? "active" : ""}`}
-            onClick={() => {
-              setView("mail");
-              setFolder("other");
-              setMobileNav(false);
-            }}
+            onClick={() => openMailFolder("other")}
           >
             <Mail size={17} />
             <span>Other</span>
@@ -2533,11 +2729,7 @@ function MailboxApp({ session }: { session: Session }) {
               <button
                 key={item}
                 className={`folder-link ${view === "mail" && folder === item ? "active" : ""}`}
-                onClick={() => {
-                  setView("mail");
-                  setFolder(item);
-                  setMobileNav(false);
-                }}
+                onClick={() => openMailFolder(item)}
               >
                 <Icon size={17} />
                 <span>{folderNames[item]}</span>
@@ -2548,17 +2740,59 @@ function MailboxApp({ session }: { session: Session }) {
             <button
               key={customFolder.id}
               className={`folder-link ${view === "mail" && folder === `custom:${customFolder.id}` ? "active" : ""}`}
-              onClick={() => {
-                setView("mail");
-                setFolder(`custom:${customFolder.id}`);
-                setMobileNav(false);
-              }}
+              onClick={() => openMailFolder(`custom:${customFolder.id}`)}
             >
               <Tag size={17} color={customFolder.color} />
               <span>{customFolder.name}</span>
             </button>
           ))}
         </nav>
+        <section className="saved-searches" aria-label="Saved searches">
+          <div className="saved-search-head">
+            <span className="eyebrow">SAVED SEARCHES</span>
+            <button
+              className="icon-button compact-icon"
+              onClick={() => setSavedSearchFormOpen((current) => !current)}
+              aria-label="Create saved search"
+              title="Create saved search from the current query"
+            >
+              <Plus size={15} />
+            </button>
+          </div>
+          {savedSearchFormOpen && (
+            <div className="saved-search-form">
+              <input
+                value={savedSearchName}
+                onChange={(event) => setSavedSearchName(event.target.value)}
+                placeholder="Search name"
+                aria-label="Saved search name"
+                maxLength={80}
+              />
+              <small>{query.trim() ? `Saves: ${query.trim()}` : "Type a query first"}</small>
+              <button className="primary-button" onClick={() => void createSavedSearch()} disabled={savedSearchBusy || !query.trim()}>
+                {savedSearchBusy ? "Saving…" : "Save search"}
+              </button>
+            </div>
+          )}
+          <div className="saved-search-list">
+            {savedSearches.map((saved) => (
+              <div className={`saved-search-row ${activeSavedSearchId === saved.id ? "active" : ""}`} key={saved.id}>
+                <button className="saved-search-link" onClick={() => openSavedSearch(saved)} title={saved.query}>
+                  <Bookmark size={15} color={saved.color} />
+                  <span>{saved.name}</span>
+                  <em>{saved.result_count ?? "—"}</em>
+                </button>
+                <div className="saved-search-controls">
+                  <button className="icon-button compact-icon" onClick={() => void reorderSavedSearch(saved, -1)} aria-label={`Move ${saved.name} up`} title="Move up"><ArrowUp size={12} /></button>
+                  <button className="icon-button compact-icon" onClick={() => void reorderSavedSearch(saved, 1)} aria-label={`Move ${saved.name} down`} title="Move down"><ArrowDown size={12} /></button>
+                  <button className="icon-button compact-icon" onClick={() => void renameSavedSearch(saved)} aria-label={`Rename ${saved.name}`} title="Rename"><Pencil size={12} /></button>
+                  <button className="icon-button compact-icon danger-icon" onClick={() => void deleteSavedSearch(saved)} aria-label={`Delete ${saved.name}`} title="Delete"><Trash2 size={12} /></button>
+                </div>
+              </div>
+            ))}
+            {savedSearches.length === 0 && !savedSearchFormOpen && <small className="saved-search-empty">Save a query here for one-click access.</small>}
+          </div>
+        </section>
         <div className="sidebar-divider" />
         <nav className="folder-nav secondary-nav">
           <button
@@ -2637,12 +2871,19 @@ function MailboxApp({ session }: { session: Session }) {
               <Search size={16} />
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setActiveSavedSearchId(null);
+                  clearListSelection();
+                }}
                 placeholder="Search messages, people, or files"
               />
               <select
                 value={filter}
-                onChange={(event) => setFilter(event.target.value)}
+                 onChange={(event) => {
+                   clearListSelection();
+                   setFilter(event.target.value);
+                 }}
                 aria-label="Filter messages"
               >
                 <option value="all">All mail</option>
@@ -2652,7 +2893,10 @@ function MailboxApp({ session }: { session: Session }) {
               </select>
               <select
                 value={sort}
-                onChange={(event) => setSort(event.target.value)}
+                 onChange={(event) => {
+                   clearListSelection();
+                   setSort(event.target.value);
+                 }}
                 aria-label="Sort messages"
               >
                 <option value="newest">Newest</option>
@@ -2664,6 +2908,75 @@ function MailboxApp({ session }: { session: Session }) {
               {liveState === "live" ? "Live updates" : liveState === "connecting" ? "Connecting to live updates…" : liveState === "reconnecting" ? "Reconnecting…" : "Polling for updates"}
             </div>
             {error && <div className="inline-error">{error}</div>}
+            {!loading && messages.length > 0 && (
+              <div className="selection-bar" aria-label="Message selection controls">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={selectAllResults || messages.every((message) => selectedIds.has(message.id))}
+                    onChange={(event) => event.target.checked ? selectCurrentPage() : clearListSelection()}
+                    aria-label="Select all messages on this page"
+                  />
+                  <span>Select page</span>
+                </label>
+                <span className="selection-count">{resultTotal ?? messages.length} result{(resultTotal ?? messages.length) === 1 ? "" : "s"}</span>
+                {selectedIds.size > 0 && !selectAllResults && <button className="text-button" onClick={clearListSelection}>Clear</button>}
+                {query.trim() && !selectAllResults && selectedIds.size === messages.length && resultTotal !== null && resultTotal > messages.length && (
+                  <button className="text-button selection-all-button" onClick={() => setSelectAllResults(true)}>Select all {resultTotal} results</button>
+                )}
+                {selectAllResults && <span className="selection-all-label">All matching results selected</span>}
+              </div>
+            )}
+            {(selectedIds.size > 0 || selectAllResults) && (
+              <div className="bulk-toolbar" aria-label="Bulk message actions">
+                <strong>{selectAllResults ? `${resultTotal ?? "All"} selected` : `${selectedIds.size} selected`}</strong>
+                <select value={bulkAction} onChange={(event) => setBulkAction(event.target.value)} aria-label="Bulk action">
+                  <option value="archive">Archive</option>
+                  <option value="move">Move to…</option>
+                  <option value="mark_read">Mark read</option>
+                  <option value="mark_unread">Mark unread</option>
+                  <option value="star">Star</option>
+                  <option value="unstar">Unstar</option>
+                  <option value="flag">Flag</option>
+                  <option value="unflag">Unflag</option>
+                  <option value="priority">Set priority</option>
+                  {labels.length > 0 && <option value="label">Add label…</option>}
+                  <option value="snooze">Snooze 1 hour</option>
+                  <option value="reply_later">Reply later</option>
+                  <option value="waiting_on">Waiting on</option>
+                  <option value="i_owe">I owe</option>
+                  <option value="create_task">Create task</option>
+                  <option value="export">Export JSON</option>
+                  <option value="restore">Restore</option>
+                  <option value="spam">Move to Spam</option>
+                  <option value="trash">Move to Trash</option>
+                </select>
+                 {bulkAction === "move" && (
+                   <select value={bulkFolder} onChange={(event) => setBulkFolder(event.target.value)} aria-label="Bulk destination folder">
+                     {(["inbox", "sent", "drafts", "archive", "trash", "spam"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}
+                     {folders.map((item) => <option key={item.id} value={`custom:${item.id}`}>{item.name}</option>)}
+                   </select>
+                 )}
+                {bulkAction === "priority" && (
+                  <select value={bulkPriority} onChange={(event) => setBulkPriority(event.target.value)} aria-label="Bulk priority">
+                    <option value="0">Normal</option><option value="1">Important</option><option value="2">High</option>
+                  </select>
+                )}
+                {bulkAction === "label" && (
+                  <select value={bulkLabelId} onChange={(event) => setBulkLabelId(event.target.value)} aria-label="Bulk label">
+                    <option value="">Choose label</option>
+                    {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
+                  </select>
+                )}
+                <button className="primary-button" onClick={() => void runBulkAction()} disabled={bulkBusy}>{bulkBusy ? "Applying…" : "Apply"}</button>
+              </div>
+            )}
+            {bulkNotice && (
+              <div className="inline-notice" role="status" aria-live="polite">
+                <span>{bulkNotice}</span>
+                {bulkUndo && <button className="text-button" onClick={() => void undoBulkAction()}>{bulkUndo.label}</button>}
+              </div>
+            )}
             <div className="message-list">
               {loading ? (
                 <div className="list-empty">
@@ -2695,11 +3008,28 @@ function MailboxApp({ session }: { session: Session }) {
                 </div>
               ) : (
                 messages.map((message) => (
-                  <button
+                  <div
                     key={message.id}
-                    className={`message-row ${selectedId === message.id ? "selected" : ""} ${message.is_read ? "read" : "unread"}`}
+                    className={`message-row ${selectedId === message.id ? "selected" : ""} ${selectedIds.has(message.id) ? "bulk-selected" : ""} ${message.is_read ? "read" : "unread"}`}
                     onClick={() => void openMessage(message)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void openMessage(message);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                   >
+                    <input
+                      className="message-select-checkbox"
+                      type="checkbox"
+                      checked={selectedIds.has(message.id) || selectAllResults}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() => toggleMessageSelection(message.id)}
+                      aria-label={`Select ${message.subject || "message"}`}
+                    />
                     {(() => {
                       const sender = senderForMessage(message, contacts, mailboxes);
                       return <SenderAvatar name={sender.name} email={sender.email} avatarUrl={sender.avatarUrl} />;
@@ -2748,10 +3078,15 @@ function MailboxApp({ session }: { session: Session }) {
                         fill="currentColor"
                       />
                     )}
-                  </button>
+                  </div>
                 ))
               )}
             </div>
+            {!loading && hasMore && (
+              <button className="load-more-button" onClick={() => void loadMessages(folder, false, page + 1, true)} disabled={bulkBusy}>
+                Load more{resultTotal !== null ? ` · ${Math.max(resultTotal - messages.length, 0)} remaining` : ""}
+              </button>
+            )}
           </section>
           <section className="reading-pane">
             {!selected ? (

@@ -565,6 +565,320 @@ async function handleDraft(env: Env, user: User, body: JsonRecord): Promise<Resp
   return json(rows?.[0] || null, 201);
 }
 
+type SearchToken = { value: string; quoted: boolean; negated: boolean };
+type SearchTextPart = { value: string; negated: boolean };
+type SearchField = "from" | "to" | "cc" | "subject" | "filename" | "rfc822msgid";
+type SearchStateField = "is_read" | "is_starred" | "is_flagged" | "is_pinned" | "has_attachment";
+type SearchFilter =
+  | { kind: "field"; field: SearchField; value: string; negated: boolean }
+  | { kind: "state"; field: SearchStateField; value: boolean; negated: boolean }
+  | { kind: "folder"; value: string; negated: boolean }
+  | { kind: "date"; operator: "after" | "before"; value: string; negated: boolean }
+  | { kind: "size"; operator: "larger" | "smaller"; bytes: number; negated: boolean };
+type ParsedSearch = { normalized: string; terms: SearchTextPart[]; phrases: SearchTextPart[]; filters: SearchFilter[] };
+
+function tokenizeSearch(value: string): SearchToken[] {
+  const tokens: SearchToken[] = [];
+  let index = 0;
+  while (index < value.length) {
+    while (index < value.length && /\s/.test(value[index])) index += 1;
+    if (index >= value.length) break;
+    let negated = false;
+    if (value[index] === "-") { negated = true; index += 1; }
+    let token = "";
+    let quoted = false;
+    while (index < value.length && !/\s/.test(value[index])) {
+      if (value[index] === '"') {
+        quoted = true;
+        index += 1;
+        const start = index;
+        while (index < value.length && value[index] !== '"') index += 1;
+        if (index >= value.length) throw new Error("Unclosed quoted phrase");
+        token += value.slice(start, index);
+        index += 1;
+      } else {
+        token += value[index];
+        index += 1;
+      }
+    }
+    if (!token.trim()) throw new Error("A negation must be followed by a search term");
+    tokens.push({ value: token.trim(), quoted, negated });
+  }
+  return tokens;
+}
+
+function parseSearchDate(value: string, operator: string): string {
+  const now = new Date();
+  const lower = value.toLowerCase();
+  let date: Date;
+  if (lower === "today") date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  else if (lower === "yesterday") date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+  else {
+    const relative = lower.match(/^(\d+)([dwmy])$/);
+    if (relative) {
+      date = new Date(now);
+      const amount = Number(relative[1]);
+      if (relative[2] === "d") date.setUTCDate(date.getUTCDate() - amount);
+      if (relative[2] === "w") date.setUTCDate(date.getUTCDate() - amount * 7);
+      if (relative[2] === "m") date.setUTCMonth(date.getUTCMonth() - amount);
+      if (relative[2] === "y") date.setUTCFullYear(date.getUTCFullYear() - amount);
+    } else {
+      date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00.000Z`) : new Date(value);
+    }
+  }
+  if (Number.isNaN(date.getTime())) throw new Error(`${operator}: invalid date "${value}"; use YYYY-MM-DD, today, or a relative value such as 7d`);
+  return date.toISOString();
+}
+
+function parseSearchBytes(value: string, operator: string): number {
+  const match = value.toLowerCase().match(/^(\d+(?:\.\d+)?)(b|kb|kib|mb|mib|gb|gib)?$/);
+  if (!match) throw new Error(`${operator}: invalid size "${value}"; use values such as 500KB or 5MB`);
+  const multipliers: Record<string, number> = { b: 1, kb: 1000, kib: 1024, mb: 1000 ** 2, mib: 1024 ** 2, gb: 1000 ** 3, gib: 1024 ** 3 };
+  return Math.round(Number(match[1]) * (multipliers[match[2] || "b"] || 1));
+}
+
+function parseSearchQuery(input: string): ParsedSearch {
+  const query = input.trim();
+  if (query.length > 1000) throw new Error("Search query is too long; keep it under 1,000 characters");
+  const terms: SearchTextPart[] = [];
+  const phrases: SearchTextPart[] = [];
+  const filters: SearchFilter[] = [];
+  const normalized: string[] = [];
+  for (const token of tokenizeSearch(query)) {
+    const colon = token.value.indexOf(":");
+    if (colon <= 0) {
+      const target = token.quoted ? phrases : terms;
+      target.push({ value: token.value, negated: token.negated });
+      normalized.push(`${token.negated ? "-" : ""}${token.quoted ? `"${token.value}"` : token.value}`);
+      continue;
+    }
+    const operator = token.value.slice(0, colon).toLowerCase();
+    const operand = token.value.slice(colon + 1).trim();
+    if (!operand) throw new Error(`${operator}: needs a value`);
+    normalized.push(`${token.negated ? "-" : ""}${operator}:${token.quoted ? `"${operand}"` : operand}`);
+    if (["from", "to", "cc", "subject", "filename", "rfc822msgid"].includes(operator)) {
+      filters.push({ kind: "field", field: operator as SearchField, value: operand, negated: token.negated });
+      continue;
+    }
+    if (operator === "has") {
+      if (operand.toLowerCase() !== "attachment") throw new Error(`has: unsupported value "${operand}"; use has:attachment`);
+      filters.push({ kind: "state", field: "has_attachment", value: true, negated: token.negated });
+      continue;
+    }
+    if (operator === "is") {
+      const states: Record<string, { field: SearchStateField; value: boolean }> = {
+        unread: { field: "is_read", value: false }, read: { field: "is_read", value: true },
+        starred: { field: "is_starred", value: true }, unstarred: { field: "is_starred", value: false },
+        flagged: { field: "is_flagged", value: true }, unflagged: { field: "is_flagged", value: false },
+        pinned: { field: "is_pinned", value: true }, unpinned: { field: "is_pinned", value: false },
+      };
+      const state = states[operand.toLowerCase()];
+      if (!state) throw new Error(`is: unsupported value "${operand}"; use unread, read, starred, flagged, or pinned`);
+      filters.push({ kind: "state", ...state, negated: token.negated });
+      continue;
+    }
+    if (operator === "in") {
+      const folder = operand.toLowerCase();
+      const validFolder = folder === "all" || SYSTEM_FOLDERS.includes(folder as typeof SYSTEM_FOLDERS[number]) || (folder.startsWith("custom:") && /^[0-9a-f-]{36}$/i.test(folder.slice(7)));
+      if (!validFolder) throw new Error(`in: unknown folder "${operand}"`);
+      filters.push({ kind: "folder", value: folder, negated: token.negated });
+      continue;
+    }
+    if (["after", "before", "older", "newer"].includes(operator)) {
+      const dateOperator = operator === "after" || operator === "newer" ? "after" : "before";
+      filters.push({ kind: "date", operator: dateOperator, value: parseSearchDate(operand, operator), negated: token.negated });
+      continue;
+    }
+    if (operator === "larger" || operator === "smaller") {
+      filters.push({ kind: "size", operator, bytes: parseSearchBytes(operand, operator), negated: token.negated });
+      continue;
+    }
+    throw new Error(`Unknown search operator "${operator}:"`);
+  }
+  return { normalized: normalized.join(" "), terms, phrases, filters };
+}
+
+function safeLike(value: string): string {
+  return value.replace(/[*,()%_]/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function safeFts(value: string): string {
+  return value.replace(/[^\p{L}\p{N}@._-]+/gu, " ").trim().slice(0, 200);
+}
+
+function webSearchValue(parsed: ParsedSearch): string {
+  return [...parsed.terms, ...parsed.phrases].map((part) => {
+    const value = safeFts(part.value);
+    if (!value) return "";
+    const text = parsed.phrases.includes(part) ? `"${value}"` : value;
+    return `${part.negated ? "-" : ""}${text}`;
+  }).filter(Boolean).join(" ");
+}
+
+async function attachmentSearchIds(env: Env, ownerId: string, filters: SearchFilter[]): Promise<{ include: string[] | null; exclude: string[] }> {
+  let include: Set<string> | null = null;
+  const exclude = new Set<string>();
+  for (const filter of filters) {
+    if (filter.kind !== "field" && filter.kind !== "size") continue;
+    const condition = filter.kind === "field"
+      ? `filename=ilike.*${encodeURIComponent(safeLike(filter.value))}*`
+      : `${filter.operator === "larger" ? (filter.negated ? "byte_size=lte." : "byte_size=gt.") : (filter.negated ? "byte_size=gte." : "byte_size=lt.")}${filter.bytes}`;
+    if (filter.kind === "field" && filter.field !== "filename") continue;
+    const rows = await dbRequest<Array<{ message_id: string }>>(env, `attachments?owner_id=eq.${encodeURIComponent(ownerId)}&${condition}&select=message_id&limit=10000`);
+    const ids = new Set(rows.map((row) => row.message_id));
+    if (filter.negated) ids.forEach((id) => exclude.add(id));
+    else if (include === null) include = ids;
+    else {
+      const currentInclude = include as Set<string>;
+      include = new Set<string>([...currentInclude].filter((id) => ids.has(id)));
+    }
+  }
+  return { include: include ? [...include] : null, exclude: [...exclude] };
+}
+
+type MailQueryOptions = { folder: string; query?: string; filter?: string; sort?: string; page?: number; pageSize?: number };
+
+async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptions): Promise<{ path: string; parsed?: ParsedSearch; page: number; pageSize: number; searchActive: boolean }> {
+  const query = options.query?.trim() || "";
+  const parsed = query ? parseSearchQuery(query) : undefined;
+  const page = Math.max(1, Math.min(100, Number(options.page || 1)));
+  const pageSize = Math.max(10, Math.min(100, Number(options.pageSize || 80)));
+  const parts = [`owner_id=eq.${encodeURIComponent(ownerId)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,focused_score,focused_category,scheduled_at,snoozed_until,received_at,sent_at,created_at"];
+  const explicitFolders = parsed?.filters.filter((filter): filter is Extract<SearchFilter, { kind: "folder" }> => filter.kind === "folder") || [];
+  if (!parsed) {
+    if (options.folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(options.folder.slice(7))}`); }
+    else if (options.folder === "focused") parts.push("folder=eq.inbox", "focused_category=eq.focused");
+    else if (options.folder === "other") parts.push("folder=eq.inbox", "focused_category=eq.other");
+    else if (options.folder !== "all") parts.push(`folder=eq.${encodeURIComponent(options.folder)}`);
+  } else {
+    for (const folder of explicitFolders) {
+      if (folder.value === "all") continue;
+      if (folder.value.startsWith("custom:")) {
+        if (folder.negated) throw new Error("Negating a custom folder is not supported; use a positive in: folder filter");
+        parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(folder.value.slice(7))}`);
+      } else parts.push(`folder=${folder.negated ? "not.eq" : "eq"}.${encodeURIComponent(folder.value)}`);
+    }
+    const fts = webSearchValue(parsed);
+    if (fts) parts.push(`search_vector=wfts.${encodeURIComponent(fts)}`);
+    for (const filter of parsed.filters) {
+      if (filter.kind === "field") {
+        if (filter.field === "filename") continue;
+        if (filter.field === "rfc822msgid") { parts.push(`message_id_header=${filter.negated ? "not.eq" : "eq"}.${encodeURIComponent(filter.value)}`); continue; }
+        if (filter.field === "to" || filter.field === "cc") {
+          const values = `{${safeLike(filter.value).replace(/[{}]/g, "")}}`;
+          parts.push(`${filter.field}_addresses=${filter.negated ? "not.cs" : "cs"}.${encodeURIComponent(values)}`);
+          continue;
+        }
+        const column = filter.field === "from" ? "from_address" : filter.field;
+        parts.push(`${column}=${filter.negated ? "not.ilike" : "ilike"}.*${encodeURIComponent(safeLike(filter.value))}*`);
+      }
+      if (filter.kind === "state") {
+        const value = filter.negated ? !filter.value : filter.value;
+        parts.push(`${filter.field}=eq.${value}`);
+      }
+      if (filter.kind === "date") {
+        const after = filter.operator === "after";
+        const operator = filter.negated ? (after ? "lt" : "gte") : (after ? "gte" : "lt");
+        parts.push(`created_at=${operator}.${encodeURIComponent(filter.value)}`);
+      }
+    }
+    const attachmentIds = await attachmentSearchIds(env, ownerId, parsed.filters);
+    if (attachmentIds.include) parts.push(`id=${encodeURIComponent(`in.(${attachmentIds.include.join(",")})`)}`);
+    if (attachmentIds.exclude.length) parts.push(`id=${encodeURIComponent(`not.in.(${attachmentIds.exclude.join(",")})`)}`);
+  }
+  const listFilter = options.filter || "all";
+  if (listFilter === "unread") parts.push("is_read=eq.false");
+  if (listFilter === "starred") parts.push("is_starred=eq.true");
+  if (listFilter === "attachments") parts.push("has_attachment=eq.true");
+  parts.push(`order=${options.sort === "oldest" ? "created_at.asc,id.asc" : "created_at.desc,id.desc"}`, `offset=${(page - 1) * pageSize}`, `limit=${pageSize + 1}`);
+  return { path: `messages?${parts.join("&")}`, parsed, page, pageSize, searchActive: Boolean(parsed) };
+}
+
+async function dbRequestCount(env: Env, path: string, token?: string): Promise<number | null> {
+  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, { headers: { ...supabaseHeaders(env, token), Prefer: "count=exact" } });
+  if (!response.ok) throw new Error(`Supabase ${response.status}: ${(await response.text()).slice(0, 500)}`);
+  const range = response.headers.get("content-range") || "";
+  const total = range.match(/\/(\d+)$/)?.[1];
+  return total ? Number(total) : null;
+}
+
+async function writeMessageAudit(env: Env, ownerId: string, requestId: string, actionType: string, message: JsonRecord, beforeState: JsonRecord, afterState: JsonRecord): Promise<void> {
+  await dbRequest(env, "message_audit_log", { method: "POST", body: JSON.stringify({ owner_id: ownerId, actor_id: ownerId, mailbox_id: message.mailbox_id || null, message_id: message.id, thread_id: message.thread_id || null, action_type: actionType, target_type: "message", target_id: message.id, before_state: beforeState, after_state: afterState, request_id: requestId }) });
+}
+
+function bulkBeforeState(message: JsonRecord): JsonRecord {
+  return {
+    folder: message.folder, custom_folder_id: message.custom_folder_id || null, previous_folder: message.previous_folder || null,
+    is_read: message.is_read === true, is_starred: message.is_starred === true, is_pinned: message.is_pinned === true,
+    is_flagged: message.is_flagged === true, priority: typeof message.priority === "number" ? message.priority : 0,
+    work_state: message.work_state || "none", follow_up_at: message.follow_up_at || null, snoozed_until: message.snoozed_until || null,
+  };
+}
+
+async function applyBulkMessageAction(env: Env, ownerId: string, message: JsonRecord, action: JsonRecord, requestId: string): Promise<{ changed: boolean; exportRow?: JsonRecord }> {
+  const type = String(action.type || "");
+  const before = bulkBeforeState(message);
+  if (type === "export") return { changed: false, exportRow: { id: message.id, subject: message.subject || "", from_address: message.from_address || "", to_addresses: message.to_addresses || [], text_body: message.text_body || message.snippet || "" } };
+  if (type === "create_task") {
+    await dbRequest(env, "tasks", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ owner_id: ownerId, title: String(message.subject || "(no subject)"), notes: String(message.snippet || ""), source_message_id: message.id }) });
+    await writeMessageAudit(env, ownerId, requestId, `bulk_${type}`, message, before, before);
+    return { changed: true };
+  }
+  if (type === "label") {
+    const labelId = String(action.labelId || "");
+    const labels = await dbRequest<Array<{ id: string }>>(env, `labels?id=eq.${encodeURIComponent(labelId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+    if (!labels[0]) throw new Error("Label not found");
+    await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: message.id, label_id: labelId }) });
+    await writeMessageAudit(env, ownerId, requestId, `bulk_${type}`, message, before, { label_id: labelId });
+    return { changed: true };
+  }
+  if (type === "restore") {
+    if (message.folder !== "trash") throw new Error("Only messages in Trash can be restored");
+    const target = trashRestoreTarget(message);
+    const rows = target.folder === "custom" ? await dbRequest<JsonRecord[]>(env, `mail_folders?id=eq.${encodeURIComponent(target.custom_folder_id || "")}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`) : [{ id: "system" }];
+    const restore = rows[0] ? target : { folder: "inbox", custom_folder_id: null };
+    const patch = { folder: restore.folder, custom_folder_id: restore.custom_folder_id, previous_folder: null };
+    await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}&owner_id=eq.${encodeURIComponent(ownerId)}&folder=eq.trash`, { method: "PATCH", body: JSON.stringify(patch) });
+    await writeMessageAudit(env, ownerId, requestId, `bulk_${type}`, message, before, patch);
+    return { changed: true };
+  }
+  const patch: JsonRecord = {};
+  if (type === "archive") { patch.folder = "archive"; patch.custom_folder_id = null; }
+  else if (type === "trash") {
+    patch.folder = "trash";
+    patch.custom_folder_id = null;
+    patch.previous_folder = message.folder === "trash"
+      ? (message.previous_folder || "inbox")
+      : (message.folder === "custom" && message.custom_folder_id ? `custom:${message.custom_folder_id}` : (message.folder || "inbox"));
+  }
+  else if (type === "spam") { patch.folder = "spam"; patch.custom_folder_id = null; }
+  else if (type === "move") {
+    const folder = String(action.folder || "");
+    if (folder === "custom") {
+      const customFolderId = String(action.customFolderId || "");
+      const customFolders = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(customFolderId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+      if (!customFolders[0]) throw new Error("Choose a valid destination folder");
+      patch.folder = "custom";
+      patch.custom_folder_id = customFolderId;
+    } else {
+      if (!SYSTEM_FOLDERS.includes(folder as typeof SYSTEM_FOLDERS[number])) throw new Error("Choose a valid destination folder");
+      patch.folder = folder;
+      patch.custom_folder_id = null;
+    }
+    patch.previous_folder = null;
+  } else if (type === "mark_read" || type === "mark_unread") patch.is_read = type === "mark_read";
+  else if (type === "star" || type === "unstar") patch.is_starred = type === "star";
+  else if (type === "pin" || type === "unpin") patch.is_pinned = type === "pin";
+  else if (type === "flag" || type === "unflag") patch.is_flagged = type === "flag";
+  else if (type === "priority") patch.priority = Math.max(0, Math.min(2, Number(action.priority || 0)));
+  else if (type === "snooze") { patch.previous_folder = message.folder; patch.snoozed_until = String(action.snoozedUntil || new Date(Date.now() + 60 * 60 * 1000).toISOString()); patch.folder = "archive"; }
+  else if (["reply_later", "waiting_on", "i_owe"].includes(type)) { patch.work_state = type; patch.follow_up_at = String(action.followUpAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()); }
+  else throw new Error(`Unsupported bulk action "${type}"`);
+  await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+  await writeMessageAudit(env, ownerId, requestId, `bulk_${type}`, message, before, patch);
+  return { changed: true };
+}
+
 function protectedHeaders(response: Response, noStore = false): Response {
   const headers = new Headers(response.headers);
   headers.set("X-Content-Type-Options", "nosniff");
@@ -618,18 +932,152 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     return json({ ok: true, deleted });
   }
 
+  if (request.method === "GET" && url.pathname === "/api/search/parse") {
+    try {
+      const parsed = parseSearchQuery(url.searchParams.get("q") || "");
+      return json({ ok: true, ...parsed });
+    } catch (parseError) {
+      return error(parseError instanceof Error ? parseError.message : "Invalid search query", 400);
+    }
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/saved-searches") {
+    const rows = await dbRequest<JsonRecord[]>(env, `saved_searches?owner_id=eq.${encodeURIComponent(user.id)}&order=sort_order.asc,name.asc`);
+    if (url.searchParams.get("counts") !== "true") return json(rows);
+    const withCounts = await Promise.all(rows.map(async (row) => {
+      try {
+        const query = await buildMailQuery(env, user.id, { folder: "all", query: String(row.query || ""), page: 1, pageSize: 1 });
+        return { ...row, result_count: await dbRequestCount(env, query.path) };
+      } catch {
+        return { ...row, result_count: null };
+      }
+    }));
+    return json(withCounts);
+  }
+  if (request.method === "POST" && url.pathname === "/api/saved-searches") {
+    const body = (await request.json()) as JsonRecord;
+    const name = String(body.name || "").trim().slice(0, 80);
+    const queryText = String(body.query || "").trim().slice(0, 1000);
+    if (!name) return error("Saved search name is required");
+    if (!queryText) return error("Saved search query is required");
+    try { parseSearchQuery(queryText); } catch (parseError) { return error(parseError instanceof Error ? parseError.message : "Invalid search query", 400); }
+    const color = typeof body.color === "string" && /^#[0-9a-f]{6}$/i.test(body.color) ? body.color : "#3156d8";
+    const rows = await dbRequest<JsonRecord[]>(env, "saved_searches", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name, query: queryText, color, sort_order: Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0 }) });
+    return json(rows[0] || null, 201);
+  }
+  const savedSearchMatch = url.pathname.match(/^\/api\/saved-searches\/([^/]+)$/);
+  if (savedSearchMatch && request.method === "PATCH") {
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 80);
+    if (typeof body.query === "string" && body.query.trim()) {
+      const queryText = body.query.trim().slice(0, 1000);
+      try { parseSearchQuery(queryText); } catch (parseError) { return error(parseError instanceof Error ? parseError.message : "Invalid search query", 400); }
+      patch.query = queryText;
+    }
+    if (typeof body.color === "string" && /^#[0-9a-f]{6}$/i.test(body.color)) patch.color = body.color;
+    if (typeof body.sortOrder === "number" && Number.isFinite(body.sortOrder)) patch.sort_order = body.sortOrder;
+    const rows = await dbRequest<JsonRecord[]>(env, `saved_searches?id=eq.${encodeURIComponent(savedSearchMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+  if (savedSearchMatch && request.method === "DELETE") {
+    await dbRequest(env, `saved_searches?id=eq.${encodeURIComponent(savedSearchMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" });
+    return json({ ok: true });
+  }
+  if (request.method === "POST" && url.pathname === "/api/saved-searches/reorder") {
+    const body = (await request.json()) as JsonRecord;
+    const ids = Array.isArray(body.ids) ? [...new Set(body.ids.map(String).filter(Boolean))].slice(0, 100) : [];
+    const existing = await dbRequest<Array<{ id: string }>>(env, `saved_searches?owner_id=eq.${encodeURIComponent(user.id)}&select=id`);
+    const allowed = new Set(existing.map((row) => row.id));
+    await Promise.all(ids.filter((id) => allowed.has(id)).map((id, index) => dbRequest(env, `saved_searches?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ sort_order: index, updated_at: new Date().toISOString() }) })));
+    return json({ ok: true });
+  }
+
   if (request.method === "GET" && url.pathname === "/api/mail") {
-    const folder = url.searchParams.get("folder") || "inbox";
-    const q = url.searchParams.get("q")?.trim();
-     const parts = [`owner_id=eq.${encodeURIComponent(user.id)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,focused_score,focused_category,scheduled_at,snoozed_until,received_at,sent_at,created_at"];
-    if (folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(folder.slice(7))}`); } else if (folder === "focused") parts.push("folder=eq.inbox", "focused_category=eq.focused"); else if (folder === "other") parts.push("folder=eq.inbox", "focused_category=eq.other"); else parts.push(`folder=eq.${encodeURIComponent(folder)}`);
-    if (q) { const safe = q.replace(/[*(),]/g, " "); parts.push(`or=${encodeURIComponent(`(subject.ilike.*${safe}*,from_name.ilike.*${safe}*,from_address.ilike.*${safe}*,text_body.ilike.*${safe}*,snippet.ilike.*${safe}*)`)}`); }
-    if (url.searchParams.get("unread") === "true") parts.push("is_read=eq.false");
-    if (url.searchParams.get("starred") === "true") parts.push("is_starred=eq.true");
-    if (url.searchParams.get("pinned") === "true") parts.push("is_pinned=eq.true");
-    if (url.searchParams.get("attachments") === "true") parts.push("has_attachment=eq.true");
-    parts.push(`order=${url.searchParams.get("sort") === "oldest" ? "created_at.asc" : "created_at.desc"}`, `limit=${Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 50)))}`);
-    return json(await dbRequest(env, `messages?${parts.join("&")}`));
+    try {
+      const query = await buildMailQuery(env, user.id, { folder: url.searchParams.get("folder") || "inbox", query: url.searchParams.get("q") || "", filter: url.searchParams.get("filter") || "all", sort: url.searchParams.get("sort") || "newest", page: Number(url.searchParams.get("page") || 1), pageSize: Number(url.searchParams.get("page_size") || url.searchParams.get("limit") || 80) });
+      const rows = await dbRequest<JsonRecord[]>(env, query.path);
+      const hasMore = rows.length > query.pageSize;
+      const items = hasMore ? rows.slice(0, query.pageSize) : rows;
+      if (url.searchParams.get("meta") === "true") {
+        const total = await dbRequestCount(env, query.path);
+        return json({ items, total, page: query.page, pageSize: query.pageSize, hasMore, normalizedQuery: query.parsed?.normalized || "" });
+      }
+      return json(items);
+    } catch (searchError) {
+      return error(searchError instanceof Error ? searchError.message : "Search failed", 400);
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/mail/bulk/undo") {
+    const body = (await request.json()) as JsonRecord;
+    const requestId = String(body.requestId || "").trim();
+    if (!requestId || requestId.length > 100) return error("Undo request is invalid");
+    const cutoff = new Date(Date.now() - 30_000).toISOString();
+    const audits = await dbRequest<Array<{ message_id?: string; action_type?: string; before_state?: JsonRecord; created_at?: string }>>(
+      env,
+      `message_audit_log?owner_id=eq.${encodeURIComponent(user.id)}&request_id=eq.${encodeURIComponent(requestId)}&created_at=gte.${encodeURIComponent(cutoff)}&select=message_id,action_type,before_state,created_at&limit=500`,
+    );
+    const actionable = audits.filter((audit) => audit.action_type?.startsWith("bulk_") && audit.action_type !== "bulk_undo" && audit.message_id);
+    if (!actionable.length) return error("This action can no longer be undone", 410);
+    if (actionable.some((audit) => audit.action_type === "bulk_label" || audit.action_type === "bulk_create_task")) return error("This action cannot be undone", 409);
+    const undoneIds: string[] = [];
+    const failures: Array<{ id: string; error: string }> = [];
+    for (const audit of actionable) {
+      const id = String(audit.message_id);
+      try {
+        const before = objectValue(audit.before_state);
+        const patch: JsonRecord = {};
+        for (const key of ["folder", "custom_folder_id", "previous_folder", "is_read", "is_starred", "is_pinned", "is_flagged", "priority", "work_state", "follow_up_at", "snoozed_until"]) if (key in before) patch[key] = before[key];
+        await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify(patch) });
+        await dbRequest(env, "message_audit_log", { method: "POST", body: JSON.stringify({ owner_id: user.id, actor_id: user.id, message_id: id, action_type: "bulk_undo", target_type: "message", target_id: id, before_state: {}, after_state: patch, request_id: requestId }) });
+        undoneIds.push(id);
+      } catch (undoError) {
+        failures.push({ id, error: undoError instanceof Error ? undoError.message : "Undo failed" });
+      }
+    }
+    return json({ ok: failures.length === 0, undoneIds, failures });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/mail/bulk") {
+    const body = (await request.json()) as JsonRecord;
+    const action = objectValue(body.action);
+    const actionType = String(action.type || "");
+    const allowedActions = new Set(["archive", "move", "label", "mark_read", "mark_unread", "star", "unstar", "pin", "unpin", "flag", "unflag", "priority", "snooze", "reply_later", "waiting_on", "i_owe", "spam", "trash", "restore", "export", "create_task"]);
+    if (!allowedActions.has(actionType)) return error(`Unsupported bulk action "${actionType}"`);
+    const requestId = String(body.idempotencyKey || crypto.randomUUID()).trim().slice(0, 100);
+    const replay = await dbRequest<Array<{ message_id?: string }>>(env, `message_audit_log?owner_id=eq.${encodeURIComponent(user.id)}&request_id=eq.${encodeURIComponent(requestId)}&action_type=like.bulk_*&select=message_id&limit=500`).catch(() => []);
+    if (replay.length) return json({ ok: true, replayed: true, requestId, changedIds: [...new Set(replay.map((row) => String(row.message_id || "")).filter(Boolean))], failures: [] });
+    const scope = body.scope === "all_results" ? "all_results" : "selected";
+    const failures: Array<{ id: string; error: string }> = [];
+    let rows: JsonRecord[] = [];
+    let truncated = false;
+    if (scope === "selected") {
+      const requested = Array.isArray(body.messageIds) ? [...new Set(body.messageIds.map(String).filter(Boolean))].slice(0, 100) : [];
+      const ids = requested.filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+      requested.filter((id) => !ids.includes(id)).forEach((id) => failures.push({ id, error: "Invalid message id" }));
+      if (!ids.length) return error("Select at least one message");
+      rows = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(user.id)}&id=${encodeURIComponent(`in.(${ids.join(",")})`)}&select=id,thread_id,mailbox_id,folder,custom_folder_id,previous_folder,is_read,is_starred,is_pinned,is_flagged,priority,work_state,follow_up_at,snoozed_until,subject,from_address,to_addresses,snippet,text_body&limit=100`);
+      const found = new Set(rows.map((row) => String(row.id)));
+      ids.filter((id) => !found.has(id)).forEach((id) => failures.push({ id, error: "Message not found or not owned" }));
+    } else {
+      const query = await buildMailQuery(env, user.id, { folder: String(body.folder || "all"), query: String(body.query || ""), filter: "all", sort: "newest", page: 1, pageSize: 500 });
+      const result = await dbRequest<JsonRecord[]>(env, query.path);
+      truncated = result.length > 500;
+      rows = truncated ? result.slice(0, 500) : result;
+    }
+    const changedIds: string[] = [];
+    const exportRows: JsonRecord[] = [];
+    for (const row of rows) {
+      try {
+        const result = await applyBulkMessageAction(env, user.id, row, action, requestId);
+        if (result.changed) changedIds.push(String(row.id));
+        if (result.exportRow) exportRows.push(result.exportRow);
+      } catch (actionError) {
+        failures.push({ id: String(row.id), error: actionError instanceof Error ? actionError.message : "Action failed" });
+      }
+    }
+    return json({ ok: failures.length === 0, requestId, scope, requestedCount: scope === "all_results" ? rows.length : (Array.isArray(body.messageIds) ? body.messageIds.length : 0), changedIds, exported: exportRows, failures, truncated, undoable: ["archive", "move", "mark_read", "mark_unread", "star", "unstar", "pin", "unpin", "flag", "unflag", "priority", "snooze", "reply_later", "waiting_on", "i_owe", "spam", "trash", "restore"].includes(actionType) });
   }
 
   const messageMatch = url.pathname.match(/^\/api\/mail\/([^/]+)$/);
@@ -800,3 +1248,5 @@ export default {
     catch (ingestError) { message.setReject(ingestError instanceof Error ? ingestError.message.slice(0, 180) : "Inbound processing failed"); }
   },
 };
+
+export { buildMailQuery, parseSearchQuery };
