@@ -1593,8 +1593,26 @@ function SettingsPanel({
     setSecurityBusy(true);
     setSecurityError("");
     try {
-      if (mfaPendingFactor) throw new Error("An unfinished authenticator setup is already waiting. Discard it below before starting a new one.");
-      const result = await requireSupabase().auth.mfa.enroll({ factorType: "totp", friendlyName: "Parcel authenticator" });
+      const client = requireSupabase();
+      const factorsResult = await client.auth.mfa.listFactors();
+      if (factorsResult.error) throw factorsResult.error;
+      const pendingFactor = ([...(factorsResult.data?.totp || []), ...(factorsResult.data?.phone || [])] as MfaFactor[]).find((factor) => factor.factor_type === "totp" && factor.status === "unverified") || null;
+      if (pendingFactor) {
+        const discarded = await client.auth.mfa.unenroll({ factorId: pendingFactor.id });
+        if (discarded.error) throw discarded.error;
+        setMfaPendingFactor(null);
+      }
+      let result = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "Parcel authenticator" });
+      if (result.error && /friendly name.*already exists/i.test(result.error.message)) {
+        const retryFactors = await client.auth.mfa.listFactors();
+        if (retryFactors.error) throw retryFactors.error;
+        const retryPending = ([...(retryFactors.data?.totp || []), ...(retryFactors.data?.phone || [])] as MfaFactor[]).find((factor) => factor.factor_type === "totp" && factor.status === "unverified") || null;
+        if (retryPending) {
+          const discarded = await client.auth.mfa.unenroll({ factorId: retryPending.id });
+          if (discarded.error) throw discarded.error;
+          result = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "Parcel authenticator" });
+        }
+      }
       if (result.error) throw result.error;
       setMfaSetup({ id: result.data.id, qrCode: result.data.totp.qr_code, secret: result.data.totp.secret, uri: result.data.totp.uri });
       setMfaPendingFactor(null);
@@ -1613,7 +1631,7 @@ function SettingsPanel({
           // Keep the actionable duplicate-name message even if the refresh fails.
         }
         setMfaPendingFactor(pendingFactor);
-        setSecurityError(pendingFactor ? "An unfinished authenticator setup already exists. Discard it below, then start again." : "An authenticator with this name already exists. Refresh Security & access before starting again.");
+        setSecurityError(pendingFactor ? "An unfinished authenticator setup already exists. Click Generate a new QR code to replace it." : "An authenticator with this name already exists. Refresh Security & access before starting again.");
       } else {
         setSecurityError(message || "Could not start authenticator setup");
       }
@@ -1659,22 +1677,6 @@ function SettingsPanel({
       await loadSecurity();
     } catch (cancelError) {
       setSecurityError(cancelError instanceof Error ? cancelError.message : "Could not cancel authenticator setup");
-    } finally {
-      setSecurityBusy(false);
-    }
-  }
-  async function discardPendingMfaSetup() {
-    if (!mfaPendingFactor || !window.confirm("Discard the unfinished authenticator setup?")) return;
-    setSecurityBusy(true);
-    setSecurityError("");
-    try {
-      const result = await requireSupabase().auth.mfa.unenroll({ factorId: mfaPendingFactor.id });
-      if (result.error) throw result.error;
-      setMfaPendingFactor(null);
-      setNotice("Unfinished authenticator setup discarded");
-      await loadSecurity();
-    } catch (discardError) {
-      setSecurityError(discardError instanceof Error ? discardError.message : "Could not discard the unfinished authenticator setup");
     } finally {
       setSecurityBusy(false);
     }
@@ -1772,7 +1774,8 @@ function SettingsPanel({
                 <span className={`security-status ${mfaFactors.length ? "enabled" : mfaPendingFactor ? "pending" : ""}`}>{mfaFactors.length ? "On" : mfaPendingFactor ? "Setup paused" : "Off"}</span>
               </div>
               {mfaFactors.length === 0 && !mfaSetup && !mfaPendingFactor && <button className="secondary-button" onClick={() => void beginMfaSetup()} disabled={securityBusy}><ShieldAlert size={15} /> Set up authenticator app</button>}
-              {mfaPendingFactor && !mfaSetup && <div className="mfa-pending"><strong>Authenticator setup is waiting</strong><small>You closed setup before verifying the code. Discard this unfinished setup to generate a fresh QR code.</small><button className="secondary-button" onClick={() => void discardPendingMfaSetup()} disabled={securityBusy}>Discard unfinished setup</button></div>}
+              {mfaPendingFactor && !mfaSetup && <div className="mfa-pending"><strong>Previous authenticator setup found</strong><small>You closed setup before verifying the code. Starting again will replace that unfinished factor with a fresh QR code.</small></div>}
+              {mfaFactors.length === 0 && !mfaSetup && <button className="secondary-button" onClick={() => void beginMfaSetup()} disabled={securityBusy}><ShieldAlert size={15} /> {securityBusy ? "Generating QR code…" : mfaPendingFactor ? "Generate a new QR code" : "Set up authenticator app"}</button>}
               {mfaFactors.map((factor) => <div className="settings-item security-factor" key={factor.id}><div><strong>{factor.friendly_name || (factor.factor_type === "totp" ? "Authenticator app" : "Phone")}</strong><small>Verified · {factor.factor_type.toUpperCase()}</small></div><button className="text-button danger-text-button" onClick={() => void removeMfaFactor(factor)} disabled={securityBusy}>Remove</button></div>)}
               {mfaSetup && <div className="mfa-enrollment">
                 <strong>Scan this QR code</strong>
