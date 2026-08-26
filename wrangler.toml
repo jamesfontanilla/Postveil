@@ -1,4 +1,4 @@
-name = "james-email-service"
+name = "email-service"
 main = "worker/index.ts"
 compatibility_date = "2026-08-25"
 compatibility_flags = ["nodejs_compat"]

@@ -529,18 +529,22 @@ async function handleDraft(env: Env, user: User, body: JsonRecord): Promise<Resp
   return json(rows?.[0] || null, 201);
 }
 
-function protectedHeaders(response: Response): Response {
+function protectedHeaders(response: Response, noStore = false): Response {
   const headers = new Headers(response.headers);
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  if (noStore || headers.get("content-type")?.includes("text/html")) {
+    headers.set("Cache-Control", "no-store");
+    headers.set("CDN-Cache-Control", "no-store");
+  }
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname === "/api/health") return json({ ok: true, service: "james-email-service", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
+  if (url.pathname === "/api/health") return json({ ok: true, service: "email-service", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
   if (url.pathname === "/api/webhooks/brevo") {
     const secret = url.searchParams.get("token") || request.headers.get("x-webhook-secret");
     if (env.BREVO_WEBHOOK_SECRET && secret !== env.BREVO_WEBHOOK_SECRET) return error("Unauthorized", 401);
@@ -710,7 +714,9 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) { try { return protectedHeaders(await api(request, env, ctx)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
-    return protectedHeaders(await env.ASSETS.fetch(request));
+    const assetResponse = await env.ASSETS.fetch(request);
+    const noStoreAsset = url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest";
+    return protectedHeaders(assetResponse, noStoreAsset);
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await processScheduled(env); },
   async email(message: { from: string; to: string; raw: ReadableStream<Uint8Array>; forward: (address: string) => Promise<void>; setReject: (reason: string) => void }, env: Env, ctx: ExecutionContext): Promise<void> {
