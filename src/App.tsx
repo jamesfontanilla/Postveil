@@ -10,17 +10,22 @@ import {
 } from "react";
 import {
   Archive,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Bell,
+  Bookmark,
+  Briefcase,
   CalendarDays,
   Check,
   ChevronDown,
   Clock3,
+  Download,
   Eye,
   Flag,
   FolderPlus,
   Forward,
+  History,
   Inbox,
   ListTodo,
   LogOut,
@@ -33,9 +38,9 @@ import {
   Pencil,
   PenLine,
   Pin,
-  Play,
   Plus,
   RefreshCcw,
+  RotateCcw,
   Search,
   Send,
   Settings2,
@@ -44,7 +49,9 @@ import {
   Star,
   Tag,
   Trash2,
+  Undo2,
   UploadCloud,
+  Upload,
   Users,
   X,
 } from "lucide-react";
@@ -61,6 +68,7 @@ type Message = {
   folder: string;
   status: string;
   custom_folder_id?: string | null;
+  previous_folder?: string | null;
   from_name?: string | null;
   from_address: string;
   to_addresses: string[];
@@ -83,7 +91,12 @@ type Message = {
   spam_reasons?: string[];
   focused_category?: string;
   scheduled_at?: string | null;
+  send_after?: string | null;
+  cancelled_at?: string | null;
   snoozed_until?: string | null;
+  work_state?: "none" | "reply_later" | "waiting_on" | "i_owe" | string | null;
+  follow_up_at?: string | null;
+  work_note?: string | null;
   received_at?: string;
   sent_at?: string;
   created_at: string;
@@ -92,6 +105,10 @@ type Message = {
     filename: string;
     content_type: string;
     byte_size: number;
+    detected_content_type?: string | null;
+    preview_state?: "ready" | "not_available" | "pending" | "failed";
+    safety_status?: "unknown" | "clean_static" | "suspicious" | "blocked" | "infected";
+    safety_reasons?: string[];
   }>;
 };
 type Contact = {
@@ -110,6 +127,30 @@ type Mailbox = {
 };
 type CustomFolder = { id: string; name: string; color: string; slug: string };
 type Label = { id: string; name: string; color: string };
+type SavedSearch = {
+  id: string;
+  name: string;
+  query: string;
+  color: string;
+  sort_order: number;
+  result_count?: number | null;
+};
+type MailPage = {
+  items: Message[];
+  total: number | null;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  normalizedQuery?: string;
+};
+type SenderPolicy = {
+  id: string;
+  mailbox_id?: string | null;
+  match_type: "address" | "domain";
+  match_value: string;
+  action: "inbox" | "spam";
+  enabled: boolean;
+};
 type Signature = {
   id: string;
   name: string;
@@ -135,6 +176,26 @@ type Rule = {
   conditions: Record<string, unknown>;
   actions: Record<string, unknown>;
 };
+type RuleLabMatch = {
+  id: string;
+  subject: string;
+  fromAddress: string;
+  snippet: string;
+  folder: string;
+  reasons: string[];
+  plannedActions: Record<string, unknown>;
+};
+type RuleLabResult = {
+  runId: string;
+  mode: "preview" | "dry_run" | "apply";
+  matchedCount: number;
+  changedCount: number;
+  matches?: RuleLabMatch[];
+  impact?: { folders: Record<string, number>; labels: number; markRead: number; forwardCount: number; total: number };
+  conflicts?: Array<{ severity: "error" | "warning"; message: string }>;
+  failures?: Array<{ id: string; error: string }>;
+  undoable?: boolean;
+};
 type AutoReply = {
   id?: string;
   mailbox_id?: string;
@@ -151,6 +212,7 @@ type AppSettings = {
   timezone?: string;
   focused_inbox_enabled?: boolean;
   desktop_notifications?: boolean;
+  send_undo_seconds?: 0 | 10 | 20 | 30;
 };
 type Task = {
   id: string;
@@ -159,6 +221,15 @@ type Task = {
   due_at?: string | null;
   priority: number;
   completed: boolean;
+  source_message_id?: string | null;
+};
+type WorkItem = Message & { overdue?: boolean };
+type WorkSummary = {
+  reply_later: number;
+  waiting_on: number;
+  i_owe: number;
+  overdue: number;
+  total: number;
 };
 type CalendarEvent = {
   id: string;
@@ -239,6 +310,7 @@ function formatDate(value?: string) {
     : d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 function messageStatusLabel(message: Message) {
+  if (message.cancelled_at) return "Cancelled";
   if (message.direction === "inbound" && message.status === "queued") return "Receiving";
   if (message.direction === "outbound" && message.status === "queued") return "Sending";
   if (message.status === "received") return "Received";
@@ -248,6 +320,17 @@ function messageStatusLabel(message: Message) {
   if (message.status === "bounced") return "Bounced";
   if (message.status === "scheduled") return "Scheduled";
   return message.status;
+}
+function workStateLabel(state?: string | null) {
+  if (state === "reply_later") return "Reply later";
+  if (state === "waiting_on") return "Waiting on";
+  if (state === "i_owe") return "I owe";
+  return "No work state";
+}
+function workDueLabel(value?: string | null) {
+  if (!value) return "No follow-up date";
+  const date = new Date(value);
+  return date.getTime() <= Date.now() ? `Overdue · ${date.toLocaleString()}` : `Follow up · ${date.toLocaleString()}`;
 }
 function splitQuotedBody(value: string) {
   const lines = value.split(/\r?\n/);
@@ -266,6 +349,17 @@ function formatBytes(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
+class ApiError extends Error {
+  status: number;
+  payload: Record<string, unknown>;
+  constructor(message: string, status: number, payload: Record<string, unknown>) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = (await requireSupabase().auth.getSession()).data.session;
   const response = await fetch(path, {
@@ -280,7 +374,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new Error(payload.error || `Request failed (${response.status})`);
+    throw new ApiError(payload.error || `Request failed (${response.status})`, response.status, payload);
   return payload as T;
 }
 
@@ -409,12 +503,14 @@ function AuthScreen() {
 function Compose({
   mailboxes,
   signatures,
+  undoSeconds,
   seed,
   onClose,
   onSent,
 }: {
   mailboxes: Mailbox[];
   signatures: Signature[];
+  undoSeconds: 0 | 10 | 20 | 30;
   seed?: ComposeSeed;
   onClose: () => void;
   onSent: () => void;
@@ -448,6 +544,8 @@ function Compose({
   const [isMinimized, setIsMinimized] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<Array<{ code: string; title: string; detail: string }>>([]);
+  const idempotencyKeyRef = useRef(crypto.randomUUID());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveDraft = useCallback(async () => {
     if (!fromAddress || (!to.trim() && !subject.trim() && !text.trim())) return;
@@ -558,6 +656,9 @@ function Compose({
           subject,
           text,
           scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          undoSendSeconds: undoSeconds,
+          idempotencyKey: idempotencyKeyRef.current,
+          warningsAcknowledged: warnings.map((warning) => warning.code),
           threadId: seed?.threadId,
           inReplyTo: seed?.inReplyTo,
           references: seed?.references,
@@ -567,11 +668,16 @@ function Compose({
       onSent();
       onClose();
     } catch (sendError) {
-      setError(
-        sendError instanceof Error
-          ? sendError.message
-          : "The message could not be sent",
-      );
+      if (sendError instanceof ApiError && Array.isArray(sendError.payload.warnings)) {
+        setWarnings(sendError.payload.warnings as Array<{ code: string; title: string; detail: string }>);
+        setError("");
+      } else {
+        setError(
+          sendError instanceof Error
+            ? sendError.message
+            : "The message could not be sent",
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -791,6 +897,13 @@ function Compose({
             <input ref={fileInputRef} type="file" multiple onChange={upload} />
           </label>
         </div>
+        {warnings.length > 0 && (
+          <div className="compose-warning" role="alert">
+            <div className="compose-warning-head"><AlertTriangle size={15} /><strong>Review before sending</strong></div>
+            {warnings.map((warning) => <p key={warning.code}><strong>{warning.title}.</strong> {warning.detail}</p>)}
+            <small>Send again to confirm these checks.</small>
+          </div>
+        )}
         <div className="attachment-strip" aria-live="polite">
           {attachments.map((attachment) => (
             <span className="attachment-chip" key={attachment.object_key}>
@@ -876,6 +989,7 @@ function SettingsPanel({
   labels,
   mailboxes,
   rules,
+  senderPolicies,
   onClose,
   onChanged,
 }: {
@@ -884,6 +998,7 @@ function SettingsPanel({
   labels: Label[];
   mailboxes: Mailbox[];
   rules: Rule[];
+  senderPolicies: SenderPolicy[];
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -891,6 +1006,7 @@ function SettingsPanel({
     | "appearance"
     | "organize"
     | "contacts"
+    | "spam"
     | "automation"
     | "mailboxes"
     | "integrations"
@@ -900,6 +1016,10 @@ function SettingsPanel({
   const [contactEmail, setContactEmail] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactAvatarUrl, setContactAvatarUrl] = useState("");
+  const [policyType, setPolicyType] = useState<"address" | "domain">("address");
+  const [policyValue, setPolicyValue] = useState("");
+  const [policyAction, setPolicyAction] = useState<"inbox" | "spam">("inbox");
+  const [policyBusy, setPolicyBusy] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleName, setRuleName] = useState("");
   const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([
@@ -929,6 +1049,9 @@ function SettingsPanel({
     body: "",
   });
   const [notice, setNotice] = useState("");
+  const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
+  const [ruleLabBusy, setRuleLabBusy] = useState(false);
+  const ruleImportRef = useRef<HTMLInputElement>(null);
   async function updateSettings(patch: JsonSettings) {
     await apiFetch("/api/settings", {
       method: "PATCH",
@@ -967,6 +1090,52 @@ function SettingsPanel({
     setContactAvatarUrl("");
     setNotice("Contact saved");
     onChanged();
+  }
+  async function createSenderPolicy() {
+    if (!policyValue.trim()) {
+      setNotice(`Enter a ${policyType === "domain" ? "domain" : "sender address"}`);
+      return;
+    }
+    setPolicyBusy(true);
+    try {
+      await apiFetch("/api/sender-policies", {
+        method: "POST",
+        body: JSON.stringify({
+          matchType: policyType,
+          matchValue: policyValue,
+          action: policyAction,
+        }),
+      });
+      setPolicyValue("");
+      setNotice(policyAction === "inbox" ? "Trusted sender saved" : "Blocked sender saved");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not save sender policy");
+    } finally {
+      setPolicyBusy(false);
+    }
+  }
+  async function toggleSenderPolicy(policy: SenderPolicy) {
+    try {
+      await apiFetch(`/api/sender-policies/${policy.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !policy.enabled }),
+      });
+      setNotice(policy.enabled ? "Sender policy paused" : "Sender policy enabled");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not update sender policy");
+    }
+  }
+  async function deleteSenderPolicy(policy: SenderPolicy) {
+    if (!window.confirm(`Remove this ${policy.action === "inbox" ? "trusted" : "blocked"} ${policy.match_type}?`)) return;
+    try {
+      await apiFetch(`/api/sender-policies/${policy.id}`, { method: "DELETE" });
+      setNotice("Sender policy removed");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not remove sender policy");
+    }
   }
   function resetRuleEditor() {
     setEditingRuleId(null);
@@ -1102,13 +1271,74 @@ function SettingsPanel({
       setNotice(caught instanceof Error ? caught.message : "Could not reorder rules");
     }
   }
-  async function runRule(rule: Rule) {
+  async function runRuleLab(rule: Rule, mode: "preview" | "dry-run") {
+    setRuleLabBusy(true);
     try {
-      const result = await apiFetch<{ matched: number; note?: string }>(`/api/rules/${rule.id}:run`, { method: "POST" });
-      setNotice(`${rule.name} matched ${result.matched} existing message${result.matched === 1 ? "" : "s"}.${result.note ? ` ${result.note}` : ""}`);
+      const result = await apiFetch<RuleLabResult>(`/api/rules/${rule.id}/${mode}`, { method: "POST" });
+      setRuleLab({ rule, result });
+      setNotice(mode === "preview" ? "Preview ready — no messages changed" : "Dry-run ready — review the impact before applying");
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Could not preview this rule");
+    } finally {
+      setRuleLabBusy(false);
+    }
+  }
+  async function applyRuleLab() {
+    if (!ruleLab) return;
+    setRuleLabBusy(true);
+    try {
+      const result = await apiFetch<RuleLabResult>(`/api/rules/${ruleLab.rule.id}/apply`, { method: "POST", body: JSON.stringify({ runId: ruleLab.result.runId }) });
+      setRuleLab({ rule: ruleLab.rule, result });
+      setNotice(`${result.changedCount} message${result.changedCount === 1 ? "" : "s"} updated. Undo is available for 30 seconds.`);
       onChanged();
     } catch (caught) {
-      setNotice(caught instanceof Error ? caught.message : "Could not run rule");
+      setNotice(caught instanceof Error ? caught.message : "Could not apply this rule");
+    } finally {
+      setRuleLabBusy(false);
+    }
+  }
+  async function undoRuleLab() {
+    if (!ruleLab) return;
+    setRuleLabBusy(true);
+    try {
+      await apiFetch(`/api/rule-runs/${ruleLab.result.runId}/undo`, { method: "POST" });
+      setRuleLab(null);
+      setNotice("Rule changes undone");
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Rule undo is no longer available");
+    } finally {
+      setRuleLabBusy(false);
+    }
+  }
+  async function exportRules() {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch("/api/rules/export", { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "parcel-rules.json";
+      link.click();
+      URL.revokeObjectURL(url);
+      setNotice("Rules exported");
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Rules could not be exported");
+    }
+  }
+  async function importRules(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const payload = JSON.parse(await file.text()) as Record<string, unknown>;
+      const result = await apiFetch<{ imported: number; failures: Array<{ index: number; error: string }> }>("/api/rules/import", { method: "POST", body: JSON.stringify(payload) });
+      setNotice(`${result.imported} rule${result.imported === 1 ? "" : "s"} imported${result.failures.length ? ` · ${result.failures.length} skipped` : ""}`);
+      onChanged();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Rules file could not be imported");
     }
   }
   async function createSignature() {
@@ -1202,6 +1432,7 @@ function SettingsPanel({
               ["appearance", "Appearance"],
               ["organize", "Folders & labels"],
               ["contacts", "Contacts"],
+              ["spam", "Spam & trust"],
               ["automation", "Rules & signatures"],
               ["mailboxes", "Mailboxes"],
               ["integrations", "Integrations"],
@@ -1253,6 +1484,19 @@ function SettingsPanel({
                   Compact
                 </button>
               </div>
+              <label className="settings-select-row">
+                <span>Undo Send</span>
+                <select
+                  value={settings.send_undo_seconds ?? 0}
+                  onChange={(event) => void updateSettings({ send_undo_seconds: Number(event.target.value) })}
+                >
+                  <option value={0}>Off</option>
+                  <option value={10}>10 seconds</option>
+                  <option value={20}>20 seconds</option>
+                  <option value={30}>30 seconds</option>
+                </select>
+              </label>
+              <small className="setting-note">New messages wait this long before the sending queue releases them.</small>
             </div>
             <div className="setting-card">
               <h3>Attention</h3>
@@ -1366,6 +1610,78 @@ function SettingsPanel({
               >
                 <Users size={15} /> Save contact
               </button>
+            </div>
+          </div>
+        )}
+        {tab === "spam" && (
+          <div className="settings-grid spam-settings-grid">
+            <div className="setting-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Sender decisions</h3>
+                  <p>Trust a sender you know or block mail before it reaches the Inbox.</p>
+                </div>
+                <ShieldAlert size={18} aria-hidden="true" />
+              </div>
+              <div className="policy-form">
+                <select value={policyAction} onChange={(event) => setPolicyAction(event.target.value as typeof policyAction)} aria-label="Sender decision">
+                  <option value="inbox">Always trust</option>
+                  <option value="spam">Always block</option>
+                </select>
+                <select value={policyType} onChange={(event) => setPolicyType(event.target.value as typeof policyType)} aria-label="Sender match type">
+                  <option value="address">This email address</option>
+                  <option value="domain">This domain</option>
+                </select>
+                <input
+                  value={policyValue}
+                  onChange={(event) => setPolicyValue(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") void createSenderPolicy(); }}
+                  placeholder={policyType === "domain" ? "example.com" : "sender@example.com"}
+                  aria-label={policyType === "domain" ? "Domain" : "Email address"}
+                  type={policyType === "domain" ? "text" : "email"}
+                />
+                <button className="secondary-button" onClick={() => void createSenderPolicy()} disabled={policyBusy}>
+                  {policyAction === "inbox" ? <Check size={15} /> : <ShieldAlert size={15} />}
+                  {policyBusy ? "Saving…" : policyAction === "inbox" ? "Trust" : "Block"}
+                </button>
+              </div>
+              <small className="field-help">A trusted sender still cannot bypass confirmed malware or a dangerous attachment.</small>
+            </div>
+            <div className="setting-card policy-list-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Saved decisions</h3>
+                  <p>These choices override the normal spam score for matching mail.</p>
+                </div>
+                <span className="rule-count">{senderPolicies.length}</span>
+              </div>
+              {senderPolicies.length === 0 ? (
+                <div className="rule-empty">No sender decisions yet.</div>
+              ) : senderPolicies.map((policy) => (
+                <div className={`settings-item policy-item ${policy.enabled ? "" : "disabled"}`} key={policy.id}>
+                  <div className="policy-copy">
+                    <strong>{policy.match_value}</strong>
+                    <small>{policy.action === "inbox" ? "Trusted" : "Blocked"} · {policy.match_type}</small>
+                  </div>
+                  <div className="rule-list-actions">
+                    <label className="rule-toggle" title={policy.enabled ? "Pause policy" : "Enable policy"}>
+                      <input type="checkbox" checked={policy.enabled} onChange={() => void toggleSenderPolicy(policy)} aria-label={`${policy.enabled ? "Disable" : "Enable"} ${policy.match_value}`} />
+                      <span />
+                    </label>
+                    <button className="icon-button compact-icon danger-icon" onClick={() => void deleteSenderPolicy(policy)} aria-label={`Remove ${policy.match_value}`} title="Remove"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="setting-card spam-explainer-card">
+              <h3>How screening works</h3>
+              <p>Parcel combines authentication alignment, sender history, user feedback, links, risky requests, and attachments.</p>
+              <div className="screening-legend">
+                <span><i className="legend-dot safe" /> Inbox</span>
+                <span><i className="legend-dot review" /> Warning</span>
+                <span><i className="legend-dot danger" /> Spam</span>
+              </div>
+              <small className="field-help">One failed authentication check is only a signal. Messages need multiple risk signals before automatic Spam placement.</small>
             </div>
           </div>
         )}
@@ -1550,9 +1866,14 @@ function SettingsPanel({
               <div className="setting-card-head">
                 <div>
                   <h3>Rules in order</h3>
-                  <p>Disable, reorder, edit, or run a rule against recent mail.</p>
+                  <p>Preview a rule first, then apply it with a short undo window.</p>
                 </div>
-                <span className="rule-count">{rules.length}</span>
+                <div className="rule-list-head-actions">
+                  <button className="text-button" onClick={() => void exportRules()} title="Download rules as JSON"><Download size={13} /> Export</button>
+                  <button className="text-button" onClick={() => ruleImportRef.current?.click()} title="Import rules from JSON"><Upload size={13} /> Import</button>
+                  <input ref={ruleImportRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void importRules(event)} />
+                  <span className="rule-count">{rules.length}</span>
+                </div>
               </div>
               {rules.length === 0 ? (
                 <div className="rule-empty">No rules yet. Build your first one on the left.</div>
@@ -1579,13 +1900,57 @@ function SettingsPanel({
                       <button className="icon-button compact-icon" disabled={index === 0} onClick={() => void reorderRule(index, -1)} aria-label="Move rule up" title="Move up"><ArrowUp size={14} /></button>
                       <button className="icon-button compact-icon" disabled={index === rules.length - 1} onClick={() => void reorderRule(index, 1)} aria-label="Move rule down" title="Move down"><ArrowDown size={14} /></button>
                       <button className="icon-button compact-icon" onClick={() => editRule(rule)} aria-label="Edit rule" title="Edit"><Pencil size={14} /></button>
-                      <button className="icon-button compact-icon" onClick={() => void runRule(rule)} aria-label="Run rule now" title="Run on existing mail"><Play size={14} /></button>
+                      <button className="icon-button compact-icon" onClick={() => void runRuleLab(rule, "preview")} aria-label="Preview rule" title="Preview existing mail"><Eye size={14} /></button>
                       <button className="icon-button compact-icon danger-icon" onClick={() => void deleteRule(rule)} aria-label="Delete rule" title="Delete"><Trash2 size={14} /></button>
                     </div>
                   </article>
                 );
               })}
             </div>
+            {ruleLab && (
+              <div className="setting-card rule-lab-panel" aria-live="polite">
+                <div className="setting-card-head">
+                  <div>
+                    <p className="eyebrow">RULE LAB</p>
+                    <h3>{ruleLab.rule.name}</h3>
+                    <p>{ruleLab.result.mode === "apply" ? `${ruleLab.result.changedCount} changed` : `${ruleLab.result.matchedCount} matching messages`} · {ruleLab.result.mode === "preview" ? "Preview only" : ruleLab.result.mode === "dry_run" ? "Dry-run only" : "Applied"}</p>
+                  </div>
+                  <button className="icon-button compact-icon" onClick={() => setRuleLab(null)} aria-label="Close rule lab"><X size={14} /></button>
+                </div>
+                {(ruleLab.result.conflicts || []).length > 0 && (
+                  <div className="rule-conflicts">
+                    {(ruleLab.result.conflicts || []).map((conflict, index) => (
+                      <div className={conflict.severity === "error" ? "rule-conflict error" : "rule-conflict"} key={`${conflict.message}-${index}`}>
+                        <AlertTriangle size={14} /> <span>{conflict.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {ruleLab.result.impact && (
+                  <div className="rule-impact-grid">
+                    <div><strong>{ruleLab.result.impact.total}</strong><span>matches</span></div>
+                    <div><strong>{Object.values(ruleLab.result.impact.folders).reduce((total, count) => total + count, 0)}</strong><span>folder moves</span></div>
+                    <div><strong>{ruleLab.result.impact.labels}</strong><span>labels</span></div>
+                    <div><strong>{ruleLab.result.impact.forwardCount}</strong><span>forwards skipped</span></div>
+                  </div>
+                )}
+                {ruleLab.result.matches && ruleLab.result.matches.length > 0 ? (
+                  <div className="rule-match-list">
+                    {ruleLab.result.matches.slice(0, 5).map((match) => (
+                      <div className="rule-match-item" key={match.id}>
+                        <div><strong>{match.subject}</strong><small>{match.fromAddress} · {match.folder}</small></div>
+                        <span title={match.reasons.join(" · ")}>{match.reasons[0] || "Matched"}</span>
+                      </div>
+                    ))}
+                    {ruleLab.result.matches.length > 5 && <small className="rule-muted">Showing 5 of {ruleLab.result.matches.length} matches.</small>}
+                  </div>
+                ) : <div className="rule-empty">No existing messages match this rule.</div>}
+                <div className="rule-lab-actions">
+                  <button className="secondary-button" onClick={() => void runRuleLab(ruleLab.rule, "dry-run")} disabled={ruleLabBusy}><History size={14} /> Dry-run</button>
+                  {ruleLab.result.mode !== "apply" ? <button className="primary-button" onClick={() => { if (window.confirm(`Apply “${ruleLab.rule.name}” to ${ruleLab.result.matchedCount} existing message${ruleLab.result.matchedCount === 1 ? "" : "s"}?`)) void applyRuleLab(); }} disabled={ruleLabBusy || !ruleLab.result.matchedCount || (ruleLab.result.conflicts || []).some((conflict) => conflict.severity === "error")}><Check size={14} /> Apply changes</button> : ruleLab.result.undoable ? <button className="secondary-button" onClick={() => void undoRuleLab()} disabled={ruleLabBusy}><RotateCcw size={14} /> Undo changes</button> : null}
+                </div>
+              </div>
+            )}
             <div className="setting-card">
               <h3>Signatures</h3>
               <input
@@ -1763,11 +2128,17 @@ function Workspace({
   mode,
   tasks,
   events,
+  workItems,
+  workSummary,
+  onOpenMessage,
   onRefresh,
 }: {
   mode: "calendar" | "tasks";
   tasks: Task[];
   events: CalendarEvent[];
+  workItems: WorkItem[];
+  workSummary: WorkSummary;
+  onOpenMessage: (message: Message) => void;
   onRefresh: () => void;
 }) {
   const [title, setTitle] = useState("");
@@ -1844,7 +2215,7 @@ function Workspace({
               </>
             ) : (
               <>
-                <ListTodo size={23} /> To Do
+                <Briefcase size={23} /> Work
               </>
             )}
           </h1>
@@ -1852,10 +2223,18 @@ function Workspace({
         <div className="workspace-stamp">
           {mode === "calendar"
             ? "Events from email can become appointments."
-            : "Turn a message into a next action."}
+            : "Keep promises, follow-ups, and next actions in one queue."}
         </div>
       </div>
       {error && <div className="inline-error workspace-error">{error}</div>}
+      {mode === "tasks" && (
+        <div className="work-summary" aria-label="Work summary">
+          <div className="work-summary-card"><span>Reply later</span><strong>{workSummary.reply_later}</strong></div>
+          <div className="work-summary-card"><span>Waiting on</span><strong>{workSummary.waiting_on}</strong></div>
+          <div className="work-summary-card"><span>I owe</span><strong>{workSummary.i_owe}</strong></div>
+          <div className={`work-summary-card ${workSummary.overdue ? "overdue" : ""}`}><span>Overdue</span><strong>{workSummary.overdue}</strong></div>
+        </div>
+      )}
       <div className="workspace-grid">
         <div className="setting-card workspace-create">
           <h3>{mode === "calendar" ? "Add an event" : "Add a task"}</h3>
@@ -1896,32 +2275,28 @@ function Workspace({
                 <p>No events yet.</p>
               </div>
             )
-          ) : tasks.length ? (
-            tasks.map((task) => (
-              <label
-                className={`task-card ${task.completed ? "completed" : ""}`}
-                key={task.id}
-              >
-                <input
-                  type="checkbox"
-                  checked={task.completed}
-                  onChange={() => void toggleTask(task)}
-                />
-                <span>
-                  <strong>{task.title}</strong>
-                  <small>
-                    {task.due_at
-                      ? `Due ${new Date(task.due_at).toLocaleString()}`
-                      : "No due date"}
-                  </small>
-                </span>
-              </label>
-            ))
           ) : (
-            <div className="list-empty">
-              <ListTodo size={25} />
-              <p>No tasks yet.</p>
-            </div>
+            <>
+              <div className="work-queue-head"><div><p className="eyebrow">MESSAGE QUEUE</p><h3>Follow-ups</h3></div><span>{workItems.length} open</span></div>
+              {workItems.length ? workItems.map((item) => (
+                <article className={`work-item ${item.overdue ? "overdue" : ""}`} key={item.id}>
+                  <button onClick={() => onOpenMessage(item)} className="work-item-main">
+                    <span className="work-state-label">{workStateLabel(item.work_state)}</span>
+                    <strong>{item.subject || "(no subject)"}</strong>
+                    <small>{item.from_address} · {workDueLabel(item.follow_up_at)}</small>
+                    {item.work_note && <em>{item.work_note}</em>}
+                  </button>
+                  <button className="icon-button compact-icon" onClick={() => onOpenMessage(item)} aria-label={`Open ${item.subject || "message"}`} title="Open message"><ArrowDown size={14} className="open-work-icon" /></button>
+                </article>
+              )) : <div className="list-empty compact-empty"><Briefcase size={25} /><p>No message follow-ups yet.</p><small>Use Reply later, Waiting on, or I owe from a message.</small></div>}
+              <div className="work-queue-head task-queue-head"><div><p className="eyebrow">TASKS</p><h3>To Do</h3></div><span>{tasks.filter((task) => !task.completed).length} open</span></div>
+              {tasks.length ? tasks.map((task) => (
+                <label className={`task-card ${task.completed ? "completed" : ""}`} key={task.id}>
+                  <input type="checkbox" checked={task.completed} onChange={() => void toggleTask(task)} />
+                  <span><strong>{task.title}</strong><small>{task.due_at ? `Due ${new Date(task.due_at).toLocaleString()}` : "No due date"}</small></span>
+                </label>
+              )) : <div className="list-empty compact-empty"><ListTodo size={25} /><p>No tasks yet.</p></div>}
+            </>
           )}
         </div>
       </div>
@@ -1939,6 +2314,8 @@ function MailboxApp({ session }: { session: Session }) {
   const [labels, setLabels] = useState<Label[]>([]);
   const [signatures, setSignatures] = useState<Signature[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
+  const [senderPolicies, setSenderPolicies] = useState<SenderPolicy[]>([]);
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
   const [settings, setSettings] = useState<AppSettings>({
     theme: "light",
     density: "comfortable",
@@ -1946,6 +2323,8 @@ function MailboxApp({ session }: { session: Session }) {
   });
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [workItems, setWorkItems] = useState<WorkItem[]>([]);
+  const [workSummary, setWorkSummary] = useState<WorkSummary>({ reply_later: 0, waiting_on: 0, i_owe: 0, overdue: 0, total: 0 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
@@ -1962,10 +2341,27 @@ function MailboxApp({ session }: { session: Session }) {
   const [showAllThreadMessages, setShowAllThreadMessages] = useState(false);
   const [showMessageDetails, setShowMessageDetails] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
+  const [trashBusy, setTrashBusy] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectAllResults, setSelectAllResults] = useState(false);
+  const [bulkAction, setBulkAction] = useState("archive");
+  const [bulkFolder, setBulkFolder] = useState("archive");
+  const [bulkLabelId, setBulkLabelId] = useState("");
+  const [bulkPriority, setBulkPriority] = useState("1");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkNotice, setBulkNotice] = useState("");
+  const [bulkUndo, setBulkUndo] = useState<{ requestId: string; label: string } | null>(null);
+  const [savedSearchFormOpen, setSavedSearchFormOpen] = useState(false);
+  const [savedSearchName, setSavedSearchName] = useState("");
+  const [savedSearchBusy, setSavedSearchBusy] = useState(false);
+  const [activeSavedSearchId, setActiveSavedSearchId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [resultTotal, setResultTotal] = useState<number | null>(null);
   const previousMessageIds = useRef<Set<string>>(new Set());
   const loadMeta = useCallback(async () => {
     try {
-      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, preference] =
+      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, policyRows, preference, savedRows] =
         await Promise.all([
           apiFetch<Mailbox[]>("/api/mailboxes"),
           apiFetch<Contact[]>("/api/contacts"),
@@ -1973,7 +2369,9 @@ function MailboxApp({ session }: { session: Session }) {
           apiFetch<Label[]>("/api/labels"),
           apiFetch<Signature[]>("/api/signatures"),
           apiFetch<Rule[]>("/api/rules"),
+          apiFetch<SenderPolicy[]>("/api/sender-policies").catch(() => []),
           apiFetch<AppSettings>("/api/settings"),
+          apiFetch<SavedSearch[]>("/api/saved-searches?counts=true").catch(() => []),
         ]);
       setMailboxes(addresses);
       setContacts(contactRows);
@@ -1981,7 +2379,9 @@ function MailboxApp({ session }: { session: Session }) {
       setLabels(labelRows);
       setSignatures(signatureRows);
       setRules(ruleRows);
+      setSenderPolicies(policyRows);
       setSettings(preference);
+      setSavedSearches(savedRows);
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -1991,22 +2391,26 @@ function MailboxApp({ session }: { session: Session }) {
     }
   }, []);
   const loadMessages = useCallback(
-    async (target: ViewKey = folder, showLoading = true) => {
+    async (target: ViewKey = folder, showLoading = true, pageNumber = 1, append = false) => {
       if (showLoading) setLoading(true);
       setError("");
       try {
         const params = new URLSearchParams({
           folder: target,
-          limit: "80",
+          page: String(pageNumber),
+          page_size: "80",
+          filter,
           sort,
         });
         if (query.trim()) params.set("q", query.trim());
-        if (filter === "unread") params.set("unread", "true");
-        if (filter === "starred") params.set("starred", "true");
-        if (filter === "attachments") params.set("attachments", "true");
-        setMessages(
-          await apiFetch<Message[]>(`/api/mail?${params.toString()}`),
-        );
+        params.set("meta", "true");
+        const payload = await apiFetch<MailPage | Message[]>(`/api/mail?${params.toString()}`);
+        const nextPage = Array.isArray(payload) ? { items: payload, total: null, page: pageNumber, hasMore: payload.length >= 80 } : payload;
+        setMessages((current) => (append ? [...current, ...nextPage.items] : nextPage.items));
+        setPage(nextPage.page);
+        setHasMore(nextPage.hasMore);
+        setResultTotal(nextPage.total);
+        if (pageNumber === 1 && !append) void apiFetch<SavedSearch[]>("/api/saved-searches?counts=true").then(setSavedSearches).catch(() => undefined);
       } catch (loadError) {
         setError(
           loadError instanceof Error
@@ -2019,14 +2423,23 @@ function MailboxApp({ session }: { session: Session }) {
     },
     [filter, folder, query, sort],
   );
+  useEffect(() => {
+    if (!bulkUndo) return;
+    const timer = window.setTimeout(() => setBulkUndo(null), 30_000);
+    return () => window.clearTimeout(timer);
+  }, [bulkUndo]);
   const loadWorkspace = useCallback(async () => {
     try {
-      const [taskRows, eventRows] = await Promise.all([
+      const [taskRows, eventRows, workRows, summary] = await Promise.all([
         apiFetch<Task[]>("/api/tasks"),
         apiFetch<CalendarEvent[]>("/api/calendar"),
+        apiFetch<WorkItem[]>("/api/work"),
+        apiFetch<WorkSummary>("/api/work/summary"),
       ]);
       setTasks(taskRows);
       setEvents(eventRows);
+      setWorkItems(workRows);
+      setWorkSummary(summary);
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -2035,6 +2448,166 @@ function MailboxApp({ session }: { session: Session }) {
       );
     }
   }, []);
+  function clearListSelection() {
+    setSelectedIds(new Set());
+    setSelectAllResults(false);
+  }
+  function openMailFolder(target: ViewKey) {
+    setView("mail");
+    setFolder(target);
+    setActiveSavedSearchId(null);
+    setSelected(null);
+    setSelectedId(null);
+    setThreadMessages([]);
+    clearListSelection();
+    setMobileNav(false);
+  }
+  function toggleMessageSelection(id: string) {
+    if (selectAllResults) {
+      setSelectedIds(new Set(messages.map((message) => message.id).filter((messageId) => messageId !== id)));
+      setSelectAllResults(false);
+      return;
+    }
+    setSelectAllResults(false);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function selectCurrentPage() {
+    setSelectedIds(new Set(messages.map((message) => message.id)));
+    setSelectAllResults(false);
+  }
+  async function createSavedSearch() {
+    const queryText = query.trim();
+    const name = savedSearchName.trim();
+    if (!name) { setError("Enter a name for the saved search"); return; }
+    if (!queryText) { setError("Enter a search query before saving it"); return; }
+    setSavedSearchBusy(true);
+    setError("");
+    try {
+      const saved = await apiFetch<SavedSearch>("/api/saved-searches", { method: "POST", body: JSON.stringify({ name, query: queryText }) });
+      setSavedSearches((current) => [...current, saved].sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name)));
+      setSavedSearchName("");
+      setSavedSearchFormOpen(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Saved search could not be created");
+    } finally {
+      setSavedSearchBusy(false);
+    }
+  }
+  async function renameSavedSearch(saved: SavedSearch) {
+    const name = window.prompt("Rename saved search", saved.name)?.trim();
+    if (!name || name === saved.name) return;
+    try {
+      const updated = await apiFetch<SavedSearch>(`/api/saved-searches/${saved.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      setSavedSearches((current) => current.map((item) => item.id === saved.id ? { ...item, ...updated } : item));
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Saved search could not be renamed");
+    }
+  }
+  async function deleteSavedSearch(saved: SavedSearch) {
+    if (!window.confirm(`Delete saved search “${saved.name}”? Your messages will not be changed.`)) return;
+    try {
+      await apiFetch(`/api/saved-searches/${saved.id}`, { method: "DELETE" });
+      setSavedSearches((current) => current.filter((item) => item.id !== saved.id));
+      if (activeSavedSearchId === saved.id) {
+        setActiveSavedSearchId(null);
+        setQuery("");
+      }
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Saved search could not be deleted");
+    }
+  }
+  async function reorderSavedSearch(saved: SavedSearch, direction: -1 | 1) {
+    const ordered = [...savedSearches].sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name));
+    const index = ordered.findIndex((item) => item.id === saved.id);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= ordered.length) return;
+    [ordered[index], ordered[nextIndex]] = [ordered[nextIndex], ordered[index]];
+    setSavedSearches(ordered.map((item, itemIndex) => ({ ...item, sort_order: itemIndex })));
+    try {
+      await apiFetch("/api/saved-searches/reorder", { method: "POST", body: JSON.stringify({ ids: ordered.map((item) => item.id) }) });
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Saved searches could not be reordered");
+    }
+  }
+  function openSavedSearch(saved: SavedSearch) {
+    openMailFolder("inbox");
+    setQuery(saved.query);
+    setActiveSavedSearchId(saved.id);
+  }
+  async function undoBulkAction() {
+    if (!bulkUndo) return;
+    const requestId = bulkUndo.requestId;
+    try {
+      await apiFetch("/api/mail/bulk/undo", { method: "POST", body: JSON.stringify({ requestId }) });
+      setBulkUndo(null);
+      setBulkNotice("Bulk change undone");
+      await loadMessages(folder, false);
+    } catch (undoError) {
+      setError(undoError instanceof Error ? undoError.message : "Undo is no longer available");
+    }
+  }
+  async function runBulkAction() {
+    const allResults = selectAllResults;
+    const visibleSelection = allResults ? messages.map((message) => message.id) : [...selectedIds];
+    if (!visibleSelection.length && !allResults) { setError("Select at least one message"); return; }
+    const countLabel = allResults ? `${resultTotal ?? "all"} matching messages` : `${visibleSelection.length} message${visibleSelection.length === 1 ? "" : "s"}`;
+    if (bulkAction === "trash" && !window.confirm(`Move ${countLabel} to Trash? You can restore them later.`)) return;
+    setBulkBusy(true);
+    setError("");
+    setBulkNotice("");
+    const action: JsonSettings = { type: bulkAction };
+    if (bulkAction === "move") {
+      if (bulkFolder.startsWith("custom:")) {
+        action.folder = "custom";
+        action.customFolderId = bulkFolder.slice(7);
+      } else {
+        action.folder = bulkFolder;
+      }
+    }
+    if (bulkAction === "label") {
+      if (!bulkLabelId) { setError("Choose a label first"); setBulkBusy(false); return; }
+      action.labelId = bulkLabelId;
+    }
+    if (bulkAction === "priority") action.priority = Number(bulkPriority);
+    const idempotencyKey = crypto.randomUUID();
+    try {
+      const payload = await apiFetch<{ requestId: string; changedIds: string[]; exported?: JsonSettings[]; failures: Array<{ id: string; error: string }>; undoable: boolean; truncated?: boolean }>("/api/mail/bulk", {
+        method: "POST",
+        body: JSON.stringify({ messageIds: visibleSelection, scope: allResults ? "all_results" : "selected", query: query.trim(), folder, action, idempotencyKey }),
+      });
+      const movedOut = ["archive", "move", "trash", "spam", "restore", "snooze"].includes(bulkAction);
+      const selectedSet = new Set(payload.changedIds);
+      setMessages((current) => movedOut ? current.filter((message) => !selectedSet.has(message.id)) : current.map((message) => {
+        if (!selectedSet.has(message.id)) return message;
+        if (bulkAction === "mark_read" || bulkAction === "mark_unread") return { ...message, is_read: bulkAction === "mark_read" };
+        if (bulkAction === "star" || bulkAction === "unstar") return { ...message, is_starred: bulkAction === "star" };
+        if (bulkAction === "pin" || bulkAction === "unpin") return { ...message, is_pinned: bulkAction === "pin" };
+        if (bulkAction === "flag" || bulkAction === "unflag") return { ...message, is_flagged: bulkAction === "flag" };
+        return message;
+      }));
+      clearListSelection();
+      await loadMessages(folder, false);
+      if (bulkAction === "export" && payload.exported?.length) {
+        const download = document.createElement("a");
+        download.href = URL.createObjectURL(new Blob([JSON.stringify(payload.exported, null, 2)], { type: "application/json" }));
+        download.download = `parcel-export-${new Date().toISOString().slice(0, 10)}.json`;
+        download.click();
+        URL.revokeObjectURL(download.href);
+      }
+      if (payload.failures.length) setError(`${payload.changedIds.length} changed; ${payload.failures.length} failed. ${payload.failures[0].error}`);
+      else setBulkNotice(`${payload.changedIds.length || (bulkAction === "export" ? visibleSelection.length : 0)} message${payload.changedIds.length === 1 ? "" : "s"} updated${payload.truncated ? " (first 500 matching messages)" : ""}`);
+      if (payload.undoable && payload.changedIds.length) setBulkUndo({ requestId: payload.requestId, label: "Undo change" });
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Bulk action failed");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
   useEffect(() => {
     void loadMeta();
     void loadWorkspace();
@@ -2108,6 +2681,8 @@ function MailboxApp({ session }: { session: Session }) {
     return () => window.clearTimeout(timer);
   }, [query, filter, sort, folder, view, loadMessages]);
   async function openMessage(message: Message) {
+    setView("mail");
+    if (["inbox", "sent", "drafts", "archive", "trash", "spam"].includes(message.folder)) setFolder(message.folder as ViewKey);
     setSelectedId(message.id);
     setShowAllThreadMessages(false);
     setShowMessageDetails(false);
@@ -2143,12 +2718,76 @@ function MailboxApp({ session }: { session: Session }) {
         body: JSON.stringify(body),
       });
       await loadMessages(folder, false);
+      if (body.workState !== undefined || body.followUpAt !== undefined || body.workNote !== undefined) void loadWorkspace();
+      if (typeof body.folder === "string" || typeof body.snoozedUntil === "string") {
+        setSelected(null);
+        setSelectedId(null);
+        setThreadMessages([]);
+        return;
+      }
       const detail = await apiFetch<Message>(`/api/mail/${selected.id}`);
       setSelected(detail);
     } catch (actionError) {
       setError(
         actionError instanceof Error ? actionError.message : "Action failed",
       );
+    }
+  }
+  function clearMessageSelection() {
+    setSelected(null);
+    setSelectedId(null);
+    setThreadMessages([]);
+    setShowMoreActions(false);
+  }
+  async function restoreSelected() {
+    if (!selected || selected.folder !== "trash") return;
+    setTrashBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/api/mail/${selected.id}`, {
+        method: "POST",
+        body: JSON.stringify({ action: "restore" }),
+      });
+      clearMessageSelection();
+      await loadMessages(folder, false);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Restore failed");
+    } finally {
+      setTrashBusy(false);
+    }
+  }
+  async function permanentlyDeleteSelected() {
+    if (!selected || selected.folder !== "trash") return;
+    if (!window.confirm("Delete this message permanently? This cannot be undone.")) return;
+    setTrashBusy(true);
+    setError("");
+    try {
+      await apiFetch(`/api/mail/${selected.id}`, {
+        method: "POST",
+        body: JSON.stringify({ action: "permanent_delete" }),
+      });
+      clearMessageSelection();
+      await loadMessages(folder, false);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Permanent delete failed");
+    } finally {
+      setTrashBusy(false);
+    }
+  }
+  async function emptyTrash() {
+    if (!window.confirm("Empty Trash permanently? Messages and attachments in Trash cannot be recovered.")) return;
+    setTrashBusy(true);
+    setError("");
+    try {
+      await apiFetch<{ ok: boolean; deleted: number }>("/api/trash/empty", {
+        method: "POST",
+      });
+      clearMessageSelection();
+      await loadMessages("trash", false);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Trash could not be emptied");
+    } finally {
+      setTrashBusy(false);
     }
   }
   async function assignLabel(labelId: string) {
@@ -2181,12 +2820,51 @@ function MailboxApp({ session }: { session: Session }) {
       );
     }
   }
+  async function previewAttachment(id: string) {
+    try {
+      const result = await apiFetch<{ url: string }>(`/api/attachments/${id}/preview`);
+      window.open(result.url, "_blank", "noopener,noreferrer");
+    } catch (attachmentError) {
+      setError(attachmentError instanceof Error ? attachmentError.message : "Preview unavailable");
+    }
+  }
+  async function downloadAllAttachments(messageId: string) {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch(`/api/messages/${messageId}/attachments/download`, { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Attachment download failed");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "attachments.zip";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (attachmentError) {
+      setError(attachmentError instanceof Error ? attachmentError.message : "Attachment download failed");
+    }
+  }
+  async function cancelSelectedSend() {
+    if (!selected || !["queued", "scheduled"].includes(selected.status)) return;
+    try {
+      await apiFetch(`/api/outbox/${selected.id}/cancel`, { method: "POST" });
+      await loadMessages(folder, false);
+      await openMessage({ ...selected, status: "draft", folder: "drafts", cancelled_at: new Date().toISOString() });
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : "Send could not be cancelled");
+    }
+  }
   function openCompose(seed?: ComposeSeed) {
     setComposeSeed(seed);
     setComposeOpen(true);
   }
-  const currentLabel =
-    folder === "focused"
+  const activeSavedSearch = activeSavedSearchId ? savedSearches.find((item) => item.id === activeSavedSearchId) : undefined;
+  const currentLabel = activeSavedSearch
+    ? activeSavedSearch.name
+    : folder === "focused"
       ? "Focused"
       : folder === "other"
         ? "Other"
@@ -2194,8 +2872,9 @@ function MailboxApp({ session }: { session: Session }) {
           ? folders.find((item) => item.id === folder.slice(7))?.name ||
             "Folder"
           : folderNames[folder as SystemFolder];
-  const CurrentIcon =
-    folder === "focused" || folder === "other" || folder.startsWith("custom:")
+  const CurrentIcon = activeSavedSearch
+    ? Bookmark
+    : folder === "focused" || folder === "other" || folder.startsWith("custom:")
       ? Mail
       : folderIcons[folder as SystemFolder];
   const unread = messages.filter((message) => !message.is_read).length;
@@ -2290,11 +2969,7 @@ function MailboxApp({ session }: { session: Session }) {
         <nav className="folder-nav" aria-label="Mailbox folders">
           <button
             className={`folder-link ${view === "mail" && folder === "inbox" ? "active" : ""}`}
-            onClick={() => {
-              setView("mail");
-              setFolder("inbox");
-              setMobileNav(false);
-            }}
+            onClick={() => openMailFolder("inbox")}
           >
             <Inbox size={17} />
             <span>Inbox</span>
@@ -2302,22 +2977,14 @@ function MailboxApp({ session }: { session: Session }) {
           </button>
           <button
             className={`folder-link ${view === "mail" && folder === "focused" ? "active" : ""}`}
-            onClick={() => {
-              setView("mail");
-              setFolder("focused");
-              setMobileNav(false);
-            }}
+            onClick={() => openMailFolder("focused")}
           >
             <Eye size={17} />
             <span>Focused</span>
           </button>
           <button
             className={`folder-link ${view === "mail" && folder === "other" ? "active" : ""}`}
-            onClick={() => {
-              setView("mail");
-              setFolder("other");
-              setMobileNav(false);
-            }}
+            onClick={() => openMailFolder("other")}
           >
             <Mail size={17} />
             <span>Other</span>
@@ -2330,11 +2997,7 @@ function MailboxApp({ session }: { session: Session }) {
               <button
                 key={item}
                 className={`folder-link ${view === "mail" && folder === item ? "active" : ""}`}
-                onClick={() => {
-                  setView("mail");
-                  setFolder(item);
-                  setMobileNav(false);
-                }}
+                onClick={() => openMailFolder(item)}
               >
                 <Icon size={17} />
                 <span>{folderNames[item]}</span>
@@ -2345,17 +3008,59 @@ function MailboxApp({ session }: { session: Session }) {
             <button
               key={customFolder.id}
               className={`folder-link ${view === "mail" && folder === `custom:${customFolder.id}` ? "active" : ""}`}
-              onClick={() => {
-                setView("mail");
-                setFolder(`custom:${customFolder.id}`);
-                setMobileNav(false);
-              }}
+              onClick={() => openMailFolder(`custom:${customFolder.id}`)}
             >
               <Tag size={17} color={customFolder.color} />
               <span>{customFolder.name}</span>
             </button>
           ))}
         </nav>
+        <section className="saved-searches" aria-label="Saved searches">
+          <div className="saved-search-head">
+            <span className="eyebrow">SAVED SEARCHES</span>
+            <button
+              className="icon-button compact-icon"
+              onClick={() => setSavedSearchFormOpen((current) => !current)}
+              aria-label="Create saved search"
+              title="Create saved search from the current query"
+            >
+              <Plus size={15} />
+            </button>
+          </div>
+          {savedSearchFormOpen && (
+            <div className="saved-search-form">
+              <input
+                value={savedSearchName}
+                onChange={(event) => setSavedSearchName(event.target.value)}
+                placeholder="Search name"
+                aria-label="Saved search name"
+                maxLength={80}
+              />
+              <small>{query.trim() ? `Saves: ${query.trim()}` : "Type a query first"}</small>
+              <button className="primary-button" onClick={() => void createSavedSearch()} disabled={savedSearchBusy || !query.trim()}>
+                {savedSearchBusy ? "Saving…" : "Save search"}
+              </button>
+            </div>
+          )}
+          <div className="saved-search-list">
+            {savedSearches.map((saved) => (
+              <div className={`saved-search-row ${activeSavedSearchId === saved.id ? "active" : ""}`} key={saved.id}>
+                <button className="saved-search-link" onClick={() => openSavedSearch(saved)} title={saved.query}>
+                  <Bookmark size={15} color={saved.color} />
+                  <span>{saved.name}</span>
+                  <em>{saved.result_count ?? "—"}</em>
+                </button>
+                <div className="saved-search-controls">
+                  <button className="icon-button compact-icon" onClick={() => void reorderSavedSearch(saved, -1)} aria-label={`Move ${saved.name} up`} title="Move up"><ArrowUp size={12} /></button>
+                  <button className="icon-button compact-icon" onClick={() => void reorderSavedSearch(saved, 1)} aria-label={`Move ${saved.name} down`} title="Move down"><ArrowDown size={12} /></button>
+                  <button className="icon-button compact-icon" onClick={() => void renameSavedSearch(saved)} aria-label={`Rename ${saved.name}`} title="Rename"><Pencil size={12} /></button>
+                  <button className="icon-button compact-icon danger-icon" onClick={() => void deleteSavedSearch(saved)} aria-label={`Delete ${saved.name}`} title="Delete"><Trash2 size={12} /></button>
+                </div>
+              </div>
+            ))}
+            {savedSearches.length === 0 && !savedSearchFormOpen && <small className="saved-search-empty">Save a query here for one-click access.</small>}
+          </div>
+        </section>
         <div className="sidebar-divider" />
         <nav className="folder-nav secondary-nav">
           <button
@@ -2371,8 +3076,10 @@ function MailboxApp({ session }: { session: Session }) {
             className={view === "tasks" ? "active folder-link" : "folder-link"}
             onClick={() => setView("tasks")}
           >
-            <ListTodo size={17} />
-            <span>To Do</span>
+            <Briefcase size={17} />
+            <span>Work</span>
+            {workSummary.total > 0 && <em className="nav-count">{workSummary.total}</em>}
+            {workSummary.overdue > 0 && <em className="nav-overdue">{workSummary.overdue} due</em>}
           </button>
         </nav>
         <div className="sidebar-spacer" />
@@ -2404,6 +3111,16 @@ function MailboxApp({ session }: { session: Session }) {
                 </h1>
               </div>
               <div className="head-actions">
+                {folder === "trash" && (
+                  <button
+                    className="secondary-button trash-empty-button"
+                    onClick={() => void emptyTrash()}
+                    disabled={trashBusy || messages.length === 0}
+                    title="Permanently delete every message in Trash"
+                  >
+                    <Trash2 size={14} /> Empty trash
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   onClick={() => void loadMessages()}
@@ -2424,12 +3141,19 @@ function MailboxApp({ session }: { session: Session }) {
               <Search size={16} />
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setActiveSavedSearchId(null);
+                  clearListSelection();
+                }}
                 placeholder="Search messages, people, or files"
               />
               <select
                 value={filter}
-                onChange={(event) => setFilter(event.target.value)}
+                 onChange={(event) => {
+                   clearListSelection();
+                   setFilter(event.target.value);
+                 }}
                 aria-label="Filter messages"
               >
                 <option value="all">All mail</option>
@@ -2439,7 +3163,10 @@ function MailboxApp({ session }: { session: Session }) {
               </select>
               <select
                 value={sort}
-                onChange={(event) => setSort(event.target.value)}
+                 onChange={(event) => {
+                   clearListSelection();
+                   setSort(event.target.value);
+                 }}
                 aria-label="Sort messages"
               >
                 <option value="newest">Newest</option>
@@ -2451,6 +3178,75 @@ function MailboxApp({ session }: { session: Session }) {
               {liveState === "live" ? "Live updates" : liveState === "connecting" ? "Connecting to live updates…" : liveState === "reconnecting" ? "Reconnecting…" : "Polling for updates"}
             </div>
             {error && <div className="inline-error">{error}</div>}
+            {!loading && messages.length > 0 && (
+              <div className="selection-bar" aria-label="Message selection controls">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={selectAllResults || messages.every((message) => selectedIds.has(message.id))}
+                    onChange={(event) => event.target.checked ? selectCurrentPage() : clearListSelection()}
+                    aria-label="Select all messages on this page"
+                  />
+                  <span>Select page</span>
+                </label>
+                <span className="selection-count">{resultTotal ?? messages.length} result{(resultTotal ?? messages.length) === 1 ? "" : "s"}</span>
+                {selectedIds.size > 0 && !selectAllResults && <button className="text-button" onClick={clearListSelection}>Clear</button>}
+                {query.trim() && !selectAllResults && selectedIds.size === messages.length && resultTotal !== null && resultTotal > messages.length && (
+                  <button className="text-button selection-all-button" onClick={() => setSelectAllResults(true)}>Select all {resultTotal} results</button>
+                )}
+                {selectAllResults && <span className="selection-all-label">All matching results selected</span>}
+              </div>
+            )}
+            {(selectedIds.size > 0 || selectAllResults) && (
+              <div className="bulk-toolbar" aria-label="Bulk message actions">
+                <strong>{selectAllResults ? `${resultTotal ?? "All"} selected` : `${selectedIds.size} selected`}</strong>
+                <select value={bulkAction} onChange={(event) => setBulkAction(event.target.value)} aria-label="Bulk action">
+                  <option value="archive">Archive</option>
+                  <option value="move">Move to…</option>
+                  <option value="mark_read">Mark read</option>
+                  <option value="mark_unread">Mark unread</option>
+                  <option value="star">Star</option>
+                  <option value="unstar">Unstar</option>
+                  <option value="flag">Flag</option>
+                  <option value="unflag">Unflag</option>
+                  <option value="priority">Set priority</option>
+                  {labels.length > 0 && <option value="label">Add label…</option>}
+                  <option value="snooze">Snooze 1 hour</option>
+                  <option value="reply_later">Reply later</option>
+                  <option value="waiting_on">Waiting on</option>
+                  <option value="i_owe">I owe</option>
+                  <option value="create_task">Create task</option>
+                  <option value="export">Export JSON</option>
+                  <option value="restore">Restore</option>
+                  <option value="spam">Move to Spam</option>
+                  <option value="trash">Move to Trash</option>
+                </select>
+                 {bulkAction === "move" && (
+                   <select value={bulkFolder} onChange={(event) => setBulkFolder(event.target.value)} aria-label="Bulk destination folder">
+                     {(["inbox", "sent", "drafts", "archive", "trash", "spam"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}
+                     {folders.map((item) => <option key={item.id} value={`custom:${item.id}`}>{item.name}</option>)}
+                   </select>
+                 )}
+                {bulkAction === "priority" && (
+                  <select value={bulkPriority} onChange={(event) => setBulkPriority(event.target.value)} aria-label="Bulk priority">
+                    <option value="0">Normal</option><option value="1">Important</option><option value="2">High</option>
+                  </select>
+                )}
+                {bulkAction === "label" && (
+                  <select value={bulkLabelId} onChange={(event) => setBulkLabelId(event.target.value)} aria-label="Bulk label">
+                    <option value="">Choose label</option>
+                    {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
+                  </select>
+                )}
+                <button className="primary-button" onClick={() => void runBulkAction()} disabled={bulkBusy}>{bulkBusy ? "Applying…" : "Apply"}</button>
+              </div>
+            )}
+            {bulkNotice && (
+              <div className="inline-notice" role="status" aria-live="polite">
+                <span>{bulkNotice}</span>
+                {bulkUndo && <button className="text-button" onClick={() => void undoBulkAction()}>{bulkUndo.label}</button>}
+              </div>
+            )}
             <div className="message-list">
               {loading ? (
                 <div className="list-empty">
@@ -2463,22 +3259,47 @@ function MailboxApp({ session }: { session: Session }) {
                     <Mail size={22} />
                   </div>
                   <h3>
-                    {currentLabel === "Inbox"
+                    {folder === "trash"
+                      ? "Trash is empty"
+                      : currentLabel === "Inbox"
                       ? "A quiet inbox"
                       : `No mail in ${currentLabel.toLowerCase()}`}
                   </h3>
-                  <p>New messages and saved rules will appear here.</p>
-                  <button className="text-button" onClick={() => openCompose()}>
-                    Write the first message
-                  </button>
+                  <p>
+                    {folder === "trash"
+                      ? "Deleted messages stay here until you restore or permanently remove them."
+                      : "New messages and saved rules will appear here."}
+                  </p>
+                  {folder !== "trash" && (
+                    <button className="text-button" onClick={() => openCompose()}>
+                      Write the first message
+                    </button>
+                  )}
                 </div>
               ) : (
                 messages.map((message) => (
-                  <button
+                  <div
                     key={message.id}
-                    className={`message-row ${selectedId === message.id ? "selected" : ""} ${message.is_read ? "read" : "unread"}`}
+                    className={`message-row ${selectedId === message.id ? "selected" : ""} ${selectedIds.has(message.id) ? "bulk-selected" : ""} ${message.is_read ? "read" : "unread"}`}
                     onClick={() => void openMessage(message)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        void openMessage(message);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                   >
+                    <input
+                      className="message-select-checkbox"
+                      type="checkbox"
+                      checked={selectedIds.has(message.id) || selectAllResults}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() => toggleMessageSelection(message.id)}
+                      aria-label={`Select ${message.subject || "message"}`}
+                    />
                     {(() => {
                       const sender = senderForMessage(message, contacts, mailboxes);
                       return <SenderAvatar name={sender.name} email={sender.email} avatarUrl={sender.avatarUrl} />;
@@ -2527,10 +3348,15 @@ function MailboxApp({ session }: { session: Session }) {
                         fill="currentColor"
                       />
                     )}
-                  </button>
+                  </div>
                 ))
               )}
             </div>
+            {!loading && hasMore && (
+              <button className="load-more-button" onClick={() => void loadMessages(folder, false, page + 1, true)} disabled={bulkBusy}>
+                Load more{resultTotal !== null ? ` · ${Math.max(resultTotal - messages.length, 0)} remaining` : ""}
+              </button>
+            )}
           </section>
           <section className="reading-pane">
             {!selected ? (
@@ -2586,24 +3412,62 @@ function MailboxApp({ session }: { session: Session }) {
                         fill={selected.is_pinned ? "currentColor" : "none"}
                       />
                     </button>
-                    <button
-                      className="icon-button"
-                      title="Archive message"
-                      onClick={() => void mutateMessage({ folder: "archive" })}
-                      aria-label="Archive message"
-                    >
-                      <Archive size={17} />
-                    </button>
-                    <button
-                      className="icon-button"
-                      title="Move message to trash"
-                      onClick={() => void mutateMessage({ folder: "trash" })}
-                      aria-label="Delete message"
-                    >
-                      <Trash2 size={17} />
-                    </button>
+                    {selected.folder === "trash" ? (
+                      <>
+                        <button
+                          className="icon-button"
+                          title="Restore to previous folder"
+                          onClick={() => void restoreSelected()}
+                          aria-label="Restore message"
+                          disabled={trashBusy}
+                        >
+                          <Undo2 size={17} />
+                        </button>
+                        <button
+                          className="icon-button danger-icon"
+                          title="Delete permanently"
+                          onClick={() => void permanentlyDeleteSelected()}
+                          aria-label="Delete message permanently"
+                          disabled={trashBusy}
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className="icon-button"
+                          title="Archive message"
+                          onClick={() => void mutateMessage({ folder: "archive" })}
+                          aria-label="Archive message"
+                        >
+                          <Archive size={17} />
+                        </button>
+                        <button
+                          className="icon-button"
+                          title="Move message to trash"
+                          onClick={() => void mutateMessage({ folder: "trash" })}
+                          aria-label="Delete message"
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
+                {selected.folder === "trash" && (
+                  <div className="trash-notice" role="status">
+                    <Trash2 size={15} />
+                    <span>This message is in Trash. Restore it to its previous folder or delete it permanently.</span>
+                  </div>
+                )}
+                {selected.work_state && selected.work_state !== "none" && (
+                  <div className={`work-state-callout ${selected.follow_up_at && new Date(selected.follow_up_at).getTime() <= Date.now() ? "overdue" : ""}`}>
+                    <Briefcase size={15} />
+                    <div><strong>{workStateLabel(selected.work_state)}</strong><span>{workDueLabel(selected.follow_up_at)}{selected.work_note ? ` · ${selected.work_note}` : ""}</span></div>
+                    <button className="text-button" onClick={() => void mutateMessage({ workState: "none" })}>Clear</button>
+                  </div>
+                )}
                 <div className="sender-line">
                   {(() => {
                     const sender = senderForMessage(selected, contacts, mailboxes);
@@ -2664,17 +3528,22 @@ function MailboxApp({ session }: { session: Session }) {
                 )}
                 {selected.attachments && selected.attachments.length > 0 && (
                   <div className="attachments">
-                    <p className="eyebrow">ATTACHMENTS</p>
+                    <div className="attachments-head">
+                      <p className="eyebrow">ATTACHMENTS · {selected.attachments.length}</p>
+                      {selected.attachments.length > 1 && <button className="attachment-download-all" onClick={() => void downloadAllAttachments(selected.id)}><Download size={13} /> Download all</button>}
+                    </div>
                     {selected.attachments.map((attachment) => (
-                      <button
-                        key={attachment.id}
-                        className="attachment-link"
-                        onClick={() => void openAttachment(attachment.id)}
-                      >
-                        <Paperclip size={14} />
-                        <span>{attachment.filename}</span>
-                        <small>{formatBytes(attachment.byte_size)}</small>
-                      </button>
+                      <div className="attachment-card" key={attachment.id}>
+                        <div className="attachment-card-main">
+                          <Paperclip size={14} />
+                          <span><strong>{attachment.filename}</strong><small>{formatBytes(attachment.byte_size)} · {attachment.detected_content_type || attachment.content_type}</small></span>
+                        </div>
+                        <div className="attachment-card-actions">
+                          {attachment.preview_state === "ready" && <button className="attachment-mini-action" onClick={() => void previewAttachment(attachment.id)}><Eye size={13} /> Preview</button>}
+                          <button className="attachment-mini-action" onClick={() => void openAttachment(attachment.id)}><Download size={13} /> Download</button>
+                        </div>
+                        <small className={`attachment-safety attachment-safety-${attachment.safety_status || "unknown"}`}><ShieldAlert size={12} /> {attachment.safety_status === "suspicious" ? "Review before opening" : "Malware scan unavailable; static checks only"}</small>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -2710,47 +3579,84 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 )}
                 <div className="detail-actions">
-                  <button
-                    className="primary-button"
-                    onClick={() => openCompose(selectedReplySeed)}
-                  >
-                    <PenLine size={15} /> Reply
-                  </button>
-                  <button
-                    className="secondary-button detail-quick-action"
-                    onClick={() => openCompose(selectedReplyAllSeed)}
-                  >
-                    <Users size={15} /> Reply all
-                  </button>
-                  <div className="more-actions">
-                    <button
-                      className="secondary-button"
-                      aria-expanded={showMoreActions}
-                      aria-haspopup="menu"
-                      onClick={() => setShowMoreActions((current) => !current)}
-                    >
-                      <MoreHorizontal size={15} /> More
+                  {selected.direction === "outbound" && ["queued", "scheduled"].includes(selected.status) && !selected.cancelled_at ? (
+                    <button className="secondary-button danger-button" onClick={() => void cancelSelectedSend()}>
+                      <Undo2 size={15} /> Cancel send
                     </button>
-                    {showMoreActions && (
-                      <div className="action-menu" role="menu">
-                        <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
-                          <Forward size={15} /> Forward
+                  ) : selected.folder === "trash" ? (
+                    <>
+                      <button
+                        className="primary-button"
+                        onClick={() => void restoreSelected()}
+                        disabled={trashBusy}
+                      >
+                        <Undo2 size={15} /> Restore
+                      </button>
+                      <button
+                        className="secondary-button danger-button"
+                        onClick={() => void permanentlyDeleteSelected()}
+                        disabled={trashBusy}
+                      >
+                        <Trash2 size={15} /> Delete forever
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="primary-button"
+                        onClick={() => openCompose(selectedReplySeed)}
+                      >
+                        <PenLine size={15} /> Reply
+                      </button>
+                      <button
+                        className="secondary-button detail-quick-action"
+                        onClick={() => openCompose(selectedReplyAllSeed)}
+                      >
+                        <Users size={15} /> Reply all
+                      </button>
+                      <div className="more-actions">
+                        <button
+                          className="secondary-button"
+                          aria-expanded={showMoreActions}
+                          aria-haspopup="menu"
+                          onClick={() => setShowMoreActions((current) => !current)}
+                        >
+                          <MoreHorizontal size={15} /> More
                         </button>
-                        <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
-                          <Eye size={15} /> Mark unread
-                        </button>
-                        <button role="menuitem" onClick={() => void mutateMessage({ folder: selected.folder === "spam" ? "inbox" : "spam" })}>
-                          <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}
-                        </button>
-                        <button role="menuitem" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}>
-                          <Clock3 size={15} /> Snooze 1h
-                        </button>
-                        <button role="menuitem" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}>
-                          <Flag size={15} /> {selected.is_flagged ? "Unflag" : "Flag"}
-                        </button>
+                        {showMoreActions && (
+                          <div className="action-menu" role="menu">
+                            <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
+                              <Forward size={15} /> Forward
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
+                              <Eye size={15} /> Mark unread
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ folder: selected.folder === "spam" ? "inbox" : "spam" })}>
+                              <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}>
+                              <Clock3 size={15} /> Snooze 1h
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}>
+                              <Flag size={15} /> {selected.is_flagged ? "Unflag" : "Flag"}
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "reply_later" })}>
+                              <Clock3 size={15} /> Reply later
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "waiting_on" })}>
+                              <Users size={15} /> Waiting on
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "i_owe" })}>
+                              <Briefcase size={15} /> I owe
+                            </button>
+                            {selected.work_state && selected.work_state !== "none" && <button role="menuitem" onClick={() => void mutateMessage({ workState: "none" })}>
+                              <Check size={15} /> Clear work state
+                            </button>}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </>
+                  )}
                 </div>
               </article>
             )}
@@ -2761,6 +3667,9 @@ function MailboxApp({ session }: { session: Session }) {
           mode={view}
           tasks={tasks}
           events={events}
+          workItems={workItems}
+          workSummary={workSummary}
+          onOpenMessage={(message) => void openMessage(message)}
           onRefresh={() => {
             void loadWorkspace();
           }}
@@ -2770,6 +3679,7 @@ function MailboxApp({ session }: { session: Session }) {
         <Compose
           mailboxes={mailboxes}
           signatures={signatures}
+          undoSeconds={settings.send_undo_seconds ?? 0}
           seed={composeSeed}
           onClose={() => {
             setComposeOpen(false);
@@ -2787,6 +3697,7 @@ function MailboxApp({ session }: { session: Session }) {
           labels={labels}
           mailboxes={mailboxes}
           rules={rules}
+          senderPolicies={senderPolicies}
           onClose={() => setSettingsOpen(false)}
           onChanged={() => {
             void loadMeta();

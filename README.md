@@ -66,6 +66,7 @@ The Backblaze bucket should be private. The application uses short-lived signed 
 - `/api/threads/:id` — conversation view
 - `/api/folders`, `/api/labels`, `/api/labels/assign` — custom folders and colored labels
 - `/api/contacts` — contacts and autocomplete data
+- `/api/sender-policies` — trusted and blocked sender/domain decisions
 - `/api/rules` — sender/subject/body/attachment rules and actions
 - `/api/signatures` — per-mailbox signatures
 - `/api/settings` — theme, density, reading pane, notification, timezone, and push settings
