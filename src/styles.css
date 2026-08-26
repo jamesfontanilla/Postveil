@@ -681,3 +681,27 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .policy-form { grid-template-columns: 1fr; }
   .policy-form input { grid-column: auto; }
 }
+.settings-select-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; color: var(--ink-soft); font-size: 11px; font-weight: 700; }
+.settings-select-row select { width: auto; min-width: 118px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-muted); color: var(--ink); padding: 7px 9px; font-size: 11px; }
+.setting-note { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.compose-warning { margin: 12px 20px 0; border: 1px solid #e6bd78; border-radius: 7px; background: #fff8e8; color: #76531d; padding: 10px 11px; font-size: 11px; line-height: 1.45; }
+.compose-warning-head { display: flex; align-items: center; gap: 6px; color: #895d15; }
+.compose-warning p { margin: 6px 0 0; }
+.compose-warning small { display: block; margin-top: 7px; color: #a27736; }
+.attachments-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.attachments-head .eyebrow { margin: 0; }
+.attachment-download-all, .attachment-mini-action { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--accent); padding: 6px 8px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.attachment-download-all:hover, .attachment-mini-action:hover { border-color: var(--accent); }
+.attachment-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; width: min(100%, 560px); margin-top: 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-muted); padding: 9px 10px; }
+.attachment-card-main { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--accent); }
+.attachment-card-main > span { min-width: 0; display: grid; gap: 3px; }
+.attachment-card-main strong { overflow: hidden; color: var(--ink-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-card-main small { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.attachment-safety { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
+.attachment-safety-suspicious { color: #a56f1a; }
+@media (max-width: 520px) {
+  .attachments-head { align-items: flex-start; flex-direction: column; }
+  .attachment-card { grid-template-columns: 1fr; }
+  .attachment-card-actions { justify-content: flex-start; }
+}

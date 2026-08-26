@@ -13,6 +13,17 @@ import {
   type RuleContext as PureRuleContext,
   type RuleDefinition,
 } from "./rules.ts";
+import {
+  buildAttachmentSafety,
+  buildSendWarnings,
+  buildZip,
+  canClaimOutbox,
+  canManageOutbox,
+  detectAttachmentContentType,
+  normalizeUndoSeconds,
+  normalizedSendFingerprint,
+  type SendWarning,
+} from "./phase3.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -34,9 +45,9 @@ interface Env {
 
 type JsonRecord = Record<string, unknown>;
 type User = { id: string; email?: string };
-type Mailbox = { id: string; owner_id: string; address: string; display_name: string; is_default: boolean; can_send: boolean; can_receive: boolean };
+type Mailbox = { id: string; owner_id: string; address: string; display_name: string; is_default: boolean; can_send: boolean; can_receive: boolean; settings?: JsonRecord };
 type Rule = RuleDefinition & { id: string; owner_id: string; conditions: JsonRecord; actions: JsonRecord; enabled: boolean; priority: number };
-type StoredAttachment = { object_key: string; filename: string; content_type: string; byte_size: number; content_id?: string; disposition?: string | null };
+type StoredAttachment = { object_key: string; filename: string; content_type: string; detected_content_type: string; byte_size: number; sha256: string; preview_state: "ready" | "not_available"; safety_status: "unknown" | "suspicious" | "blocked"; safety_reasons: string[]; content_id?: string; disposition?: string | null };
 
 const SYSTEM_FOLDERS = ["inbox", "sent", "drafts", "archive", "trash", "spam"] as const;
 const SPAM_THRESHOLD = 0.70;
@@ -111,6 +122,19 @@ function storageClient(env: Env): S3Client {
 
 async function putObject(env: Env, key: string, body: Uint8Array | string, contentType: string): Promise<void> {
   await storageClient(env).send(new PutObjectCommand({ Bucket: env.B2_BUCKET, Key: key, Body: body, ContentType: contentType }));
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function readObject(env: Env, key: string): Promise<Uint8Array> {
+  const result = await storageClient(env).send(new GetObjectCommand({ Bucket: env.B2_BUCKET, Key: key }));
+  const body = result.Body as unknown as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
+  if (!body) throw new Error("Attachment content is unavailable");
+  if (typeof body.transformToByteArray === "function") return new Uint8Array(await body.transformToByteArray());
+  return new Uint8Array(await new Response(body as unknown as BodyInit).arrayBuffer());
 }
 
 async function deleteObject(env: Env, key: string): Promise<void> {
@@ -236,12 +260,14 @@ async function saveAttachments(env: Env, ownerId: string, messageId: string, att
   for (const [index, attachment] of attachments.entries()) {
     if (!attachment.content) continue;
     const filename = (attachment.filename || `attachment-${index + 1}`).replace(/[^a-zA-Z0-9._-]/g, "_");
-    const contentType = attachment.mimeType || "application/octet-stream";
+    const declaredContentType = attachment.mimeType || "application/octet-stream";
     const content = attachment.content instanceof Uint8Array ? attachment.content : attachment.content instanceof ArrayBuffer ? new Uint8Array(attachment.content) : new TextEncoder().encode(attachment.content);
-    if (content.byteLength > 15 * 1024 * 1024 || isDangerousAttachment(filename, contentType)) { blocked.push(filename); continue; }
+    const detectedContentType = detectAttachmentContentType(filename, declaredContentType, content);
+    const safety = buildAttachmentSafety(filename, declaredContentType, detectedContentType, content.byteLength);
+    if (content.byteLength > 15 * 1024 * 1024 || safety.safetyStatus === "blocked") { blocked.push(filename); continue; }
     const objectKey = `attachments/${ownerId}/${messageId}/${crypto.randomUUID()}-${filename}`;
-    await putObject(env, objectKey, content, contentType);
-    stored.push({ object_key: objectKey, filename, content_type: contentType, byte_size: content.byteLength, content_id: attachment.contentId || undefined, disposition: attachment.disposition });
+    await putObject(env, objectKey, content, detectedContentType);
+    stored.push({ object_key: objectKey, filename, content_type: declaredContentType, detected_content_type: detectedContentType, byte_size: content.byteLength, sha256: await sha256Hex(content), preview_state: safety.previewState, safety_status: safety.safetyStatus, safety_reasons: safety.safetyReasons, content_id: attachment.contentId || undefined, disposition: attachment.disposition });
   }
   return { stored, blocked };
 }
@@ -448,12 +474,12 @@ async function applyExistingRuleMatches(env: Env, ownerId: string, rule: Rule, r
   return { changedCount, failures };
 }
 
-async function sendViaBrevo(env: Env, input: { fromAddress: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; html?: string; replyTo?: string; attachments?: Array<{ filename: string; object_key: string }> }): Promise<{ messageId?: string }> {
+async function sendViaBrevo(env: Env, input: { fromAddress: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; html?: string; replyTo?: string; idempotencyKey?: string; attachments?: Array<{ filename: string; object_key: string }> }): Promise<{ messageId?: string }> {
   const payload: JsonRecord = { sender: { email: input.fromAddress }, to: input.to.map((email) => ({ email })), subject: input.subject || "(no subject)", textContent: input.text || "", htmlContent: input.html || undefined, replyTo: { email: input.replyTo || input.fromAddress } };
   if (input.cc?.length) payload.cc = input.cc.map((email) => ({ email }));
   if (input.bcc?.length) payload.bcc = input.bcc.map((email) => ({ email }));
   if (input.attachments?.length) payload.attachment = await Promise.all(input.attachments.map(async (attachment) => ({ url: await signedObjectUrl(env, attachment.object_key), name: attachment.filename })));
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", { method: "POST", headers: { accept: "application/json", "api-key": env.BREVO_API_KEY, "content-type": "application/json" }, body: JSON.stringify(payload) });
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", { method: "POST", headers: { accept: "application/json", "api-key": env.BREVO_API_KEY, "content-type": "application/json", ...(input.idempotencyKey ? { "x-idempotency-key": input.idempotencyKey } : {}) }, body: JSON.stringify(payload) });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`Brevo ${response.status}: ${JSON.stringify(result).slice(0, 500)}`);
   return result as { messageId?: string };
@@ -524,6 +550,33 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   else await finishInbound();
 }
 
+type OutboundAttachment = { filename: string; object_key: string; byte_size?: number; content_type?: string; detected_content_type?: string; sha256?: string; preview_state?: string; safety_status?: string; safety_reasons?: string[] };
+
+async function sendOutboxMessage(env: Env, message: JsonRecord): Promise<{ messageId?: string }> {
+  const attachments = await dbRequest<Array<{ filename: string; object_key: string }>>(env, `attachments?message_id=eq.${encodeURIComponent(String(message.id))}&select=filename,object_key&order=created_at.asc`);
+  const result = await sendViaBrevo(env, { fromAddress: String(message.from_address), to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [], cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [], bcc: Array.isArray(message.bcc_addresses) ? message.bcc_addresses.map(String) : [], subject: String(message.subject || "(no subject)"), text: String(message.text_body || ""), html: typeof message.html_body === "string" ? message.html_body : undefined, replyTo: String(message.reply_to || message.from_address), idempotencyKey: typeof message.send_idempotency_key === "string" ? message.send_idempotency_key : undefined, attachments });
+  await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ status: "sent", folder: "sent", sent_at: new Date().toISOString(), provider_message_id: result.messageId || null, scheduled_at: null, send_after: null, send_lease_until: null, work_note: "", updated_at: new Date().toISOString() }) });
+  return { messageId: result.messageId };
+}
+
+async function processOutbox(env: Env, limit = 25): Promise<void> {
+  const now = new Date().toISOString();
+  const leaseFilter = encodeURIComponent(`(send_lease_until.is.null,send_lease_until.lt.${now})`);
+  const candidates = await dbRequest<JsonRecord[]>(env, `messages?status=in.(queued,scheduled)&send_after=lte.${encodeURIComponent(now)}&cancelled_at=is.null&or=${leaseFilter}&order=send_after.asc&limit=${limit}`);
+  for (const candidate of candidates) {
+    const id = String(candidate.id || "");
+    if (!id || !canClaimOutbox(candidate)) continue;
+    const leaseUntil = new Date(Date.now() + 60_000).toISOString();
+    const claimed = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&status=in.(queued,scheduled)&cancelled_at=is.null&or=${leaseFilter}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ send_lease_until: leaseUntil, send_attempts: Number(candidate.send_attempts || 0) + 1, updated_at: new Date().toISOString() }) }).catch(() => []);
+    if (!claimed[0]) continue;
+    try {
+      await sendOutboxMessage(env, claimed[0]);
+    } catch (sendError) {
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", send_lease_until: null, send_after: null, work_note: sendError instanceof Error ? sendError.message.slice(0, 500) : "Send failed", updated_at: new Date().toISOString() }) }).catch(() => undefined);
+    }
+  }
+}
+
 async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ctx?: ExecutionContext): Promise<Response> {
   const fromAddress = cleanAddress(String(body.fromAddress || `james@${env.APP_DOMAIN}`));
   const to = splitAddresses(body.to);
@@ -536,44 +589,57 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   const text = String(body.text || "");
   const html = typeof body.html === "string" ? body.html : undefined;
   const replyTo = cleanAddress(String(body.replyTo || fromAddress));
-  const attachments = Array.isArray(body.attachments) ? body.attachments.filter((item): item is { filename: string; object_key: string } => Boolean(item && typeof item.filename === "string" && typeof item.object_key === "string")) : [];
+  const attachments: OutboundAttachment[] = Array.isArray(body.attachments) ? body.attachments.filter((item): item is OutboundAttachment => Boolean(item && typeof item.filename === "string" && typeof item.object_key === "string")).map((item) => ({ filename: item.filename.slice(0, 180), object_key: item.object_key, byte_size: Number(item.byte_size || 0), content_type: item.content_type, detected_content_type: item.detected_content_type, sha256: item.sha256, preview_state: item.preview_state, safety_status: item.safety_status, safety_reasons: item.safety_reasons })) : [];
+  const warnings = ownerId ? buildSendWarnings({ fromAddress, mailboxAddress: mailbox?.address, mailboxCanSend: mailbox?.can_send, to, cc, bcc, replyTo, subject, text, attachmentCount: attachments.length }) : [];
+  const acknowledged = new Set(Array.isArray(body.warningsAcknowledged) ? body.warningsAcknowledged.map(String) : []);
+  const unacknowledgedWarnings = warnings.filter((warning) => !acknowledged.has(warning.code));
+  if (unacknowledgedWarnings.length) return json({ ok: false, requiresConfirmation: true, warnings: unacknowledgedWarnings }, 409);
   const messageIdHeader = `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`;
-  let messageId: string | undefined;
-  if (ownerId && mailbox) {
-    const threadId = typeof body.threadId === "string" && body.threadId ? body.threadId : await findOrCreateThread(env, ownerId, subject, typeof body.inReplyTo === "string" ? body.inReplyTo : undefined, typeof body.references === "string" ? body.references : undefined);
-    const scheduledAt = typeof body.scheduledAt === "string" && body.scheduledAt ? body.scheduledAt : null;
-     const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: scheduledAt ? "drafts" : "sent", status: scheduledAt ? "scheduled" : "queued", from_name: mailbox.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledAt, sent_at: null }) });
-    messageId = inserted[0]?.id;
-    if (scheduledAt) return json({ ok: true, id: messageId, scheduled: true });
+  if (!ownerId) {
+    const result = await sendViaBrevo(env, { fromAddress, to, cc, bcc, subject, text, html, replyTo, attachments });
+    return json({ ok: true, providerMessageId: result.messageId });
   }
-  const deliver = async (): Promise<{ messageId?: string }> => {
-    try {
-      const providerResult = await sendViaBrevo(env, { fromAddress, to, cc, bcc, subject, text, html, replyTo, attachments });
-      if (messageId) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ status: "sent", sent_at: new Date().toISOString(), provider_message_id: providerResult.messageId || null, work_note: "" }) });
-      return { messageId: providerResult.messageId };
-    } catch (sendError) {
-      if (messageId) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", work_note: sendError instanceof Error ? sendError.message.slice(0, 500) : "Send failed" }) }).catch(() => undefined);
-      throw sendError;
-    }
-  };
-  if (ctx && messageId) {
-    ctx.waitUntil(deliver().catch(() => undefined));
-    return json({ ok: true, id: messageId, status: "queued" });
+  const idempotencyKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() ? body.idempotencyKey.trim().slice(0, 200) : crypto.randomUUID();
+  const duplicate = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&send_idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=id,status,folder,send_after,scheduled_at&limit=1`);
+  if (duplicate[0]) return json({ ok: true, replayed: true, id: duplicate[0].id, status: duplicate[0].status, scheduled: duplicate[0].status === "scheduled" });
+  for (const attachment of attachments) if (!attachment.object_key.startsWith(`drafts/${ownerId}/`) && !attachment.object_key.startsWith(`attachments/${ownerId}/`)) return error("Attachment ownership could not be verified", 403);
+  const threadId = typeof body.threadId === "string" && body.threadId ? body.threadId : await findOrCreateThread(env, ownerId, subject, typeof body.inReplyTo === "string" ? body.inReplyTo : undefined, typeof body.references === "string" ? body.references : undefined);
+  const scheduledInput = typeof body.scheduledAt === "string" && body.scheduledAt ? body.scheduledAt : null;
+  const scheduledDate = scheduledInput ? new Date(scheduledInput) : null;
+  if (scheduledInput && (!scheduledDate || Number.isNaN(scheduledDate.getTime()) || scheduledDate.getTime() <= Date.now())) return error("Scheduled send time must be in the future");
+  const configuredUndo = normalizeUndoSeconds(objectValue(mailbox?.settings).send_undo_seconds, 0);
+  const undoSeconds = scheduledDate ? 0 : normalizeUndoSeconds(body.undoSendSeconds, configuredUndo);
+  const sendAfter = scheduledDate ? scheduledDate.toISOString() : new Date(Date.now() + undoSeconds * 1000).toISOString();
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox?.id, direction: "outbound", folder: scheduledDate ? "drafts" : "sent", status: scheduledDate ? "scheduled" : "queued", from_name: mailbox?.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledDate?.toISOString() || null, send_after: sendAfter, send_idempotency_key: idempotencyKey, send_warning_acknowledged: Object.fromEntries(warnings.map((warning) => [warning.code, true])), sent_at: null }) });
+  const messageId = inserted[0]?.id;
+  if (!messageId) return error("The message could not be queued", 502);
+  if (attachments.length) {
+    await dbRequest(env, "attachments", {
+      method: "POST",
+      body: JSON.stringify(attachments.map((attachment) => ({
+        owner_id: ownerId,
+        message_id: messageId,
+        object_key: attachment.object_key,
+        filename: attachment.filename,
+        content_type: attachment.content_type || "application/octet-stream",
+        detected_content_type: attachment.detected_content_type || attachment.content_type || "application/octet-stream",
+        byte_size: attachment.byte_size || 0,
+        sha256: attachment.sha256 || null,
+        preview_state: attachment.preview_state === "ready" ? "ready" : "not_available",
+        safety_status: ["unknown", "suspicious", "blocked", "infected"].includes(String(attachment.safety_status)) ? attachment.safety_status : "unknown",
+        safety_reasons: Array.isArray(attachment.safety_reasons) ? attachment.safety_reasons : ["No malware scanner is configured"],
+      }))),
+    });
   }
-  const providerResult = await deliver();
-  return json({ ok: true, id: messageId, providerMessageId: providerResult.messageId });
+  const run = async () => { if (undoSeconds) await new Promise<void>((resolve) => setTimeout(resolve, undoSeconds * 1000)); await processOutbox(env); };
+  if (ctx) { if (scheduledDate) return json({ ok: true, id: messageId, scheduled: true, sendAfter }); ctx.waitUntil(run()); return json({ ok: true, id: messageId, status: "queued", sendAfter, undoSeconds }); }
+  await run();
+  return json({ ok: true, id: messageId, status: "queued", sendAfter, undoSeconds });
 }
 
 async function processScheduled(env: Env): Promise<void> {
+  await processOutbox(env);
   const now = new Date().toISOString();
-  const scheduled = await dbRequest<JsonRecord[]>(env, `messages?status=eq.scheduled&scheduled_at=lte.${encodeURIComponent(now)}&limit=25`);
-  for (const message of scheduled) {
-    try {
-      const attachments = await dbRequest<Array<{ filename: string; object_key: string }>>(env, `attachments?message_id=eq.${encodeURIComponent(String(message.id))}&select=filename,object_key`);
-      const result = await sendViaBrevo(env, { fromAddress: String(message.from_address), to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [], cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [], bcc: Array.isArray(message.bcc_addresses) ? message.bcc_addresses.map(String) : [], subject: String(message.subject || "(no subject)"), text: String(message.text_body || ""), html: typeof message.html_body === "string" ? message.html_body : undefined, replyTo: String(message.reply_to || message.from_address), attachments });
-      await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ status: "sent", folder: "sent", sent_at: new Date().toISOString(), provider_message_id: result.messageId || null, scheduled_at: null }) });
-    } catch { await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ status: "failed" }) }).catch(() => undefined); }
-  }
   const snoozed = await dbRequest<JsonRecord[]>(env, `messages?snoozed_until=lte.${encodeURIComponent(now)}&limit=50`);
   for (const message of snoozed) await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ folder: message.previous_folder || "inbox", previous_folder: null, snoozed_until: null }) }).catch(() => undefined);
   await processDueFollowUps(env, now);
@@ -1149,6 +1215,33 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   const messageMatch = url.pathname.match(/^\/api\/mail\/([^/]+)$/);
   if (request.method === "GET" && messageMatch) { const id = messageMatch[1]; const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!rows[0]) return error("Message not found", 404); const attachments = await dbRequest<JsonRecord[]>(env, `attachments?message_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`); const labels = await dbRequest<JsonRecord[]>(env, `message_labels?message_id=eq.${encodeURIComponent(id)}&select=label_id`); return json({ ...rows[0], attachments, labels }); }
   if (request.method === "GET" && url.pathname.startsWith("/api/threads/")) { const id = url.pathname.split("/").pop() || ""; return json(await dbRequest(env, `messages?thread_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`)); }
+  const outboxCancelMatch = url.pathname.match(/^\/api\/outbox\/([^/]+)\/cancel$/);
+  if (request.method === "POST" && outboxCancelMatch) {
+    const id = outboxCancelMatch[1];
+    const existing = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    if (!existing[0]) return error("Message not found", 404);
+    if (!canManageOutbox(existing[0], user.id)) return error("This send is already being processed or can no longer be cancelled", 409);
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&status=in.(queued,scheduled)&cancelled_at=is.null`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ status: "draft", folder: "drafts", cancelled_at: new Date().toISOString(), send_after: null, send_lease_until: null, scheduled_at: null, work_note: "Send cancelled", updated_at: new Date().toISOString() }) });
+    return json({ ok: true, message: rows[0] || null });
+  }
+  const outboxEditMatch = url.pathname.match(/^\/api\/outbox\/([^/]+)$/);
+  if (request.method === "PATCH" && outboxEditMatch) {
+    const id = outboxEditMatch[1];
+    const existing = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    if (!existing[0]) return error("Message not found", 404);
+    if (!canManageOutbox(existing[0], user.id)) return error("This send is already being processed or can no longer be edited", 409);
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (body.to !== undefined) { const recipients = splitAddresses(body.to); if (!recipients.length) return error("At least one recipient is required"); patch.to_addresses = recipients; }
+    if (body.cc !== undefined) patch.cc_addresses = splitAddresses(body.cc);
+    if (body.bcc !== undefined) patch.bcc_addresses = splitAddresses(body.bcc);
+    if (typeof body.subject === "string") { patch.subject = body.subject.slice(0, 500); patch.snippet = snippet(String((body.text ?? existing[0].text_body) || "")); }
+    if (typeof body.text === "string") { patch.text_body = body.text; patch.snippet = snippet(body.text); }
+    if (typeof body.html === "string") patch.html_body = body.html;
+    if (typeof body.replyTo === "string") patch.reply_to = cleanAddress(body.replyTo);
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&status=in.(queued,scheduled)&cancelled_at=is.null`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json({ ok: true, message: rows[0] || null });
+  }
   if (request.method === "POST" && messageMatch) {
     const id = messageMatch[1]; const body = (await request.json()) as JsonRecord; const existing = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!existing[0]) return error("Message not found", 404);
     if (body.action === "restore") {
@@ -1403,8 +1496,8 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (request.method === "GET" && url.pathname === "/api/signatures") return json(await dbRequest(env, `signatures?owner_id=eq.${encodeURIComponent(user.id)}&order=name.asc`));
   if (request.method === "POST" && url.pathname === "/api/signatures") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "signatures", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: body.mailboxId || mailbox.id, name: String(body.name || "Default"), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, is_default: body.isDefault === true }) }); return json(rows[0], 201); }
-  if (request.method === "GET" && url.pathname === "/api/settings") { const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); return json(rows[0] || { owner_id: user.id }); }
-  if (request.method === "PATCH" && url.pathname === "/api/settings") { const body = (await request.json()) as JsonRecord; const allowed = ["theme", "density", "reading_pane", "language", "timezone", "focused_inbox_enabled", "desktop_notifications", "push_subscription"]; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of allowed) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || patch); }
+  if (request.method === "GET" && url.pathname === "/api/settings") { const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); return json({ ...(rows[0] || { owner_id: user.id }), send_undo_seconds: normalizeUndoSeconds(objectValue(mailbox.settings).send_undo_seconds, 0) }); }
+  if (request.method === "PATCH" && url.pathname === "/api/settings") { const body = (await request.json()) as JsonRecord; const allowed = ["theme", "density", "reading_pane", "language", "timezone", "focused_inbox_enabled", "desktop_notifications", "push_subscription"]; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of allowed) if (key in body) patch[key] = body[key]; let undoSeconds = normalizeUndoSeconds(objectValue(mailbox.settings).send_undo_seconds, 0); if ("send_undo_seconds" in body) { undoSeconds = normalizeUndoSeconds(body.send_undo_seconds, undoSeconds); const currentMailboxSettings = objectValue(mailbox.settings); await dbRequest(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ settings: { ...currentMailboxSettings, send_undo_seconds: undoSeconds } }) }); } const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json({ ...(rows[0] || patch), send_undo_seconds: undoSeconds }); }
   if (request.method === "GET" && url.pathname === "/api/calendar") return json(await dbRequest(env, `calendar_events?owner_id=eq.${encodeURIComponent(user.id)}&order=starts_at.asc`));
   if (request.method === "POST" && url.pathname === "/api/calendar") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "calendar_events", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, title: String(body.title || "Untitled event"), description: String(body.description || ""), location: body.location || null, starts_at: body.startsAt, ends_at: body.endsAt, all_day: body.allDay === true, attendees: body.attendees || [] }) }); return json(rows[0], 201); }
   const calendarMatch = url.pathname.match(/^\/api\/calendar\/([^/]+)$/);
@@ -1418,8 +1511,12 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "GET" && url.pathname === "/api/integrations") return json(await dbRequest(env, `integrations?owner_id=eq.${encodeURIComponent(user.id)}&order=provider.asc`));
   if (request.method === "PATCH" && url.pathname === "/api/integrations") { const body = (await request.json()) as JsonRecord; const provider = String(body.provider || ""); if (!provider) return error("Provider is required"); const rows = await dbRequest<JsonRecord[]>(env, "integrations", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, provider, status: String(body.status || "not_configured"), settings: body.settings || {} }) }); return json(rows[0] || null); }
   if (request.method === "POST" && url.pathname === "/api/drafts") return handleDraft(env, user, (await request.json()) as JsonRecord);
-  if (request.method === "POST" && url.pathname === "/api/attachments") { const form = await request.formData(); const file = form.get("file"); if (!(file instanceof File)) return error("File is required"); if (file.size > 15 * 1024 * 1024) return error("Attachments are limited to 15 MB"); if (isDangerousAttachment(file.name, file.type)) return error("This attachment type is blocked for safety"); const objectKey = `drafts/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; await putObject(env, objectKey, new Uint8Array(await file.arrayBuffer()), file.type || "application/octet-stream"); return json({ object_key: objectKey, filename: file.name, content_type: file.type || "application/octet-stream", byte_size: file.size }); }
+  if (request.method === "POST" && url.pathname === "/api/attachments") { const form = await request.formData(); const file = form.get("file"); if (!(file instanceof File)) return error("File is required"); if (file.size > 15 * 1024 * 1024) return error("Attachments are limited to 15 MB"); const bytes = new Uint8Array(await file.arrayBuffer()); const declaredContentType = file.type || "application/octet-stream"; const detectedContentType = detectAttachmentContentType(file.name, declaredContentType, bytes); const safety = buildAttachmentSafety(file.name, declaredContentType, detectedContentType, file.size); if (safety.safetyStatus === "blocked") return error("This attachment type is blocked for safety"); const objectKey = `drafts/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; await putObject(env, objectKey, bytes, detectedContentType); return json({ object_key: objectKey, filename: file.name, content_type: declaredContentType, detected_content_type: detectedContentType, byte_size: file.size, sha256: await sha256Hex(bytes), preview_state: safety.previewState, safety_status: safety.safetyStatus, safety_reasons: safety.safetyReasons }); }
   if (request.method === "POST" && url.pathname === "/api/send") { try { return await handleSend(env, user.id, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
+  const downloadAllMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/attachments\/download$/);
+  if (request.method === "GET" && downloadAllMatch) { const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!messageRows[0]) return error("Message not found", 404); const rows = await dbRequest<Array<{ filename: string; object_key: string; byte_size: number }>>(env, `attachments?message_id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc&limit=10`); if (!rows.length) return error("There are no attachments to download", 404); const totalBytes = rows.reduce((sum, row) => sum + Number(row.byte_size || 0), 0); if (totalBytes > 25 * 1024 * 1024) return error("The download is limited to 25 MB", 413); const entries: Array<{ filename: string; data: Uint8Array }> = []; for (const row of rows) entries.push({ filename: row.filename, data: await readObject(env, row.object_key) }); const archive = buildZip(entries); const archiveName = `${String(messageRows[0].subject || "attachments").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "attachments"}.zip`; return new Response(archive, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${archiveName}"`, "cache-control": "no-store" } }); }
+  const previewMatch = url.pathname.match(/^\/api\/attachments\/([^/]+)\/preview$/);
+  if (request.method === "GET" && previewMatch) { const rows = await dbRequest<Array<{ object_key: string; filename: string; content_type: string; detected_content_type?: string | null; byte_size: number; preview_state: string; safety_status: string }>>(env, `attachments?id=eq.${encodeURIComponent(previewMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); const attachment = rows[0]; if (!attachment) return error("Attachment not found", 404); const contentType = attachment.detected_content_type || attachment.content_type; if (attachment.safety_status === "blocked" || attachment.safety_status === "infected") return error("This attachment is blocked from preview", 409); if (attachment.preview_state !== "ready" || (!contentType.startsWith("image/") && contentType !== "application/pdf") || Number(attachment.byte_size || 0) > 5 * 1024 * 1024) return error("This file is not eligible for safe preview", 415); return json({ url: await signedObjectUrl(env, attachment.object_key), filename: attachment.filename, contentType, previewState: attachment.preview_state }); }
   if (request.method === "GET" && url.pathname.startsWith("/api/attachments/")) { const id = url.pathname.split("/").pop() || ""; const rows = await dbRequest<Array<{ object_key: string }>>(env, `attachments?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!rows[0]) return error("Attachment not found", 404); const signedUrl = await signedObjectUrl(env, rows[0].object_key); return url.searchParams.get("json") === "true" ? json({ url: signedUrl }) : Response.redirect(signedUrl, 302); }
   return error("Not found", 404);
 }

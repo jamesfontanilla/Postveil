@@ -91,6 +91,8 @@ type Message = {
   spam_reasons?: string[];
   focused_category?: string;
   scheduled_at?: string | null;
+  send_after?: string | null;
+  cancelled_at?: string | null;
   snoozed_until?: string | null;
   work_state?: "none" | "reply_later" | "waiting_on" | "i_owe" | string | null;
   follow_up_at?: string | null;
@@ -103,6 +105,10 @@ type Message = {
     filename: string;
     content_type: string;
     byte_size: number;
+    detected_content_type?: string | null;
+    preview_state?: "ready" | "not_available" | "pending" | "failed";
+    safety_status?: "unknown" | "clean_static" | "suspicious" | "blocked" | "infected";
+    safety_reasons?: string[];
   }>;
 };
 type Contact = {
@@ -206,6 +212,7 @@ type AppSettings = {
   timezone?: string;
   focused_inbox_enabled?: boolean;
   desktop_notifications?: boolean;
+  send_undo_seconds?: 0 | 10 | 20 | 30;
 };
 type Task = {
   id: string;
@@ -303,6 +310,7 @@ function formatDate(value?: string) {
     : d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 function messageStatusLabel(message: Message) {
+  if (message.cancelled_at) return "Cancelled";
   if (message.direction === "inbound" && message.status === "queued") return "Receiving";
   if (message.direction === "outbound" && message.status === "queued") return "Sending";
   if (message.status === "received") return "Received";
@@ -341,6 +349,17 @@ function formatBytes(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
+class ApiError extends Error {
+  status: number;
+  payload: Record<string, unknown>;
+  constructor(message: string, status: number, payload: Record<string, unknown>) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = (await requireSupabase().auth.getSession()).data.session;
   const response = await fetch(path, {
@@ -355,7 +374,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new Error(payload.error || `Request failed (${response.status})`);
+    throw new ApiError(payload.error || `Request failed (${response.status})`, response.status, payload);
   return payload as T;
 }
 
@@ -484,12 +503,14 @@ function AuthScreen() {
 function Compose({
   mailboxes,
   signatures,
+  undoSeconds,
   seed,
   onClose,
   onSent,
 }: {
   mailboxes: Mailbox[];
   signatures: Signature[];
+  undoSeconds: 0 | 10 | 20 | 30;
   seed?: ComposeSeed;
   onClose: () => void;
   onSent: () => void;
@@ -523,6 +544,8 @@ function Compose({
   const [isMinimized, setIsMinimized] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<Array<{ code: string; title: string; detail: string }>>([]);
+  const idempotencyKeyRef = useRef(crypto.randomUUID());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveDraft = useCallback(async () => {
     if (!fromAddress || (!to.trim() && !subject.trim() && !text.trim())) return;
@@ -633,6 +656,9 @@ function Compose({
           subject,
           text,
           scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          undoSendSeconds: undoSeconds,
+          idempotencyKey: idempotencyKeyRef.current,
+          warningsAcknowledged: warnings.map((warning) => warning.code),
           threadId: seed?.threadId,
           inReplyTo: seed?.inReplyTo,
           references: seed?.references,
@@ -642,11 +668,16 @@ function Compose({
       onSent();
       onClose();
     } catch (sendError) {
-      setError(
-        sendError instanceof Error
-          ? sendError.message
-          : "The message could not be sent",
-      );
+      if (sendError instanceof ApiError && Array.isArray(sendError.payload.warnings)) {
+        setWarnings(sendError.payload.warnings as Array<{ code: string; title: string; detail: string }>);
+        setError("");
+      } else {
+        setError(
+          sendError instanceof Error
+            ? sendError.message
+            : "The message could not be sent",
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -866,6 +897,13 @@ function Compose({
             <input ref={fileInputRef} type="file" multiple onChange={upload} />
           </label>
         </div>
+        {warnings.length > 0 && (
+          <div className="compose-warning" role="alert">
+            <div className="compose-warning-head"><AlertTriangle size={15} /><strong>Review before sending</strong></div>
+            {warnings.map((warning) => <p key={warning.code}><strong>{warning.title}.</strong> {warning.detail}</p>)}
+            <small>Send again to confirm these checks.</small>
+          </div>
+        )}
         <div className="attachment-strip" aria-live="polite">
           {attachments.map((attachment) => (
             <span className="attachment-chip" key={attachment.object_key}>
@@ -1446,6 +1484,19 @@ function SettingsPanel({
                   Compact
                 </button>
               </div>
+              <label className="settings-select-row">
+                <span>Undo Send</span>
+                <select
+                  value={settings.send_undo_seconds ?? 0}
+                  onChange={(event) => void updateSettings({ send_undo_seconds: Number(event.target.value) })}
+                >
+                  <option value={0}>Off</option>
+                  <option value={10}>10 seconds</option>
+                  <option value={20}>20 seconds</option>
+                  <option value={30}>30 seconds</option>
+                </select>
+              </label>
+              <small className="setting-note">New messages wait this long before the sending queue releases them.</small>
             </div>
             <div className="setting-card">
               <h3>Attention</h3>
@@ -2769,6 +2820,43 @@ function MailboxApp({ session }: { session: Session }) {
       );
     }
   }
+  async function previewAttachment(id: string) {
+    try {
+      const result = await apiFetch<{ url: string }>(`/api/attachments/${id}/preview`);
+      window.open(result.url, "_blank", "noopener,noreferrer");
+    } catch (attachmentError) {
+      setError(attachmentError instanceof Error ? attachmentError.message : "Preview unavailable");
+    }
+  }
+  async function downloadAllAttachments(messageId: string) {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch(`/api/messages/${messageId}/attachments/download`, { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Attachment download failed");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "attachments.zip";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (attachmentError) {
+      setError(attachmentError instanceof Error ? attachmentError.message : "Attachment download failed");
+    }
+  }
+  async function cancelSelectedSend() {
+    if (!selected || !["queued", "scheduled"].includes(selected.status)) return;
+    try {
+      await apiFetch(`/api/outbox/${selected.id}/cancel`, { method: "POST" });
+      await loadMessages(folder, false);
+      await openMessage({ ...selected, status: "draft", folder: "drafts", cancelled_at: new Date().toISOString() });
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : "Send could not be cancelled");
+    }
+  }
   function openCompose(seed?: ComposeSeed) {
     setComposeSeed(seed);
     setComposeOpen(true);
@@ -3440,17 +3528,22 @@ function MailboxApp({ session }: { session: Session }) {
                 )}
                 {selected.attachments && selected.attachments.length > 0 && (
                   <div className="attachments">
-                    <p className="eyebrow">ATTACHMENTS</p>
+                    <div className="attachments-head">
+                      <p className="eyebrow">ATTACHMENTS · {selected.attachments.length}</p>
+                      {selected.attachments.length > 1 && <button className="attachment-download-all" onClick={() => void downloadAllAttachments(selected.id)}><Download size={13} /> Download all</button>}
+                    </div>
                     {selected.attachments.map((attachment) => (
-                      <button
-                        key={attachment.id}
-                        className="attachment-link"
-                        onClick={() => void openAttachment(attachment.id)}
-                      >
-                        <Paperclip size={14} />
-                        <span>{attachment.filename}</span>
-                        <small>{formatBytes(attachment.byte_size)}</small>
-                      </button>
+                      <div className="attachment-card" key={attachment.id}>
+                        <div className="attachment-card-main">
+                          <Paperclip size={14} />
+                          <span><strong>{attachment.filename}</strong><small>{formatBytes(attachment.byte_size)} · {attachment.detected_content_type || attachment.content_type}</small></span>
+                        </div>
+                        <div className="attachment-card-actions">
+                          {attachment.preview_state === "ready" && <button className="attachment-mini-action" onClick={() => void previewAttachment(attachment.id)}><Eye size={13} /> Preview</button>}
+                          <button className="attachment-mini-action" onClick={() => void openAttachment(attachment.id)}><Download size={13} /> Download</button>
+                        </div>
+                        <small className={`attachment-safety attachment-safety-${attachment.safety_status || "unknown"}`}><ShieldAlert size={12} /> {attachment.safety_status === "suspicious" ? "Review before opening" : "Malware scan unavailable; static checks only"}</small>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -3486,7 +3579,11 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 )}
                 <div className="detail-actions">
-                  {selected.folder === "trash" ? (
+                  {selected.direction === "outbound" && ["queued", "scheduled"].includes(selected.status) && !selected.cancelled_at ? (
+                    <button className="secondary-button danger-button" onClick={() => void cancelSelectedSend()}>
+                      <Undo2 size={15} /> Cancel send
+                    </button>
+                  ) : selected.folder === "trash" ? (
                     <>
                       <button
                         className="primary-button"
@@ -3582,6 +3679,7 @@ function MailboxApp({ session }: { session: Session }) {
         <Compose
           mailboxes={mailboxes}
           signatures={signatures}
+          undoSeconds={settings.send_undo_seconds ?? 0}
           seed={composeSeed}
           onClose={() => {
             setComposeOpen(false);

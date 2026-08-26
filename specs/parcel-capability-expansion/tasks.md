@@ -69,18 +69,18 @@ listed tests before moving to the next phase.
 
 ## Phase 3 — Safe sending and attachments
 
-- [ ] P3.1 [R-006] Refactor immediate send and scheduled send into one durable
+- [x] P3.1 [R-006] Refactor immediate send and scheduled send into one durable
        outbox processor.
-- [ ] P3.2 [R-006] Add configurable 0/10/20/30-second Undo Send delay.
-- [ ] P3.3 [R-006] Add cancel/edit endpoints with ownership and lease checks.
-- [ ] P3.4 [R-006] Add send warnings for attachment omission, recipient domain,
+- [x] P3.2 [R-006] Add configurable 0/10/20/30-second Undo Send delay.
+- [x] P3.3 [R-006] Add cancel/edit endpoints with ownership and lease checks.
+- [x] P3.4 [R-006] Add send warnings for attachment omission, recipient domain,
        Reply-To mismatch, and From identity.
-- [ ] P3.5 [R-006] Add idempotent Brevo send and duplicate-send tests.
-- [ ] P3.6 [R-007] Compute SHA-256 and detected MIME metadata on upload.
-- [ ] P3.7 [R-007] Add safe image/PDF preview endpoint with strict limits.
-- [ ] P3.8 [R-007] Add download-all endpoint with bounded ZIP generation.
-- [ ] P3.9 [R-007] Add attachment safety state to the message detail UI.
-- [ ] P3.10 [R-007] Add scanner adapter interface and explicit unavailable-scan
+- [x] P3.5 [R-006] Add idempotent Brevo send and duplicate-send tests.
+- [x] P3.6 [R-007] Compute SHA-256 and detected MIME metadata on upload.
+- [x] P3.7 [R-007] Add safe image/PDF preview endpoint with strict limits.
+- [x] P3.8 [R-007] Add download-all endpoint with bounded ZIP generation.
+- [x] P3.9 [R-007] Add attachment safety state to the message detail UI.
+- [x] P3.10 [R-007] Add scanner adapter interface and explicit unavailable-scan
        messaging; do not claim malware scanning without a configured provider.
 - [ ] P3.11 [R-006,R-007] Run outbound, attachment, and signed-URL production
        smoke tests.
