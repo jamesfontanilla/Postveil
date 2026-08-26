@@ -687,6 +687,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .security-email { overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink-soft); padding: 10px 11px; font-size: 12px; }
 .security-status { border-radius: 999px; background: var(--surface); color: var(--muted); padding: 4px 8px; font: 500 10px "DM Mono", monospace; }
 .security-status.enabled { background: #e9f7ef; color: #268256; }
+.security-status.pending { background: #fff8e8; color: #895d15; }
 .security-factor { justify-content: space-between; }
 .security-factor > div:first-child { min-width: 0; display: grid; gap: 3px; }
 .security-factor strong { overflow: hidden; color: var(--ink-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -696,6 +697,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .mfa-enrollment, .verification-box { display: grid; gap: 9px; border-top: 1px solid var(--line); padding-top: 13px; }
 .mfa-enrollment strong, .verification-box strong { color: var(--ink-soft); font-size: 12px; }
 .mfa-enrollment > small, .verification-box > small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.mfa-pending { display: grid; gap: 9px; border-top: 1px solid var(--line); padding-top: 13px; }
+.mfa-pending strong { color: var(--ink-soft); font-size: 12px; }
+.mfa-pending small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .mfa-qr { width: 164px; height: 164px; justify-self: start; border: 1px solid var(--line); border-radius: 6px; background: white; padding: 8px; }
 .mfa-qr-fallback { max-width: 320px; border: 1px solid #e6bd78; border-radius: 6px; background: #fff8e8; color: #76531d; padding: 10px 11px; font-size: 11px; line-height: 1.45; }
 .mfa-enrollment details { color: var(--muted); font-size: 10px; }
@@ -705,6 +709,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .security-recovery-form { align-items: start; }
 .security-recovery-form input { min-width: 0; }
 .verification-box { grid-column: 1 / -1; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface)); padding: 12px; }
+.settings-alert { margin-bottom: 16px; border-radius: 6px; padding: 10px 11px; font-size: 11px; line-height: 1.45; }
+.settings-error { border: 1px solid #e5a6a6; background: #fff2f2; color: #9c3030; }
 @media (max-width: 720px) {
   .security-settings-grid { grid-template-columns: 1fr; }
   .security-recovery-form { flex-direction: column; }
