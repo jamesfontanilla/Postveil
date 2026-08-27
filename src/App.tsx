@@ -61,7 +61,7 @@ import { qrImageSource } from "./lib/qr";
 
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam";
 type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
-type Message = {
+  type Message = {
   id: string;
   thread_id: string;
   mailbox_id: string | null;
@@ -90,6 +90,23 @@ type Message = {
   has_attachment?: boolean;
   spam_score?: number;
   spam_reasons?: string[];
+  trust_score?: number | null;
+  trust_reasons?: string[];
+  trust_evidence?: Record<string, unknown>;
+  auth_results?: Record<string, unknown>;
+  auth_spf?: string | null;
+  auth_dkim?: string | null;
+  auth_dmarc?: string | null;
+  auth_arc?: string | null;
+  auth_tls?: string | null;
+  received_auth_at?: string | null;
+  sender_first_seen?: boolean | null;
+  known_contact?: boolean | null;
+  reply_to_mismatch?: boolean;
+  link_count?: number;
+  tracking_pixel_count?: number;
+  screening_status?: "none" | "review" | "approved" | "blocked" | "rerouted" | string;
+  screening_policy_id?: string | null;
   focused_category?: string;
   scheduled_at?: string | null;
   send_after?: string | null;
@@ -149,9 +166,12 @@ type SenderPolicy = {
   mailbox_id?: string | null;
   match_type: "address" | "domain";
   match_value: string;
-  action: "inbox" | "spam";
+  action: "inbox" | "spam" | "screen" | "archive" | "folder";
+  target_folder_id?: string | null;
   enabled: boolean;
 };
+type ScreeningEvent = { id: string; decision: string; previous_folder?: string | null; created_at: string; restored_at?: string | null };
+type TrustData = Message & { screening_history?: ScreeningEvent[] };
 type Signature = {
   id: string;
   name: string;
@@ -1096,6 +1116,7 @@ function SettingsPanel({
   senderPolicies,
   onClose,
   onChanged,
+  onOpenMessage,
 }: {
   session: Session;
   settings: AppSettings;
@@ -1106,6 +1127,7 @@ function SettingsPanel({
   senderPolicies: SenderPolicy[];
   onClose: () => void;
   onChanged: () => void;
+  onOpenMessage: (message: Message) => void;
 }) {
   const [tab, setTab] = useState<
     | "appearance"
@@ -1124,8 +1146,12 @@ function SettingsPanel({
   const [contactAvatarUrl, setContactAvatarUrl] = useState("");
   const [policyType, setPolicyType] = useState<"address" | "domain">("address");
   const [policyValue, setPolicyValue] = useState("");
-  const [policyAction, setPolicyAction] = useState<"inbox" | "spam">("inbox");
+  const [policyAction, setPolicyAction] = useState<SenderPolicy["action"]>("inbox");
+  const [policyMailboxId, setPolicyMailboxId] = useState("");
+  const [policyTargetFolderId, setPolicyTargetFolderId] = useState("");
   const [policyBusy, setPolicyBusy] = useState(false);
+  const [screeningQueue, setScreeningQueue] = useState<Message[]>([]);
+  const [screeningBusy, setScreeningBusy] = useState<string | null>(null);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleName, setRuleName] = useState("");
   const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([
@@ -1221,16 +1247,44 @@ function SettingsPanel({
           matchType: policyType,
           matchValue: policyValue,
           action: policyAction,
+          mailboxId: policyMailboxId || null,
+          targetFolderId: policyAction === "folder" ? policyTargetFolderId || null : null,
         }),
       });
       setPolicyValue("");
-      setNotice(policyAction === "inbox" ? "Trusted sender saved" : "Blocked sender saved");
+      setPolicyTargetFolderId("");
+      setNotice(policyAction === "inbox" ? "Trusted sender saved" : policyAction === "spam" ? "Blocked sender saved" : "Sender review rule saved");
       onChanged();
     } catch (caught) {
       setNotice(caught instanceof Error ? caught.message : "Could not save sender policy");
     } finally {
       setPolicyBusy(false);
     }
+  }
+  async function applyPolicyToExisting(policy: SenderPolicy) {
+    if (!window.confirm(`Apply this decision to matching messages already in Parcel? Up to 500 messages will be reviewed.`)) return;
+    try {
+      const result = await apiFetch<{ matched: number; changed: number; capped?: boolean }>(`/api/sender-policies/${policy.id}/apply-existing`, { method: "POST", body: JSON.stringify({ confirm: true }) });
+      setNotice(`${result.changed} existing message${result.changed === 1 ? "" : "s"} updated${result.capped ? " · limited to 500" : ""}`);
+      onChanged();
+      if (tab === "spam") void loadScreeningQueue();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Existing messages could not be updated");
+    }
+  }
+  async function loadScreeningQueue() {
+    try { setScreeningQueue(await apiFetch<Message[]>("/api/screening/queue")); }
+    catch (caught) { setNotice(caught instanceof Error ? caught.message : "Screening queue unavailable"); }
+  }
+  async function decideScreening(message: Message, decision: "approve" | "block" | "reroute") {
+    setScreeningBusy(message.id);
+    try {
+      await apiFetch(`/api/screening/${message.id}/decision`, { method: "POST", body: JSON.stringify({ decision, folder: decision === "reroute" ? "archive" : undefined }) });
+      setScreeningQueue((current) => current.filter((item) => item.id !== message.id));
+      setNotice(decision === "approve" ? "Message approved to Inbox" : decision === "block" ? "Message moved to Spam" : "Message archived");
+      onChanged();
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Screening decision failed"); }
+    finally { setScreeningBusy(null); }
   }
   async function toggleSenderPolicy(policy: SenderPolicy) {
     try {
@@ -1245,7 +1299,7 @@ function SettingsPanel({
     }
   }
   async function deleteSenderPolicy(policy: SenderPolicy) {
-    if (!window.confirm(`Remove this ${policy.action === "inbox" ? "trusted" : "blocked"} ${policy.match_type}?`)) return;
+    if (!window.confirm(`Remove this sender decision for ${policy.match_value}?`)) return;
     try {
       await apiFetch(`/api/sender-policies/${policy.id}`, { method: "DELETE" });
       setNotice("Sender policy removed");
@@ -1712,6 +1766,7 @@ function SettingsPanel({
   }, [tab]);
   useEffect(() => {
     if (tab === "security") void loadSecurity();
+    if (tab === "spam") void loadScreeningQueue();
   }, [tab]);
   return (
     <div className="modal-backdrop">
@@ -1985,6 +2040,9 @@ function SettingsPanel({
                 <select value={policyAction} onChange={(event) => setPolicyAction(event.target.value as typeof policyAction)} aria-label="Sender decision">
                   <option value="inbox">Always trust</option>
                   <option value="spam">Always block</option>
+                  <option value="screen">Always review</option>
+                  <option value="archive">Archive automatically</option>
+                  <option value="folder">Move to folder</option>
                 </select>
                 <select value={policyType} onChange={(event) => setPolicyType(event.target.value as typeof policyType)} aria-label="Sender match type">
                   <option value="address">This email address</option>
@@ -1998,12 +2056,20 @@ function SettingsPanel({
                   aria-label={policyType === "domain" ? "Domain" : "Email address"}
                   type={policyType === "domain" ? "text" : "email"}
                 />
+                <select value={policyMailboxId} onChange={(event) => setPolicyMailboxId(event.target.value)} aria-label="Mailbox scope">
+                  <option value="">All mailboxes</option>
+                  {mailboxes.map((item) => <option value={item.id} key={item.id}>{item.display_name || item.address}</option>)}
+                </select>
+                {policyAction === "folder" && <select value={policyTargetFolderId} onChange={(event) => setPolicyTargetFolderId(event.target.value)} aria-label="Destination folder">
+                  <option value="">Choose destination folder</option>
+                  {folders.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
+                </select>}
                 <button className="secondary-button" onClick={() => void createSenderPolicy()} disabled={policyBusy}>
                   {policyAction === "inbox" ? <Check size={15} /> : <ShieldAlert size={15} />}
-                  {policyBusy ? "Saving…" : policyAction === "inbox" ? "Trust" : "Block"}
+                  {policyBusy ? "Saving…" : "Save decision"}
                 </button>
               </div>
-              <small className="field-help">A trusted sender still cannot bypass confirmed malware or a dangerous attachment.</small>
+              <small className="field-help">Address rules are stronger than domain rules. Trusted senders still cannot bypass confirmed malware or a dangerous attachment.</small>
             </div>
             <div className="setting-card policy-list-card">
               <div className="setting-card-head">
@@ -2019,14 +2085,38 @@ function SettingsPanel({
                 <div className={`settings-item policy-item ${policy.enabled ? "" : "disabled"}`} key={policy.id}>
                   <div className="policy-copy">
                     <strong>{policy.match_value}</strong>
-                    <small>{policy.action === "inbox" ? "Trusted" : "Blocked"} · {policy.match_type}</small>
+                    <small>{policy.action === "inbox" ? "Trusted" : policy.action === "spam" ? "Blocked" : policy.action === "screen" ? "Review" : policy.action === "archive" ? "Archive" : "Move to folder"} · {policy.match_type}{policy.mailbox_id ? " · mailbox-specific" : " · all mailboxes"}</small>
                   </div>
                   <div className="rule-list-actions">
+                    <button className="text-button policy-apply-button" onClick={() => void applyPolicyToExisting(policy)}>Apply to existing</button>
                     <label className="rule-toggle" title={policy.enabled ? "Pause policy" : "Enable policy"}>
                       <input type="checkbox" checked={policy.enabled} onChange={() => void toggleSenderPolicy(policy)} aria-label={`${policy.enabled ? "Disable" : "Enable"} ${policy.match_value}`} />
                       <span />
                     </label>
                     <button className="icon-button compact-icon danger-icon" onClick={() => void deleteSenderPolicy(policy)} aria-label={`Remove ${policy.match_value}`} title="Remove"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="setting-card screening-queue-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Screening queue</h3>
+                  <p>Messages needing a decision stay available here without losing their trust evidence.</p>
+                </div>
+                <span className="rule-count">{screeningQueue.length}</span>
+              </div>
+              {screeningQueue.length === 0 ? <div className="rule-empty">No messages waiting for review.</div> : screeningQueue.map((message) => (
+                <div className="screening-queue-item" key={message.id}>
+                  <button className="screening-queue-main" onClick={() => { onClose(); onOpenMessage(message); }}>
+                    <strong>{message.subject || "(no subject)"}</strong>
+                    <span>{message.from_name || message.from_address}</span>
+                    <small>{message.spam_score !== undefined ? `${Math.round((message.spam_score || 0) * 100)}% risk` : "Risk review"} · {message.snippet || "No preview"}</small>
+                  </button>
+                  <div className="screening-queue-actions">
+                    <button className="text-button" disabled={screeningBusy === message.id} onClick={() => void decideScreening(message, "approve")}>Approve</button>
+                    <button className="text-button danger-text-button" disabled={screeningBusy === message.id} onClick={() => void decideScreening(message, "block")}>Block</button>
+                    <button className="text-button" disabled={screeningBusy === message.id} onClick={() => void decideScreening(message, "reroute")}>Archive</button>
                   </div>
                 </div>
               ))}
@@ -2698,6 +2788,9 @@ function MailboxApp({ session }: { session: Session }) {
   const [liveState, setLiveState] = useState<"connecting" | "live" | "reconnecting" | "offline">("connecting");
   const [showAllThreadMessages, setShowAllThreadMessages] = useState(false);
   const [showMessageDetails, setShowMessageDetails] = useState(false);
+  const [trustLensOpen, setTrustLensOpen] = useState(false);
+  const [trustLensBusy, setTrustLensBusy] = useState(false);
+  const [trustData, setTrustData] = useState<TrustData | null>(null);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [trashBusy, setTrashBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -3044,6 +3137,8 @@ function MailboxApp({ session }: { session: Session }) {
     setSelectedId(message.id);
     setShowAllThreadMessages(false);
     setShowMessageDetails(false);
+    setTrustLensOpen(false);
+    setTrustData(null);
     setShowMoreActions(false);
     try {
       const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
@@ -3066,6 +3161,29 @@ function MailboxApp({ session }: { session: Session }) {
       setError(
         openError instanceof Error ? openError.message : "Message unavailable",
       );
+    }
+  }
+  async function toggleTrustLens() {
+    if (!selected) return;
+    if (trustLensOpen) { setTrustLensOpen(false); return; }
+    setTrustLensOpen(true);
+    if (trustData) return;
+    setTrustLensBusy(true);
+    try { setTrustData(await apiFetch<TrustData>(`/api/mail/${selected.id}/trust`)); }
+    catch (trustError) { setError(trustError instanceof Error ? trustError.message : "Trust details unavailable"); }
+    finally { setTrustLensBusy(false); }
+  }
+  async function submitSpamFeedback(feedback: "spam" | "not_spam") {
+    if (!selected) return;
+    try {
+      await apiFetch(`/api/mail/${selected.id}/feedback`, { method: "POST", body: JSON.stringify({ feedback }) });
+      setSelected(null);
+      setSelectedId(null);
+      setThreadMessages([]);
+      setTrustData(null);
+      await loadMessages(folder, false);
+    } catch (feedbackError) {
+      setError(feedbackError instanceof Error ? feedbackError.message : "Feedback could not be saved");
     }
   }
   async function mutateMessage(body: JsonSettings) {
@@ -3095,6 +3213,8 @@ function MailboxApp({ session }: { session: Session }) {
     setSelected(null);
     setSelectedId(null);
     setThreadMessages([]);
+    setTrustLensOpen(false);
+    setTrustData(null);
     setShowMoreActions(false);
   }
   async function restoreSelected() {
@@ -3860,6 +3980,35 @@ function MailboxApp({ session }: { session: Session }) {
                     </div>
                   </div>
                 )}
+                <div className="trust-lens">
+                  <button className="trust-lens-toggle" onClick={() => void toggleTrustLens()} aria-expanded={trustLensOpen}>
+                    <span className="trust-lens-title"><ShieldAlert size={15} /><span><strong>Trust Lens</strong><small> Authentication and sender evidence</small></span></span>
+                    <span>{trustLensBusy ? "Loading…" : trustLensOpen ? "Hide" : "Inspect"} <ChevronDown size={14} className={trustLensOpen ? "rotated" : ""} /></span>
+                  </button>
+                  {trustLensOpen && trustData && (() => {
+                    const auth = trustData.auth_results || {};
+                    const evidence = trustData.trust_evidence || {};
+                    const status = (key: "spf" | "dkim" | "dmarc" | "arc" | "tls") => String(trustData[`auth_${key}` as keyof TrustData] || auth[key] || "missing");
+                    const statusClass = (value: string) => value === "pass" ? "trust-status-pass" : value === "missing" || value === "none" ? "trust-status-missing" : "trust-status-fail";
+                    const hosts = Array.isArray(evidence.link_hosts) ? evidence.link_hosts as Array<{ host?: string; count?: number }> : [];
+                    const history = trustData.screening_history || [];
+                    return <div className="trust-lens-body">
+                      <p className="trust-lens-note">Advisory signals only. Authentication results describe what the receiving server observed; they do not guarantee that a message is safe.</p>
+                      <div className="trust-lens-grid">
+                        {(["spf", "dkim", "dmarc", "arc", "tls"] as const).map((key) => <div className="trust-lens-item" key={key}><strong>{key.toUpperCase()}</strong><span className={statusClass(status(key))}>{status(key)}</span></div>)}
+                      </div>
+                      <div className="trust-lens-grid">
+                        <div className="trust-lens-item"><strong>Sender history</strong><span>{trustData.sender_first_seen ? "First seen sender" : "Seen before"}</span></div>
+                        <div className="trust-lens-item"><strong>Contact</strong><span>{trustData.known_contact ? "Known contact" : "Not in contacts"}</span></div>
+                        <div className="trust-lens-item"><strong>Reply-To</strong><span className={trustData.reply_to_mismatch ? "trust-status-fail" : "trust-status-pass"}>{trustData.reply_to_mismatch ? "Different address" : "Matches sender"}</span></div>
+                        <div className="trust-lens-item"><strong>Tracking pixels</strong><span>{trustData.tracking_pixel_count || 0} detected</span></div>
+                      </div>
+                      <div className="trust-lens-section"><strong>Link hosts · {trustData.link_count || 0} links</strong>{hosts.length ? <div className="trust-host-list">{hosts.map((item) => <span className="trust-host" key={item.host}>{item.host}{item.count && item.count > 1 ? ` · ${item.count}` : ""}</span>)}</div> : <p className="trust-lens-note">No web links detected.</p>}</div>
+                      {history.length > 0 && <div className="trust-lens-section"><strong>Screening history</strong><p className="trust-lens-note">{history.slice(0, 3).map((item) => `${item.decision} · ${new Date(item.created_at).toLocaleString()}`).join("  |  ")}</p></div>}
+                    </div>;
+                  })()}
+                  {trustLensOpen && !trustData && trustLensBusy && <div className="trust-lens-body"><p className="trust-lens-note">Loading sender evidence…</p></div>}
+                </div>
                 {labels.length > 0 && (
                   <div className="detail-labels">
                     <span className="eyebrow">LABELS</span>
@@ -3989,7 +4138,7 @@ function MailboxApp({ session }: { session: Session }) {
                             <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
                               <Eye size={15} /> Mark unread
                             </button>
-                            <button role="menuitem" onClick={() => void mutateMessage({ folder: selected.folder === "spam" ? "inbox" : "spam" })}>
+                            <button role="menuitem" onClick={() => void submitSpamFeedback(selected.folder === "spam" ? "not_spam" : "spam")}>
                               <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}
                             </button>
                             <button role="menuitem" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}>
@@ -4058,6 +4207,7 @@ function MailboxApp({ session }: { session: Session }) {
           rules={rules}
           senderPolicies={senderPolicies}
           onClose={() => setSettingsOpen(false)}
+          onOpenMessage={(message) => void openMessage(message)}
           onChanged={() => {
             void loadMeta();
           }}
