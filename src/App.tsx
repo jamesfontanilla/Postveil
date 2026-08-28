@@ -2776,6 +2776,8 @@ function MailboxApp({ session }: { session: Session }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Message | null>(null);
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequestRef = useRef(0);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeSeed, setComposeSeed] = useState<ComposeSeed | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2904,12 +2906,14 @@ function MailboxApp({ session }: { session: Session }) {
     setSelectAllResults(false);
   }
   function openMailFolder(target: ViewKey) {
+    detailRequestRef.current += 1;
     setView("mail");
     setFolder(target);
     setActiveSavedSearchId(null);
     setSelected(null);
     setSelectedId(null);
     setThreadMessages([]);
+    setDetailLoading(false);
     clearListSelection();
     setMobileNav(false);
   }
@@ -3132,25 +3136,33 @@ function MailboxApp({ session }: { session: Session }) {
     return () => window.clearTimeout(timer);
   }, [query, filter, sort, folder, view, loadMessages]);
   async function openMessage(message: Message) {
+    const requestId = detailRequestRef.current + 1;
+    detailRequestRef.current = requestId;
     setView("mail");
     if (["inbox", "sent", "drafts", "archive", "trash", "spam"].includes(message.folder)) setFolder(message.folder as ViewKey);
     setSelectedId(message.id);
+    setSelected(message);
+    setDetailLoading(true);
+    setError("");
     setShowAllThreadMessages(false);
     setShowMessageDetails(false);
+    setThreadMessages([]);
     setTrustLensOpen(false);
     setTrustData(null);
     setShowMoreActions(false);
     try {
       const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
+      if (detailRequestRef.current !== requestId) return;
       setSelected(detail);
-      setThreadMessages(
-        await apiFetch<Message[]>(`/api/threads/${message.thread_id}`),
-      );
+      const thread = await apiFetch<Message[]>(`/api/threads/${message.thread_id}`);
+      if (detailRequestRef.current !== requestId) return;
+      setThreadMessages(thread);
       if (!message.is_read) {
         await apiFetch(`/api/mail/${message.id}`, {
           method: "POST",
           body: JSON.stringify({ isRead: true }),
         });
+        if (detailRequestRef.current !== requestId) return;
         setMessages((current) =>
           current.map((item) =>
             item.id === message.id ? { ...item, is_read: true } : item,
@@ -3158,9 +3170,12 @@ function MailboxApp({ session }: { session: Session }) {
         );
       }
     } catch (openError) {
+      if (detailRequestRef.current !== requestId) return;
       setError(
         openError instanceof Error ? openError.message : "Message unavailable",
       );
+    } finally {
+      if (detailRequestRef.current === requestId) setDetailLoading(false);
     }
   }
   async function toggleTrustLens() {
@@ -3210,9 +3225,11 @@ function MailboxApp({ session }: { session: Session }) {
     }
   }
   function clearMessageSelection() {
+    detailRequestRef.current += 1;
     setSelected(null);
     setSelectedId(null);
     setThreadMessages([]);
+    setDetailLoading(false);
     setTrustLensOpen(false);
     setTrustData(null);
     setShowMoreActions(false);
@@ -3846,7 +3863,7 @@ function MailboxApp({ session }: { session: Session }) {
                 <span>Your inbox, without the noise.</span>
               </div>
             ) : (
-              <article className="message-detail">
+              <article key={selected.id} className={`message-detail ${detailLoading ? "is-detail-loading" : ""}`} aria-busy={detailLoading}>
                 <div className="detail-head">
                   <div>
                     <p className="eyebrow">{selected.direction === "inbound" ? "RECEIVED" : "SENT"}</p>
@@ -3933,6 +3950,11 @@ function MailboxApp({ session }: { session: Session }) {
                     )}
                   </div>
                 </div>
+                {detailLoading && (
+                  <div className="detail-loading" role="status" aria-live="polite">
+                    <span className="detail-loading-dot" /> Updating message…
+                  </div>
+                )}
                 {selected.folder === "trash" && (
                   <div className="trash-notice" role="status">
                     <Trash2 size={15} />
@@ -3980,7 +4002,7 @@ function MailboxApp({ session }: { session: Session }) {
                     </div>
                   </div>
                 )}
-                <div className="trust-lens">
+                {trustLensOpen && <div className="trust-lens">
                   <button className="trust-lens-toggle" onClick={() => void toggleTrustLens()} aria-expanded={trustLensOpen}>
                     <span className="trust-lens-title"><ShieldAlert size={15} /><span><strong>Trust Lens</strong><small> Authentication and sender evidence</small></span></span>
                     <span>{trustLensBusy ? "Loading…" : trustLensOpen ? "Hide" : "Inspect"} <ChevronDown size={14} className={trustLensOpen ? "rotated" : ""} /></span>
@@ -4008,7 +4030,7 @@ function MailboxApp({ session }: { session: Session }) {
                     </div>;
                   })()}
                   {trustLensOpen && !trustData && trustLensBusy && <div className="trust-lens-body"><p className="trust-lens-note">Loading sender evidence…</p></div>}
-                </div>
+                </div>}
                 {labels.length > 0 && (
                   <div className="detail-labels">
                     <span className="eyebrow">LABELS</span>
@@ -4134,6 +4156,9 @@ function MailboxApp({ session }: { session: Session }) {
                           <div className="action-menu" role="menu">
                             <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
                               <Forward size={15} /> Forward
+                            </button>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleTrustLens(); }}>
+                              <ShieldAlert size={15} /> {trustLensOpen ? "Hide trust details" : "Inspect trust details"}
                             </button>
                             <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
                               <Eye size={15} /> Mark unread
