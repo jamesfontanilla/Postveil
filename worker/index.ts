@@ -31,6 +31,15 @@ import {
   maskRecoveryEmail,
   normalizeRecoveryEmail,
 } from "./security.ts";
+import {
+  extractTrustEvidence,
+  authenticationAlignmentMismatches,
+  normalizeAuthenticationResults,
+  screeningDecisionPatch,
+  selectSenderPolicy,
+  type TrustAuthResults,
+  type TrustPolicy,
+} from "./trust.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -285,7 +294,64 @@ function hasDeceptiveLink(html: string): boolean {
   return false;
 }
 
-type SenderPolicy = { id: string; mailbox_id: string | null; match_type: "address" | "domain"; match_value: string; action: string };
+type SenderPolicy = TrustPolicy;
+
+const SENDER_POLICY_ACTIONS = new Set(["inbox", "spam", "screen", "archive", "folder"]);
+
+function normalizeSenderPolicyValue(matchType: "address" | "domain", value: unknown): string {
+  const normalized = String(value || "").trim().toLowerCase().replace(/^@/, "").replace(/\.$/, "");
+  if (matchType === "address") {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error("Enter a complete email address");
+  } else if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i.test(normalized)) {
+    throw new Error("Enter a domain such as example.com");
+  }
+  return normalized;
+}
+
+async function ensurePolicyMailbox(env: Env, ownerId: string, mailboxId: unknown): Promise<string | null> {
+  const value = typeof mailboxId === "string" && mailboxId ? mailboxId : null;
+  if (!value) return null;
+  const rows = await dbRequest<Array<{ id: string }>>(env, `mailboxes?id=eq.${encodeURIComponent(value)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+  if (!rows[0]) throw new Error("Mailbox not found");
+  return value;
+}
+
+function policyMatchesMessage(policy: SenderPolicy, message: JsonRecord): boolean {
+  if (policy.enabled === false) return false;
+  if (policy.mailbox_id && policy.mailbox_id !== message.mailbox_id) return false;
+  const address = cleanAddress(String(message.from_address || ""));
+  const domain = addressDomain(address);
+  return policy.match_type === "address" ? policy.match_value.toLowerCase() === address : policy.match_value.toLowerCase().replace(/^@/, "").replace(/\.$/, "") === domain;
+}
+
+async function recordScreeningFeedback(env: Env, ownerId: string, message: JsonRecord, feedback: "spam" | "not_spam"): Promise<void> {
+  const id = String(message.id || "");
+  const previousFolder = String(message.folder || "inbox");
+  await dbRequest(env, "spam_feedback", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: id, feedback }) }).catch(() => undefined);
+  await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: id, decision: feedback === "spam" ? "blocked" : "allowed", previous_folder: previousFolder }) }).catch(() => undefined);
+  await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder: feedback === "spam" ? "spam" : "inbox", custom_folder_id: null, screening_status: feedback === "spam" ? "blocked" : "approved", updated_at: new Date().toISOString() }) });
+}
+
+async function applyPolicyToMessage(env: Env, ownerId: string, message: JsonRecord, policy: SenderPolicy): Promise<void> {
+  const id = String(message.id || "");
+  const previousFolder = String(message.folder || "inbox");
+  const patch: JsonRecord = { screening_policy_id: policy.id, updated_at: new Date().toISOString() };
+  let decision: "allowed" | "blocked" | "rerouted" | "screened" = "screened";
+  if (policy.action === "spam") { patch.folder = "spam"; patch.custom_folder_id = null; patch.screening_status = "blocked"; decision = "blocked"; }
+  else if (policy.action === "inbox") { patch.folder = "inbox"; patch.custom_folder_id = null; patch.screening_status = "approved"; decision = "allowed"; }
+  else if (policy.action === "archive") { patch.folder = "archive"; patch.custom_folder_id = null; patch.screening_status = "rerouted"; decision = "rerouted"; }
+  else if (policy.action === "folder") {
+    if (!policy.target_folder_id) throw new Error("This folder policy has no destination");
+    const folders = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(policy.target_folder_id)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+    if (!folders[0]) throw new Error("This folder policy points to a missing folder");
+    patch.folder = "custom"; patch.custom_folder_id = policy.target_folder_id; patch.screening_status = "rerouted"; decision = "rerouted";
+  } else if (policy.action === "screen") {
+    patch.screening_status = "review";
+    decision = "screened";
+  }
+  await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+  await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: id, policy_id: policy.id, decision, previous_folder: previousFolder }) }).catch(() => undefined);
+}
 
 async function saveAttachments(env: Env, ownerId: string, messageId: string, attachments: Array<{ filename?: string | null; mimeType?: string; content?: Uint8Array | ArrayBuffer | string; contentId?: string | null; disposition?: string | null }>): Promise<{ stored: StoredAttachment[]; blocked: string[] }> {
   const stored: StoredAttachment[] = [];
@@ -305,38 +371,36 @@ async function saveAttachments(env: Env, ownerId: string, messageId: string, att
   return { stored, blocked };
 }
 
-async function assessInbound(env: Env, ownerId: string, mailboxId: string, envelopeFrom: string, headerFrom: string, subject: string, textBody: string, htmlBody: string, parsed: { headers?: Array<{ key: string; value: string }>; attachments?: Array<{ filename?: string | null; mimeType?: string }> }): Promise<{ score: number; reasons: string[]; focusedScore: number; focusedCategory: string; authResults: JsonRecord; policyId: string | null }> {
+async function assessInbound(env: Env, ownerId: string, mailboxId: string, envelopeFrom: string, headerFrom: string, subject: string, textBody: string, htmlBody: string, parsed: { headers?: Array<{ key: string; value: string }>; attachments?: Array<{ filename?: string | null; mimeType?: string }> }): Promise<{ score: number; reasons: string[]; focusedScore: number; focusedCategory: string; authResults: TrustAuthResults; trustScore: number; trustReasons: string[]; trustEvidence: JsonRecord; receivedAuthAt: string | null; senderFirstSeen: boolean; knownContact: boolean; replyToMismatch: boolean; linkCount: number; trackingPixelCount: number; policyId: string | null; policyAction: string | null; policyTargetFolderId: string | null }> {
   let score = 0;
   let focusedScore = 0.5;
   const reasons: string[] = [];
-  const authHeader = headerValue(parsed, "authentication-results") || "";
-  const spf = authStatus(authHeader, "spf");
-  const dkim = authStatus(authHeader, "dkim");
-  const dmarc = authStatus(authHeader, "dmarc");
-  const authResults: JsonRecord = { header: authHeader.slice(0, 1000), spf, dkim, dmarc };
+  const authResults = normalizeAuthenticationResults(parsed.headers || []);
+  const authHeader = authResults.header;
+  const spf = authResults.spf;
+  const dkim = authResults.dkim;
+  const dmarc = authResults.dmarc;
   const authFailures = [spf, dkim, dmarc].filter((status) => status === "fail" || status === "softfail" || status === "permerror" || status === "temperror");
   if (dmarc === "fail") { score += 0.18; reasons.push("DMARC failure"); }
   if (authFailures.length) { score += 0.18 + Math.min(0.12, (authFailures.length - 1) * 0.06); reasons.push("authentication failure"); }
   if ([spf, dkim, dmarc].filter(Boolean).length >= 2 && authFailures.length === 0 && [spf, dkim, dmarc].every((status) => !status || status === "pass")) { score -= 0.08; reasons.push("authentication passed"); }
   if (envelopeFrom && headerFrom && cleanAddress(envelopeFrom) !== cleanAddress(headerFrom)) { score += 0.12; reasons.push("envelope/header sender mismatch"); }
   const visibleDomain = addressDomain(headerFrom);
-  const spfDomain = authDomain(authHeader, "spf", "smtp.mailfrom");
-  const dkimDomain = authDomain(authHeader, "dkim", "header.d");
-  const dmarcDomain = authDomain(authHeader, "dmarc", "header.from");
-  authResults.spf_domain = spfDomain;
-  authResults.dkim_domain = dkimDomain;
-  authResults.dmarc_domain = dmarcDomain;
-  if (spf === "pass" && spfDomain && !domainsAlign(spfDomain, visibleDomain)) { score += 0.08; reasons.push("SPF alignment mismatch"); }
-  if (dkim === "pass" && dkimDomain && !domainsAlign(dkimDomain, visibleDomain)) { score += 0.08; reasons.push("DKIM alignment mismatch"); }
-  if (dmarc === "pass" && dmarcDomain && !domainsAlign(dmarcDomain, visibleDomain)) { score += 0.12; reasons.push("DMARC alignment mismatch"); }
+  authenticationAlignmentMismatches(authResults, visibleDomain).forEach((mechanism) => {
+    score += mechanism === "DMARC" ? 0.12 : 0.08;
+    reasons.push(`${mechanism} alignment mismatch`);
+  });
+  const sender = cleanAddress(headerFrom || envelopeFrom);
   const replyTo = cleanAddress(headerValue(parsed, "reply-to") || headerFrom);
-  if (replyTo && headerFrom && replyTo !== cleanAddress(headerFrom)) { score += 0.10; reasons.push("reply-to mismatch"); }
+  const linkEvidence = extractTrustEvidence({ sender, replyTo, subject, textBody, htmlBody, authentication: authResults });
+  if (linkEvidence.reply_to_mismatch) { score += 0.10; reasons.push("reply-to mismatch"); }
   const content = `${subject} ${textBody} ${stripHtml(htmlBody)}`;
   const urls = content.match(/https?:\/\/[^\s"'<>]+/gi) || [];
   if (urls.length >= 5) { score += 0.10; reasons.push("many links"); }
   if (urls.some((url) => /(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|cutt\.ly)\//i.test(url))) { score += 0.08; reasons.push("shortened link"); }
   if (urls.some((url) => /^(?:https?:\/\/)?(?:[^/]+@)?(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:[/?#]|$)/i.test(url) || urlHost(url).startsWith("xn--"))) { score += 0.08; reasons.push("suspicious link host"); }
   if (hasDeceptiveLink(htmlBody)) { score += 0.16; reasons.push("deceptive link text"); }
+  if (linkEvidence.tracking_pixel_count) { score += Math.min(0.10, 0.04 + linkEvidence.tracking_pixel_count * 0.02); reasons.push("tracking pixel"); }
   const credentialRequest = /(?:verify|confirm|unlock|suspend|password|login|sign[ -]?in|security code|one[- ]?time code|account)/i.test(content);
   const urgency = /(?:urgent|immediately|action required|within \d+ hours?|expires?|final notice)/i.test(content);
   const paymentRequest = /(?:wire transfer|gift card|invoice|payment due|bank account|crypto(?:currency)?|wallet)/i.test(content);
@@ -346,8 +410,6 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   if (blocked.length) { score = Math.max(score, 0.90); reasons.push("dangerous attachment"); }
   if (suspicious.length && !blocked.length) { score += 0.16; reasons.push("suspicious attachment type"); }
   if (!textBody.trim() && htmlBody) { score += 0.04; reasons.push("HTML-only message"); }
-  const sender = cleanAddress(headerFrom || envelopeFrom);
-  const senderDomain = addressDomain(sender);
   const knownContact = await dbRequest<Array<{ id: string }>>(env, `contacts?owner_id=eq.${encodeURIComponent(ownerId)}&email=eq.${encodeURIComponent(sender)}&limit=1`).catch(() => []);
   const previous = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&from_address=eq.${encodeURIComponent(sender)}&select=id&order=created_at.desc&limit=25`).catch(() => []);
   if (knownContact[0]) { score -= 0.25; focusedScore += 0.35; reasons.push("known contact"); }
@@ -360,13 +422,8 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
     if (spamReports) { score += Math.min(0.24, spamReports * 0.08); reasons.push("sender reported as spam"); }
     if (notSpamReports) { score -= Math.min(0.36, notSpamReports * 0.12); reasons.push("sender restored as not spam"); }
   }
-  const policies = await dbRequest<SenderPolicy[]>(env, `sender_policies?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&select=id,mailbox_id,match_type,match_value,action`).catch(() => []);
-  const matchingPolicies = policies
-    .filter((policy) => (policy.mailbox_id === null || policy.mailbox_id === mailboxId)
-      && ((policy.match_type === "address" && policy.match_value.toLowerCase() === sender)
-        || (policy.match_type === "domain" && policy.match_value.toLowerCase() === senderDomain)))
-    .sort((left, right) => Number(right.mailbox_id === mailboxId) - Number(left.mailbox_id === mailboxId) || Number(right.match_type === "address") - Number(left.match_type === "address"));
-  const senderPolicy = matchingPolicies[0];
+  const policies = await dbRequest<SenderPolicy[]>(env, `sender_policies?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&select=id,mailbox_id,match_type,match_value,action,target_folder_id,target_label_id`).catch(() => []);
+  const senderPolicy = selectSenderPolicy(policies, mailboxId, sender);
   const explicitlyBlocked = senderPolicy?.action === "spam";
   const explicitlyAllowed = senderPolicy?.action === "inbox";
   if (explicitlyBlocked) reasons.push("blocked sender policy");
@@ -376,7 +433,27 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   if (/^no[-_]?reply@/i.test(sender)) focusedScore -= 0.2;
   score = Math.max(0, Math.min(1, score));
   focusedScore = Math.max(0, Math.min(1, focusedScore - score * 0.35));
-  return { score, reasons, focusedScore, focusedCategory: focusedScore >= 0.5 ? "focused" : "other", authResults, policyId: senderPolicy?.id || null };
+  const trustScore = Math.max(0, Math.min(1, 1 - score));
+  const trustEvidence = extractTrustEvidence({ sender, replyTo, subject, textBody, htmlBody, authentication: authResults, firstSeenSender: !previous[0], knownContact: Boolean(knownContact[0]), policyAction: senderPolicy?.action || null, policyId: senderPolicy?.id || null });
+  return {
+    score,
+    reasons,
+    focusedScore,
+    focusedCategory: focusedScore >= 0.5 ? "focused" : "other",
+    authResults,
+    trustScore,
+    trustReasons: reasons,
+    trustEvidence,
+    receivedAuthAt: authHeader ? new Date().toISOString() : null,
+    senderFirstSeen: !previous[0],
+    knownContact: Boolean(knownContact[0]),
+    replyToMismatch: linkEvidence.reply_to_mismatch,
+    linkCount: linkEvidence.link_count,
+    trackingPixelCount: linkEvidence.tracking_pixel_count,
+    policyId: senderPolicy?.id || null,
+    policyAction: senderPolicy?.action || null,
+    policyTargetFolderId: senderPolicy?.target_folder_id || null,
+  };
 }
 
 type RuleContext = PureRuleContext;
@@ -675,7 +752,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   const toAddresses = splitAddresses(headerValue(parsed, "to") || destination);
   const ccAddresses = splitAddresses(headerValue(parsed, "cc") || "");
   const receivedAt = new Date().toISOString();
-  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder: "inbox", status: "queued", from_name: fromName, from_address: headerFrom, to_addresses: toAddresses, cc_addresses: ccAddresses, reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: null, has_attachment: Boolean(parsed.attachments?.length), spam_score: 0, spam_reasons: [], focused_score: 0.5, focused_category: "focused", auth_results: {}, received_at: receivedAt }) });
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder: "inbox", status: "queued", screening_status: "none", from_name: fromName, from_address: headerFrom, to_addresses: toAddresses, cc_addresses: ccAddresses, reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: null, has_attachment: Boolean(parsed.attachments?.length), spam_score: 0, spam_reasons: [], focused_score: 0.5, focused_category: "focused", auth_results: {}, received_at: receivedAt }) });
   if (!inserted[0]) throw new Error("Message insert returned no row");
 
   const finishInbound = async (): Promise<void> => {
@@ -685,9 +762,12 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
       await putObject(env, rawKey, new Uint8Array(raw), "message/rfc822");
       const attachmentResult = await saveAttachments(env, ownerId, messageId, parsed.attachments ?? []);
       const reasons = [...assessment.reasons, ...(attachmentResult.blocked.length ? [`blocked attachments: ${attachmentResult.blocked.join(", ")}`] : [])];
-      const folder = assessment.score >= SPAM_THRESHOLD ? "spam" : "inbox";
-      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, status: "received", raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, updated_at: new Date().toISOString() }) });
-      await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, policy_id: assessment.policyId, decision: folder === "spam" ? "blocked" : "screened", previous_folder: "inbox" }) }).catch(() => undefined);
+      const explicitPolicy = assessment.policyAction;
+      const customFolderId = explicitPolicy === "folder" ? assessment.policyTargetFolderId : null;
+      const folder = explicitPolicy === "screen" ? "inbox" : explicitPolicy === "archive" && assessment.score < SPAM_THRESHOLD ? "archive" : explicitPolicy === "folder" && customFolderId && assessment.score < SPAM_THRESHOLD ? "custom" : assessment.score >= SPAM_THRESHOLD || explicitPolicy === "spam" ? "spam" : "inbox";
+      const screeningStatus = explicitPolicy === "screen" || (assessment.score >= 0.35 && assessment.score < SPAM_THRESHOLD) ? "review" : folder === "spam" ? "blocked" : "none";
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, custom_folder_id: folder === "custom" ? customFolderId : null, status: "received", screening_status: screeningStatus, screening_policy_id: assessment.policyId, raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, auth_spf: assessment.authResults.spf, auth_dkim: assessment.authResults.dkim, auth_dmarc: assessment.authResults.dmarc, auth_arc: assessment.authResults.arc, auth_tls: assessment.authResults.tls, trust_score: assessment.trustScore, trust_reasons: reasons, trust_evidence: { ...assessment.trustEvidence, blocked_attachments: attachmentResult.blocked }, received_auth_at: assessment.receivedAuthAt, sender_first_seen: assessment.senderFirstSeen, known_contact: assessment.knownContact, reply_to_mismatch: assessment.replyToMismatch, link_count: assessment.linkCount, tracking_pixel_count: assessment.trackingPixelCount, updated_at: new Date().toISOString() }) });
+      await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, policy_id: assessment.policyId, decision: screeningStatus === "blocked" ? "blocked" : screeningStatus === "review" ? "screened" : "allowed", previous_folder: "inbox" }) }).catch(() => undefined);
       if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
       await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
       await applyInboundRules(env, ownerId, messageId, {
@@ -1015,7 +1095,7 @@ async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptio
   const parsed = query ? parseSearchQuery(query) : undefined;
   const page = Math.max(1, Math.min(100, Number(options.page || 1)));
   const pageSize = Math.max(10, Math.min(100, Number(options.pageSize || 80)));
-  const parts = [`owner_id=eq.${encodeURIComponent(ownerId)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,focused_score,focused_category,scheduled_at,snoozed_until,work_state,follow_up_at,work_note,received_at,sent_at,created_at"];
+  const parts = [`owner_id=eq.${encodeURIComponent(ownerId)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,spam_reasons,trust_score,trust_reasons,screening_status,focused_score,focused_category,scheduled_at,snoozed_until,work_state,follow_up_at,work_note,received_at,sent_at,created_at"];
   const explicitFolders = parsed?.filters.filter((filter): filter is Extract<SearchFilter, { kind: "folder" }> => filter.kind === "folder") || [];
   if (!parsed) {
     if (options.folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(options.folder.slice(7))}`); }
@@ -1457,7 +1537,58 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
   }
 
+  if (request.method === "GET" && url.pathname === "/api/screening/queue") {
+    return json(await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(user.id)}&screening_status=eq.review&order=created_at.asc&limit=100&select=id,thread_id,mailbox_id,direction,folder,status,from_name,from_address,to_addresses,subject,snippet,spam_score,spam_reasons,trust_score,screening_status,has_attachment,received_at,created_at`));
+  }
+  if (request.method === "GET" && url.pathname === "/api/screening/history") {
+    const messageId = url.searchParams.get("messageId") || "";
+    if (!messageId) return error("Message id is required");
+    const owned = await dbRequest<Array<{ id: string }>>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}&select=id&limit=1`);
+    if (!owned[0]) return error("Message not found", 404);
+    return json(await dbRequest<JsonRecord[]>(env, `screening_events?owner_id=eq.${encodeURIComponent(user.id)}&message_id=eq.${encodeURIComponent(messageId)}&order=created_at.desc&limit=100`));
+  }
+  const screeningDecisionMatch = url.pathname.match(/^\/api\/screening\/([^/]+)\/decision$/);
+  if (request.method === "POST" && screeningDecisionMatch) {
+    const id = screeningDecisionMatch[1];
+    const existing = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    if (!existing[0]) return error("Message not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const decision = body.decision === "approve" || body.decision === "block" || body.decision === "reroute" ? body.decision : "";
+    if (!decision) return error("Choose approve, block, or reroute");
+    const decisionPatch = screeningDecisionPatch(decision, body.folder === "custom" ? "custom" : "archive");
+    const { event, ...patch } = decisionPatch;
+    if (decision === "reroute" && body.folder === "custom") {
+      const customFolderId = String(body.customFolderId || "");
+      const folders = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(customFolderId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+      if (!folders[0]) return error("Choose a valid destination folder");
+      patch.custom_folder_id = customFolderId;
+    }
+    await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ ...patch, screening_policy_id: existing[0].screening_policy_id || null, updated_at: new Date().toISOString() }) });
+    await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: id, policy_id: existing[0].screening_policy_id || null, decision: event, previous_folder: existing[0].folder, restored_at: decision === "approve" ? new Date().toISOString() : null }) }).catch(() => undefined);
+    return json({ ok: true, messageId: id, decision, folder: patch.folder });
+  }
+
   const messageMatch = url.pathname.match(/^\/api\/mail\/([^/]+)$/);
+  const trustMatch = url.pathname.match(/^\/api\/mail\/([^/]+)\/trust$/);
+  if (request.method === "GET" && trustMatch) {
+    const id = trustMatch[1];
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1&select=id,from_name,from_address,reply_to,subject,spam_score,spam_reasons,trust_score,trust_reasons,trust_evidence,auth_results,auth_spf,auth_dkim,auth_dmarc,auth_arc,auth_tls,received_auth_at,sender_first_seen,known_contact,reply_to_mismatch,link_count,tracking_pixel_count,screening_status,screening_policy_id,created_at`);
+    if (!rows[0]) return error("Message not found", 404);
+    const events = await dbRequest<JsonRecord[]>(env, `screening_events?owner_id=eq.${encodeURIComponent(user.id)}&message_id=eq.${encodeURIComponent(id)}&order=created_at.desc&limit=20`).catch(() => []);
+    return json({ ...rows[0], screening_history: events });
+  }
+  const feedbackMatch = url.pathname.match(/^\/api\/mail\/([^/]+)\/feedback$/);
+  if (request.method === "POST" && feedbackMatch) {
+    const id = feedbackMatch[1];
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    if (!rows[0]) return error("Message not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const feedback = body.feedback === "spam" || body.feedback === "not_spam" ? body.feedback : "";
+    if (!feedback) return error("Feedback must be spam or not_spam");
+    await recordScreeningFeedback(env, user.id, rows[0], feedback);
+    const updated = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    return json({ ok: true, feedback, message: updated[0] || null });
+  }
   if (request.method === "GET" && messageMatch) { const id = messageMatch[1]; const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!rows[0]) return error("Message not found", 404); const attachments = await dbRequest<JsonRecord[]>(env, `attachments?message_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`); const labels = await dbRequest<JsonRecord[]>(env, `message_labels?message_id=eq.${encodeURIComponent(id)}&select=label_id`); return json({ ...rows[0], attachments, labels }); }
   if (request.method === "GET" && url.pathname.startsWith("/api/threads/")) { const id = url.pathname.split("/").pop() || ""; return json(await dbRequest(env, `messages?thread_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`)); }
   const outboxCancelMatch = url.pathname.match(/^\/api\/outbox\/([^/]+)\/cancel$/);
@@ -1529,7 +1660,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
     if (body.folder === "custom" && typeof body.customFolderId === "string") { patch.folder = "custom"; patch.custom_folder_id = body.customFolderId; }
     const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
-    if (body.folder === "spam" || body.folder === "inbox") await dbRequest(env, "spam_feedback", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: id, feedback: body.folder === "spam" ? "spam" : "not_spam" }) }).catch(() => undefined);
+    if (body.folder === "spam" || body.folder === "inbox") await recordScreeningFeedback(env, user.id, { ...existing[0], folder: body.folder }, body.folder === "spam" ? "spam" : "not_spam");
     return json(Array.isArray(rows) ? rows[0] : rows);
   }
 
@@ -1540,35 +1671,74 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "POST" && url.pathname === "/api/labels/assign") { const body = (await request.json()) as JsonRecord; const labelId = String(body.labelId || ""); const messageId = String(body.messageId || ""); if (!labelId || !messageId) return error("Message and label are required"); await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, label_id: labelId }) }); return json({ ok: true }); }
   if (request.method === "GET" && url.pathname === "/api/contacts") { const q = url.searchParams.get("q")?.trim(); const path = `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc${q ? `&or=${encodeURIComponent(`email.ilike.*${q}*,display_name.ilike.*${q}*`)}` : ""}`; return json(await dbRequest(env, path)); }
   if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!email.includes("@")) return error("A valid email is required"); const avatarUrl = typeof body.avatarUrl === "string" && body.avatarUrl.trim() ? body.avatarUrl.trim() : null; if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return error("Profile image URL must use https://"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]), avatar_url: avatarUrl, company: body.company || null, notes: body.notes || null }) }); return json(rows[0], 201); }
-  if (request.method === "GET" && url.pathname === "/api/sender-policies") return json(await dbRequest<SenderPolicy[]>(env, `sender_policies?owner_id=eq.${encodeURIComponent(user.id)}&order=action.asc,match_type.asc,match_value.asc`).catch(() => []));
+  if (request.method === "GET" && url.pathname === "/api/sender-policies") return json(await dbRequest<SenderPolicy[]>(env, `sender_policies?owner_id=eq.${encodeURIComponent(user.id)}&order=enabled.desc,match_type.asc,match_value.asc`).catch(() => []));
   if (request.method === "POST" && url.pathname === "/api/sender-policies") {
     const body = (await request.json()) as JsonRecord;
     const matchType = body.matchType === "domain" ? "domain" : body.matchType === "address" ? "address" : "";
-    const action = body.action === "inbox" ? "inbox" : body.action === "spam" ? "spam" : "";
-    const matchValue = String(body.matchValue || "").trim().toLowerCase().replace(/^@/, "");
-    if (!matchType || !action || !matchValue) return error("Choose a sender or domain and an action");
-    if (matchType === "address" && (!matchValue.includes("@") || matchValue.startsWith("@") || matchValue.endsWith("@"))) return error("Enter a complete email address");
-    if (matchType === "domain" && (matchValue.includes("@") || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(matchValue))) return error("Enter a domain such as example.com");
-    const mailboxId = typeof body.mailboxId === "string" && body.mailboxId ? body.mailboxId : null;
-    if (mailboxId) {
-      const mailboxRows = await dbRequest<Array<{ id: string }>>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
-      if (!mailboxRows[0]) return error("Mailbox not found", 404);
+    const action = String(body.action || "");
+    if (!matchType || !SENDER_POLICY_ACTIONS.has(action)) return error("Choose a sender or domain and a valid action");
+    let matchValue = "";
+    try { matchValue = normalizeSenderPolicyValue(matchType, body.matchValue); } catch (policyError) { return error(policyError instanceof Error ? policyError.message : "Sender policy is invalid"); }
+    const mailboxId = await ensurePolicyMailbox(env, user.id, body.mailboxId);
+    const targetFolderId = typeof body.targetFolderId === "string" && body.targetFolderId ? body.targetFolderId : null;
+    if (action === "folder") {
+      if (!targetFolderId) return error("Choose a destination folder");
+      const target = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(targetFolderId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+      if (!target[0]) return error("Destination folder not found", 404);
     }
-    const rows = await dbRequest<SenderPolicy[]>(env, "sender_policies", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: mailboxId, match_type: matchType, match_value: matchValue, action, enabled: true }) });
-    return json(rows[0], 201);
+    try {
+      const rows = await dbRequest<SenderPolicy[]>(env, "sender_policies", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: mailboxId, match_type: matchType, match_value: matchValue, action, target_folder_id: targetFolderId, enabled: true }) });
+      return json(rows[0], 201);
+    } catch (policyError) {
+      return error(policyError instanceof Error ? policyError.message : "That sender policy already exists", 409);
+    }
   }
   const senderPolicyMatch = url.pathname.match(/^\/api\/sender-policies\/([^/]+)$/);
   if (senderPolicyMatch && request.method === "PATCH") {
     const body = (await request.json()) as JsonRecord;
-    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    const existing = await dbRequest<SenderPolicy[]>(env, `sender_policies?id=eq.${encodeURIComponent(senderPolicyMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    if (!existing[0]) return error("Sender policy not found", 404);
+    const matchType = body.matchType === "domain" || body.matchType === "address" ? body.matchType : existing[0].match_type;
+    const action = typeof body.action === "string" ? body.action : existing[0].action;
+    if (!SENDER_POLICY_ACTIONS.has(action)) return error("Choose a valid sender policy action");
+    let matchValue = existing[0].match_value;
+    try { if (body.matchValue !== undefined || body.matchType !== undefined) matchValue = normalizeSenderPolicyValue(matchType, body.matchValue ?? existing[0].match_value); } catch (policyError) { return error(policyError instanceof Error ? policyError.message : "Sender policy is invalid"); }
+    const patch: JsonRecord = { updated_at: new Date().toISOString(), match_type: matchType, match_value: matchValue, action };
     if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
-    if (body.action === "inbox" || body.action === "spam") patch.action = body.action;
-    const rows = await dbRequest<SenderPolicy[]>(env, `sender_policies?id=eq.${encodeURIComponent(senderPolicyMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
-    return json(rows[0] || null);
+    if (body.mailboxId !== undefined) patch.mailbox_id = await ensurePolicyMailbox(env, user.id, body.mailboxId);
+    if (body.targetFolderId !== undefined) patch.target_folder_id = typeof body.targetFolderId === "string" && body.targetFolderId ? body.targetFolderId : null;
+    if (action === "folder") {
+      const targetFolderId = String(patch.target_folder_id ?? existing[0].target_folder_id ?? "");
+      if (!targetFolderId) return error("Choose a destination folder");
+      const target = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(targetFolderId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+      if (!target[0]) return error("Destination folder not found", 404);
+      patch.target_folder_id = targetFolderId;
+    } else if (body.targetFolderId === undefined) patch.target_folder_id = null;
+    try {
+      const rows = await dbRequest<SenderPolicy[]>(env, `sender_policies?id=eq.${encodeURIComponent(senderPolicyMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+      return json(rows[0] || null);
+    } catch (policyError) {
+      return error(policyError instanceof Error ? policyError.message : "Sender policy could not be updated", 409);
+    }
   }
   if (senderPolicyMatch && request.method === "DELETE") {
     await dbRequest(env, `sender_policies?id=eq.${encodeURIComponent(senderPolicyMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" });
     return json({ ok: true });
+  }
+  const senderPolicyApplyMatch = url.pathname.match(/^\/api\/sender-policies\/([^/]+)\/apply-existing$/);
+  if (request.method === "POST" && senderPolicyApplyMatch) {
+    const body = (await request.json()) as JsonRecord;
+    if (body.confirm !== true) return error("Explicit confirmation is required before applying a policy to existing messages");
+    const policies = await dbRequest<SenderPolicy[]>(env, `sender_policies?id=eq.${encodeURIComponent(senderPolicyApplyMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    const policy = policies[0];
+    if (!policy) return error("Sender policy not found", 404);
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.desc&limit=500&select=id,mailbox_id,from_address,folder,custom_folder_id`);
+    const matching = rows.filter((message) => policyMatchesMessage(policy, message));
+    const failures: Array<{ id: string; error: string }> = [];
+    for (const message of matching) {
+      try { await applyPolicyToMessage(env, user.id, message, policy); } catch (applyError) { failures.push({ id: String(message.id), error: applyError instanceof Error ? applyError.message : "Could not apply policy" }); }
+    }
+    return json({ ok: failures.length === 0, matched: matching.length, changed: matching.length - failures.length, failures, capped: rows.length === 500 });
   }
   if (request.method === "GET" && url.pathname === "/api/rules/export") {
     const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`);

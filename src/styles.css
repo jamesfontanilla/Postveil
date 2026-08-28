@@ -740,3 +740,102 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .attachment-card { grid-template-columns: 1fr; }
   .attachment-card-actions { justify-content: flex-start; }
 }
+/* Trust Lens and sender screening */
+.policy-apply-button { font-size: 10px; white-space: nowrap; }
+.screening-queue-card { grid-column: 1 / -1; }
+.screening-queue-item { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line); padding: 12px 0; }
+.screening-queue-main { display: grid; min-width: 0; flex: 1; gap: 3px; border: 0; background: transparent; padding: 0; text-align: left; color: inherit; cursor: pointer; }
+.screening-queue-main strong, .screening-queue-main span, .screening-queue-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.screening-queue-main strong { color: var(--ink); font-size: 12px; }
+.screening-queue-main span { color: var(--ink-soft); font-size: 11px; }
+.screening-queue-main small { color: var(--muted); font-size: 10px; }
+.screening-queue-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 10px; }
+.trust-lens { margin-top: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); overflow: hidden; }
+.trust-lens-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 14px; border: 0; background: transparent; padding: 12px 14px; color: var(--ink); text-align: left; cursor: pointer; }
+.trust-lens-toggle:hover { background: color-mix(in srgb, var(--surface) 70%, var(--accent)); }
+.trust-lens-title { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.trust-lens-title strong { font-size: 12px; }
+.trust-lens-title small { color: var(--muted); font-size: 10px; }
+.trust-lens-body { display: grid; gap: 14px; border-top: 1px solid var(--line); padding: 14px; }
+.trust-lens-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.trust-lens-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.trust-lens-item { display: grid; gap: 3px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 9px; }
+.trust-lens-item strong { color: var(--ink-soft); font-size: 10px; }
+.trust-lens-item span { color: var(--muted); font-size: 10px; }
+.trust-status-pass { color: #1e7b52 !important; }
+.trust-status-fail { color: var(--danger) !important; }
+.trust-status-missing { color: var(--muted) !important; }
+.trust-lens-section { display: grid; gap: 7px; }
+.trust-lens-section > strong { color: var(--ink-soft); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.trust-host-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.trust-host { border: 1px solid var(--line); border-radius: 99px; background: var(--surface); padding: 4px 7px; color: var(--muted); font-size: 10px; }
+.theme-dark .trust-lens, .theme-dark .trust-lens-item, .theme-dark .trust-host { background: var(--surface); border-color: var(--line); }
+.theme-dark .screening-queue-main strong, .theme-dark .trust-lens-item strong, .theme-dark .trust-lens-toggle { color: var(--ink); }
+@media (max-width: 720px) {
+  .screening-queue-item { align-items: stretch; flex-direction: column; gap: 9px; }
+  .screening-queue-actions { justify-content: flex-start; }
+  .policy-apply-button { margin-right: auto; }
+  .trust-lens-grid { grid-template-columns: 1fr; }
+}
+
+/* Keep the navigation, message list, and reader in their own quiet scroll lanes. */
+@media (min-width: 721px) {
+  .app-shell {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    min-height: 0;
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .message-column {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .message-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    align-content: start;
+  }
+
+  .reading-pane {
+    min-height: 0;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1020px) {
+  .app-shell { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+  .sidebar { grid-row: 1 / -1; }
+  .message-column { grid-column: 2; grid-row: 1; }
+  .reading-pane { grid-column: 2; grid-row: 2; border-top: 1px solid var(--line); }
+}
+
+/* Let a clicked message arrive immediately, then settle into the full detail view. */
+.message-detail { animation: message-detail-enter .2s ease both; }
+.detail-loading { display: flex; align-items: center; gap: 7px; margin-top: 15px; color: var(--muted); font: 10px "IBM Plex Mono", monospace; }
+.detail-loading-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: detail-loading-pulse 1s ease-in-out infinite; }
+.is-detail-loading .body-copy { opacity: .72; }
+@keyframes message-detail-enter { from { opacity: .35; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes detail-loading-pulse { 50% { transform: scale(.65); opacity: .4; } }
+@media (prefers-reduced-motion: reduce) {
+  .message-detail, .detail-loading-dot { animation: none; }
+}
