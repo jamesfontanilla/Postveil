@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { Session } from "@supabase/supabase-js";
 import { requireSupabase, supabase } from "./lib/supabase";
+import { sanitizeEmailHtml } from "./lib/email-html";
 import { qrImageSource } from "./lib/qr";
 
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam";
@@ -80,6 +81,7 @@ type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
   message_id_header?: string | null;
   in_reply_to?: string | null;
   references_header?: string | null;
+  reply_to?: string | null;
   text_body?: string;
   html_body?: string | null;
   is_read: boolean;
@@ -321,6 +323,15 @@ function senderForMessage(message: Message, contacts: Contact[], mailboxes: Mail
     ? contact?.display_name?.trim() || message.from_name?.trim() || displayName(address)
     : contact?.display_name?.trim() || mailbox?.display_name?.trim() || displayName(address);
   return { name, email: address, avatarUrl: contact?.avatar_url || null };
+}
+function detailIdentityForMessage(message: Message, contacts: Contact[], mailboxes: Mailbox[]) {
+  if (message.direction === "inbound") return senderForMessage(message, contacts, mailboxes);
+  const mailbox = mailboxes.find((item) => item.address.toLowerCase() === message.from_address.toLowerCase());
+  return {
+    name: message.from_name?.trim() || mailbox?.display_name?.trim() || displayName(message.from_address),
+    email: message.from_address,
+    avatarUrl: null,
+  };
 }
 function formatDate(value?: string) {
   if (!value) return "";
@@ -3412,6 +3423,10 @@ function MailboxApp({ session }: { session: Session }) {
   const selectedBody = selected
     ? splitQuotedBody(selected.text_body || selected.snippet || "")
     : { body: "", quote: "" };
+  const detailIdentity = selected
+    ? detailIdentityForMessage(selected, contacts, mailboxes)
+    : null;
+  const selectedHtml = selected ? sanitizeEmailHtml(selected.html_body) : "";
   return (
     <main
       className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
@@ -3969,16 +3984,18 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 )}
                 <div className="sender-line">
-                  {(() => {
-                    const sender = senderForMessage(selected, contacts, mailboxes);
-                    return <SenderAvatar name={sender.name} email={sender.email} avatarUrl={sender.avatarUrl} large />;
-                  })()}
+                  {detailIdentity && <SenderAvatar name={detailIdentity.name} email={detailIdentity.email} avatarUrl={detailIdentity.avatarUrl} large />}
                   <div className="sender-copy">
-                    <strong>{senderForMessage(selected, contacts, mailboxes).name}</strong>
-                    <small>{senderForMessage(selected, contacts, mailboxes).email}</small>
+                    <strong>{detailIdentity?.name}</strong>
+                    <small>{detailIdentity?.email}</small>
                     <span>to {selected.to_addresses?.join(", ") || "your mailbox"}</span>
                     {showMessageDetails && (
                       <dl className="sender-details">
+                        <div><dt>From</dt><dd>{detailIdentity?.email || "Not available"}</dd></div>
+                        <div><dt>To</dt><dd>{selected.to_addresses?.join(", ") || "Not available"}</dd></div>
+                        {selected.cc_addresses && selected.cc_addresses.length > 0 && <div><dt>CC</dt><dd>{selected.cc_addresses.join(", ")}</dd></div>}
+                        {selected.bcc_addresses && selected.bcc_addresses.length > 0 && <div><dt>BCC</dt><dd>{selected.bcc_addresses.join(", ")}</dd></div>}
+                        {selected.reply_to && <div><dt>Reply-To</dt><dd>{selected.reply_to}</dd></div>}
                         <div><dt>Date</dt><dd>{new Date(selected.received_at || selected.sent_at || selected.created_at).toLocaleString()}</dd></div>
                         <div><dt>Message ID</dt><dd>{selected.message_id_header || "Not available"}</dd></div>
                       </dl>
@@ -4047,7 +4064,7 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 )}
                 <div className="body-copy">
-                  {selectedBody.body || "No message body."}
+                  {selectedHtml ? <div className="email-html" dangerouslySetInnerHTML={{ __html: selectedHtml }} /> : selectedBody.body || "No message body."}
                 </div>
                 {selectedBody.quote && (
                   <details className="quoted-block">
