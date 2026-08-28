@@ -10,8 +10,18 @@ const allowedTags = [
 const allowedAttributes = [
   "align", "alt", "aria-label", "bgcolor", "border", "cellpadding", "cellspacing",
   "colspan", "height", "href", "loading", "rel", "role", "rowspan", "src", "target",
-  "title", "valign", "width",
+  "style", "title", "valign", "width",
 ];
+
+const allowedStyleProperties = new Set([
+  "background", "background-color", "border", "border-bottom", "border-collapse",
+  "border-left", "border-radius", "border-right", "border-spacing", "border-top",
+  "color", "display", "font-family", "font-size", "font-style", "font-weight",
+  "height", "letter-spacing", "line-height", "margin", "margin-bottom", "margin-left",
+  "margin-right", "margin-top", "max-width", "min-width", "padding", "padding-bottom",
+  "padding-left", "padding-right", "padding-top", "text-align", "text-decoration",
+  "vertical-align", "width", "white-space",
+]);
 
 function isSafeUrl(value: string, kind: "href" | "src"): boolean {
   const normalized = value.trim().toLowerCase();
@@ -19,10 +29,32 @@ function isSafeUrl(value: string, kind: "href" | "src"): boolean {
   return normalized.startsWith("https://") || normalized.startsWith("http://");
 }
 
+function sanitizeStyle(value: string): string {
+  return value
+    .split(";")
+    .map((declaration) => {
+      const separator = declaration.indexOf(":");
+      if (separator < 1) return "";
+
+      const property = declaration.slice(0, separator).trim().toLowerCase();
+      const rawValue = declaration.slice(separator + 1).trim();
+      if (!allowedStyleProperties.has(property) || !rawValue) return "";
+      if (/(?:url\s*\(|expression\s*\(|javascript:|@import|-moz-binding|behavior\s*:)/i.test(rawValue)) {
+        return "";
+      }
+
+      return `${property}: ${rawValue}`;
+    })
+    .filter(Boolean)
+    .join("; ");
+}
+
 /**
  * Render email HTML as content, never as application markup.
  * Email HTML is treated as hostile: scripts, forms, styles, event handlers,
- * embedded documents, and unsafe URLs are removed before React receives it.
+ * embedded documents, unsafe URLs, and executable CSS are removed before React
+ * receives it. Safe email presentation styles are preserved because table-based
+ * email layouts depend on them.
  */
 export function sanitizeEmailHtml(value: string | null | undefined): string {
   if (!value?.trim()) return "";
@@ -30,7 +62,6 @@ export function sanitizeEmailHtml(value: string | null | undefined): string {
     ALLOWED_ATTR: allowedAttributes,
     ALLOWED_TAGS: allowedTags,
     ALLOW_DATA_ATTR: false,
-    FORBID_ATTR: ["style"],
     FORBID_TAGS: ["base", "embed", "form", "iframe", "link", "meta", "object", "script", "style", "svg"],
   });
   if (typeof DOMParser === "undefined") return sanitized;
@@ -40,6 +71,11 @@ export function sanitizeEmailHtml(value: string | null | undefined): string {
     [...element.attributes].forEach((attribute) => {
       if (attribute.name.toLowerCase().startsWith("on")) element.removeAttribute(attribute.name);
     });
+    if (element.hasAttribute("style")) {
+      const style = sanitizeStyle(element.getAttribute("style") || "");
+      if (style) element.setAttribute("style", style);
+      else element.removeAttribute("style");
+    }
   });
   document.querySelectorAll("a").forEach((link) => {
     const href = link.getAttribute("href");

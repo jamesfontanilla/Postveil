@@ -423,14 +423,20 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .sender-details dd { min-width: 0; margin: 0; color: var(--ink-soft); overflow-wrap: anywhere; }
 .detail-labels { margin: 18px 0 0; padding-bottom: 17px; border-bottom: 1px solid var(--line); }
 .body-copy { max-width: 68ch; margin-top: 24px; font-size: 15px; line-height: 1.75; overflow-wrap: anywhere; }
-.email-html { max-width: 100%; overflow-wrap: anywhere; }
-.email-html :where(p, div, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre) { max-width: 100%; margin: 0 0 1em; }
-.email-html :where(h1, h2, h3, h4, h5, h6) { color: var(--ink); line-height: 1.25; }
+.email-html { width: 100%; max-width: 100%; overflow-x: auto; overflow-wrap: anywhere; line-height: normal; }
+.email-html :where(p, h1, h2, h3, h4, h5, h6, blockquote, pre) { max-width: 100%; }
+.email-html :where(p, ul, ol) { margin: 0 0 1em; }
+.email-html :where(h1, h2, h3, h4, h5, h6) { margin: 0 0 .75em; color: var(--ink); line-height: 1.25; }
 .email-html :where(ul, ol) { padding-left: 1.4em; }
+.email-html > :first-child { margin-top: 0; }
+.email-html > :last-child { margin-bottom: 0; }
 .email-html a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-.email-html img { display: block; max-width: 100%; height: auto; border-radius: 4px; }
-.email-html table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-.email-html td, .email-html th { max-width: 100%; overflow-wrap: anywhere; }
+.email-html img { display: block; max-width: 100% !important; height: auto !important; border-radius: 4px; }
+.email-html table { width: auto !important; max-width: 100% !important; border-collapse: collapse; }
+.email-html > table, .email-html table[width="100%"] { width: 100% !important; }
+.email-html :where(table, tr, td, th) { max-width: 100%; }
+.email-html td, .email-html th { width: auto !important; max-width: 100%; overflow-wrap: anywhere; }
+.email-html td[width="100%"], .email-html th[width="100%"] { width: 100% !important; }
 .email-html pre { max-width: 100%; overflow-x: auto; white-space: pre-wrap; }
 .email-html blockquote { border-left: 3px solid var(--line-strong); padding-left: 13px; color: var(--muted); }
 .email-html hr { border: 0; border-top: 1px solid var(--line); }
