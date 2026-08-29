@@ -15,3 +15,7 @@ crons = ["* * * * *"]
 
 [vars]
 APP_DOMAIN = "jamesfontanilla.com"
+
+[[routes]]
+pattern = "mail.jamesfontanilla.com"
+custom_domain = true
