@@ -10,5 +10,5 @@ self.addEventListener("activate", (event) => event.waitUntil(
 ));
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || new URL(event.request.url).pathname.startsWith("/api/")) return;
-  event.respondWith(fetch(event.request).catch(() => caches.match(event.request).then((cached) => cached || caches.match("/")));
+  event.respondWith(fetch(event.request).catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))));
 });
