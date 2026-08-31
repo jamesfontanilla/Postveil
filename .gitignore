@@ -7,3 +7,7 @@ dist
 supabase/.temp
 .dev.vars*
 *.local
+*.pem
+*.key
+.npmrc
+.DS_Store

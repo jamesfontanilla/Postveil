@@ -58,6 +58,7 @@ import {
 import { Session } from "@supabase/supabase-js";
 import { requireSupabase, supabase } from "./lib/supabase";
 import { qrImageSource } from "./lib/qr";
+import EmailBody from "./components/EmailBody";
 
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam";
 type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
@@ -127,6 +128,7 @@ type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
     preview_state?: "ready" | "not_available" | "pending" | "failed";
     safety_status?: "unknown" | "clean_static" | "suspicious" | "blocked" | "infected";
     safety_reasons?: string[];
+    content_id?: string | null;
   }>;
 };
 type Contact = {
@@ -352,17 +354,6 @@ function workDueLabel(value?: string | null) {
   if (!value) return "No follow-up date";
   const date = new Date(value);
   return date.getTime() <= Date.now() ? `Overdue · ${date.toLocaleString()}` : `Follow up · ${date.toLocaleString()}`;
-}
-function splitQuotedBody(value: string) {
-  const lines = value.split(/\r?\n/);
-  const quoteStart = lines.findIndex((line, index) =>
-    index > 0 && (/^On .+wrote:\s*$/i.test(line.trim()) || /^>/.test(line.trim())),
-  );
-  if (quoteStart < 0) return { body: value.trim(), quote: "" };
-  return {
-    body: lines.slice(0, quoteStart).join("\n").trim(),
-    quote: lines.slice(quoteStart).join("\n").trim(),
-  };
 }
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -3315,10 +3306,13 @@ function MailboxApp({ session }: { session: Session }) {
       );
     }
   }
+  const getAttachmentPreviewUrl = useCallback(async (id: string) => {
+    const result = await apiFetch<{ url: string }>(`/api/attachments/${id}/preview`);
+    return result.url;
+  }, []);
   async function previewAttachment(id: string) {
     try {
-      const result = await apiFetch<{ url: string }>(`/api/attachments/${id}/preview`);
-      window.open(result.url, "_blank", "noopener,noreferrer");
+      window.open(await getAttachmentPreviewUrl(id), "_blank", "noopener,noreferrer");
     } catch (attachmentError) {
       setError(attachmentError instanceof Error ? attachmentError.message : "Preview unavailable");
     }
@@ -3409,9 +3403,6 @@ function MailboxApp({ session }: { session: Session }) {
           .join(", "),
       }
     : undefined;
-  const selectedBody = selected
-    ? splitQuotedBody(selected.text_body || selected.snippet || "")
-    : { body: "", quote: "" };
   return (
     <main
       className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
@@ -4046,15 +4037,13 @@ function MailboxApp({ session }: { session: Session }) {
                     ))}
                   </div>
                 )}
-                <div className="body-copy">
-                  {selectedBody.body || "No message body."}
-                </div>
-                {selectedBody.quote && (
-                  <details className="quoted-block">
-                    <summary>Show quoted text</summary>
-                    <div className="quoted-content">{selectedBody.quote}</div>
-                  </details>
-                )}
+                <EmailBody
+                  htmlBody={selected.html_body}
+                  textBody={selected.text_body}
+                  fallback={selected.snippet}
+                  attachments={selected.attachments}
+                  loadAttachmentPreview={getAttachmentPreviewUrl}
+                />
                 {selected.attachments && selected.attachments.length > 0 && (
                   <div className="attachments">
                     <div className="attachments-head">

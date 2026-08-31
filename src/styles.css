@@ -839,3 +839,495 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 @media (prefers-reduced-motion: reduce) {
   .message-detail, .detail-loading-dot { animation: none; }
 }
+
+/* Parcel curation: calm operational mailroom.
+   Liquid Glass is reserved for the application chrome and transient surfaces;
+   messages, warnings, and trust evidence stay opaque and readable. */
+:root {
+  color-scheme: light;
+  --canvas: #edf2f0;
+  --surface: #ffffff;
+  --surface-muted: #f5f8f6;
+  --ink: #14201d;
+  --ink-soft: #40504b;
+  --muted: #6f7e78;
+  --faint: #a0ada7;
+  --line: #dbe4df;
+  --line-strong: #c2d0c8;
+  --accent: #3156d8;
+  --accent-soft: #e9edff;
+  --accent-ink: #2444af;
+  --danger: #a9433c;
+  --glass: rgba(255, 255, 255, .74);
+  --shadow-soft: 0 12px 30px rgba(31, 52, 45, .08);
+}
+
+body {
+  background:
+    radial-gradient(circle at 80% -10%, rgba(214, 224, 255, .72), transparent 34rem),
+    linear-gradient(135deg, #f4f7f5 0%, var(--canvas) 55%, #e8efec 100%);
+}
+
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+button, a { cursor: pointer; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app-shell {
+  background: transparent;
+}
+
+.sidebar {
+  position: relative;
+  z-index: 4;
+  border-right-color: color-mix(in srgb, var(--line) 86%, transparent);
+  background: var(--glass);
+  box-shadow: 12px 0 34px rgba(31, 52, 45, .04);
+  backdrop-filter: blur(18px) saturate(120%);
+}
+
+.sidebar::after {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--accent) 25%, var(--line)), transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.brand-mark {
+  box-shadow: 4px 4px 0 rgba(49, 86, 216, .17), 0 0 0 1px rgba(255, 255, 255, .3) inset;
+}
+
+.brand-lockup span {
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.compose-button {
+  border: 1px solid color-mix(in srgb, var(--ink) 80%, transparent);
+  background: linear-gradient(135deg, #1a2824, #273833);
+  box-shadow: 0 9px 18px rgba(20, 32, 29, .13);
+}
+
+.compose-button:hover {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--accent), #4769dd);
+  box-shadow: 0 10px 22px rgba(49, 86, 216, .18);
+}
+
+.folder-link {
+  position: relative;
+}
+
+.folder-link.active {
+  background: linear-gradient(90deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 35%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.icon-button:hover {
+  background: color-mix(in srgb, var(--surface) 82%, var(--accent-soft));
+  box-shadow: 0 4px 12px rgba(31, 52, 45, .06);
+}
+
+.message-column {
+  position: relative;
+  z-index: 2;
+  border-right-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 93%, var(--canvas));
+  box-shadow: 8px 0 26px rgba(31, 52, 45, .035);
+}
+
+.column-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--surface) 83%, transparent);
+  backdrop-filter: blur(16px) saturate(120%);
+}
+
+.column-head h1 {
+  letter-spacing: -.055em;
+}
+
+.search-box {
+  border-color: color-mix(in srgb, var(--line-strong) 80%, transparent);
+  background: var(--surface-muted);
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.search-box:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(49, 86, 216, .09), 0 8px 20px rgba(31, 52, 45, .05);
+}
+
+.message-row {
+  position: relative;
+  transition: background .16s ease, border-color .16s ease;
+}
+
+.message-row.unread {
+  border-left-color: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.message-row:hover {
+  background: color-mix(in srgb, var(--surface-muted) 78%, var(--surface));
+}
+
+.message-row.selected {
+  background: linear-gradient(90deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 42%, var(--surface)));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 12%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.message-row.unread .row-top strong,
+.message-row.unread .row-subject {
+  letter-spacing: -.01em;
+}
+
+.row-copy p {
+  color: color-mix(in srgb, var(--muted) 92%, var(--ink));
+}
+
+.reading-pane {
+  background:
+    radial-gradient(circle at 100% 0, rgba(224, 230, 255, .34), transparent 28rem),
+    var(--canvas);
+}
+
+.message-detail {
+  animation: none;
+}
+
+.detail-head {
+  border-bottom-color: color-mix(in srgb, var(--line) 88%, transparent);
+}
+
+.sender-line {
+  box-shadow: 0 8px 24px rgba(31, 52, 45, .045);
+}
+
+.trust-lens {
+  border-color: color-mix(in srgb, var(--accent) 23%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 30%, var(--surface));
+  box-shadow: 0 8px 24px rgba(31, 52, 45, .04);
+}
+
+.trust-lens-toggle:hover {
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface));
+}
+
+.compose-overlay, .modal-backdrop {
+  background: rgba(18, 30, 27, .24);
+  backdrop-filter: blur(13px) saturate(115%);
+}
+
+.compose-card, .settings-panel {
+  border-color: color-mix(in srgb, var(--line-strong) 90%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 26px 75px rgba(18, 30, 27, .19), 0 0 0 1px rgba(255, 255, 255, .34) inset;
+  backdrop-filter: blur(18px) saturate(120%);
+}
+
+.compose-head, .compose-foot {
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+}
+
+.setting-card, .event-card, .task-card, .work-summary-card {
+  box-shadow: 0 5px 16px rgba(31, 52, 45, .035);
+}
+
+.setting-card:hover, .event-card:hover, .task-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+}
+
+.workspace-view {
+  background:
+    radial-gradient(circle at 80% 0, rgba(224, 230, 255, .34), transparent 30rem),
+    var(--canvas);
+}
+
+.work-summary-card strong,
+.rule-impact-grid strong {
+  letter-spacing: -.04em;
+}
+
+.mobile-topbar {
+  border-bottom-color: color-mix(in srgb, var(--line) 88%, transparent);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  box-shadow: 0 6px 20px rgba(31, 52, 45, .05);
+  backdrop-filter: blur(18px) saturate(120%);
+}
+
+.detail-actions {
+  border-top-color: color-mix(in srgb, var(--line) 88%, transparent);
+}
+
+.theme-dark {
+  color-scheme: dark;
+  --canvas: #111816;
+  --surface: #19221f;
+  --surface-muted: #202b27;
+  --ink: #f1f6f2;
+  --ink-soft: #c6d2ca;
+  --muted: #95a49c;
+  --faint: #708078;
+  --line: #33423a;
+  --line-strong: #4a5b4e;
+  --accent: #91a8ff;
+  --accent-soft: #28385f;
+  --accent-ink: #dce5ff;
+  --danger: #f0a39a;
+  --glass: rgba(25, 34, 31, .84);
+  --shadow-soft: 0 12px 30px rgba(0, 0, 0, .22);
+  background: var(--canvas);
+}
+
+.theme-dark .sidebar {
+  background: var(--glass);
+  box-shadow: 12px 0 34px rgba(0, 0, 0, .16);
+}
+
+.theme-dark .message-column {
+  background: color-mix(in srgb, var(--surface) 94%, var(--canvas));
+}
+
+.theme-dark .column-head,
+.theme-dark .mobile-topbar {
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+}
+
+.theme-dark .reading-pane,
+.theme-dark .workspace-view {
+  background:
+    radial-gradient(circle at 100% 0, rgba(45, 61, 116, .25), transparent 28rem),
+    var(--canvas);
+}
+
+.theme-dark .message-row:hover {
+  background: color-mix(in srgb, var(--surface-muted) 80%, var(--surface));
+}
+
+.theme-dark .message-row.selected {
+  background: linear-gradient(90deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 70%, var(--surface)));
+}
+
+.theme-dark .compose-overlay,
+.theme-dark .modal-backdrop {
+  background: rgba(0, 0, 0, .48);
+}
+
+.theme-dark .compose-card,
+.theme-dark .settings-panel {
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  box-shadow: 0 26px 75px rgba(0, 0, 0, .35), 0 0 0 1px rgba(255, 255, 255, .04) inset;
+}
+
+@media (max-width: 720px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    height: auto;
+    min-height: 100%;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: blur(22px) saturate(120%);
+  }
+
+  .message-column {
+    background: var(--surface);
+  }
+
+  .column-head {
+    background: color-mix(in srgb, var(--surface) 91%, transparent);
+  }
+
+  .detail-actions {
+    background: color-mix(in srgb, var(--canvas) 89%, transparent);
+    box-shadow: 0 -8px 22px rgba(31, 52, 45, .06);
+    backdrop-filter: blur(16px) saturate(120%);
+  }
+
+  .theme-dark .sidebar {
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-row, .search-box { transition: none; }
+}
+
+/* Rich message canvas: familiar mail-client hierarchy with an explicit privacy gate for remote images. */
+.email-content-frame {
+  max-width: 68ch;
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px rgba(31, 52, 45, .045);
+  overflow: hidden;
+}
+
+.email-content-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 11px 13px;
+}
+
+.email-content-heading {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.email-content-title,
+.email-content-summary,
+.email-content-footer span,
+.email-text-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.email-content-title {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .01em;
+}
+
+.email-content-summary {
+  color: var(--muted);
+  font: 9px "IBM Plex Mono", monospace;
+  letter-spacing: .02em;
+}
+
+.email-format-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 2px;
+}
+
+.email-format-switch button,
+.email-load-images {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.email-format-switch button:hover,
+.email-format-switch button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.email-external-images-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent-soft) 38%, var(--surface));
+  padding: 10px 13px;
+}
+
+.email-external-images-copy {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.email-external-images-copy > svg { flex: 0 0 auto; margin-top: 1px; }
+
+.email-external-images-copy span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.email-external-images-copy strong { color: var(--ink-soft); font-size: 10px; }
+.email-external-images-copy small { color: var(--muted); font-size: 9px; line-height: 1.4; }
+
+.email-load-images {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.email-load-images:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.email-html-surface,
+.email-text-surface {
+  min-width: 0;
+  padding: 22px clamp(16px, 3vw, 28px);
+}
+
+.email-html-surface {
+  color: var(--ink-soft);
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 14px;
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+}
+
+.email-html-surface > :first-child { margin-top: 0; }
+.email-html-surface > :last-child { margin-bottom: 0; }
+.email-html-surface p { margin: 0 0 1em; }
+.email-html-surface h1, .email-html-surface h2, .email-html-surface h3, .email-html-surface h4 { margin: 1.2em 0 .55em; color: var(--ink); line-height: 1.25; }
+.email-html-surface h1 { font-size: 1.7em; }
+.email-html-surface h2 { font-size: 1.4em; }
+.email-html-surface h3 { font-size: 1.18em; }
+.email-html-surface a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.email-html-surface a:hover { color: var(--accent-ink); }
+.email-html-surface ul, .email-html-surface ol { margin: .75em 0 1em; padding-left: 1.5em; }
+.email-html-surface blockquote { margin: 1em 0; border-left: 3px solid var(--line-strong); color: var(--muted); padding-left: 14px; }
+.email-html-surface hr { margin: 1.4em 0; border: 0; border-top: 1px solid var(--line); }
+.email-html-surface pre, .email-html-surface code { font-family: "IBM Plex Mono", monospace; }
+.email-html-surface pre { max-width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-muted); padding: 11px; font-size: 11px; white-space: pre-wrap; }
+.email-html-surface code { border-radius: 3px; background: var(--surface-muted); padding: 1px 4px; font-size: .9em; }
+.email-html-surface pre code { background: transparent; padding: 0; }
+.email-html-surface img { display: block; max-width: 100%; height: auto; border-radius: 6px; }
+.email-html-surface table { max-width: 100%; border-collapse: collapse; border-spacing: 0; }
+.email-html-surface td, .email-html-surface th { max-width: 100%; overflow-wrap: anywhere; }
+.email-html-surface figure { max-width: 100%; margin: 1em 0; }
+.email-html-surface figcaption { margin-top: 5px; color: var(--muted); font-size: 10px; }
+.email-external-image-placeholder { display: inline-flex; width: auto; max-width: 100%; min-height: 0; align-items: center; justify-content: center; border: 1px dashed var(--line-strong); border-radius: 6px; background: var(--surface-muted); color: var(--muted); padding: 4px 7px; font: 9px "IBM Plex Mono", monospace; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.email-text-surface { color: var(--ink-soft); }
+.email-plain-body { white-space: pre-wrap; font-size: 14px; line-height: 1.78; overflow-wrap: anywhere; }
+.email-text-note { margin: 17px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.email-content-footer { display: flex; flex-wrap: wrap; gap: 8px 14px; border-top: 1px solid var(--line); background: var(--surface-muted); padding: 8px 13px; color: var(--muted); font: 9px "IBM Plex Mono", monospace; }
+.email-content-footer span { min-width: 0; }
+.theme-dark .email-content-frame { background: var(--surface); box-shadow: 0 8px 22px rgba(0, 0, 0, .14); }
+.theme-dark .email-content-toolbar, .theme-dark .email-content-footer { background: color-mix(in srgb, var(--surface-muted) 88%, var(--canvas)); }
+.theme-dark .email-external-images-banner { background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface)); }
+
+@media (max-width: 560px) {
+  .email-content-toolbar, .email-external-images-banner { align-items: flex-start; flex-direction: column; }
+  .email-format-switch, .email-load-images { width: 100%; }
+  .email-format-switch button { flex: 1; }
+  .email-html-surface, .email-text-surface { padding: 18px 14px; }
+  .email-html-surface table, .email-html-surface tbody, .email-html-surface thead, .email-html-surface tfoot, .email-html-surface tr { display: block; width: 100% !important; }
+  .email-html-surface td, .email-html-surface th { display: block; width: auto !important; }
+}

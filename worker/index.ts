@@ -28,9 +28,16 @@ import {
 } from "./phase3.ts";
 import {
   isRecent,
+  isValidDomain,
+  isValidEmailAddress,
   isValidRecoveryEmail,
   maskRecoveryEmail,
+  MAX_JSON_BODY_BYTES,
+  MAX_MULTIPART_REQUEST_BYTES,
+  MAX_RAW_EMAIL_BYTES,
   normalizeRecoveryEmail,
+  readJsonBody,
+  RequestInputError,
 } from "./security.ts";
 import {
   extractTrustEvidence,
@@ -55,8 +62,8 @@ interface Env {
   B2_APPLICATION_KEY: string;
   B2_BUCKET: string;
   OWNER_USER_ID?: string;
+  ALLOWED_SENDER_DOMAINS?: string;
   BREVO_WEBHOOK_SECRET?: string;
-  INTERNAL_TEST_TOKEN?: string;
   OUTLOOK_FORWARD_TO?: string;
   DEFAULT_FROM_EMAIL?: string;
 }
@@ -69,6 +76,11 @@ type StoredAttachment = { object_key: string; filename: string; content_type: st
 
 const SYSTEM_FOLDERS = ["inbox", "sent", "drafts", "archive", "trash", "spam"] as const;
 const SPAM_THRESHOLD = 0.70;
+const MAX_RECIPIENTS = 50;
+const MAX_SUBJECT_LENGTH = 998;
+const MAX_MESSAGE_LENGTH = 1_000_000;
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -78,6 +90,33 @@ const error = (message: string, status = 400) => json({ error: message }, status
 
 function cleanAddress(value: string): string {
   return value.trim().replace(/^.*<([^>]+)>.*$/, "$1").toLowerCase();
+}
+
+function configuredAppDomain(env: Pick<Env, "APP_DOMAIN">): string {
+  const domain = String(env.APP_DOMAIN || "").trim().toLowerCase();
+  if (!isValidDomain(domain)) throw new Error("APP_DOMAIN is not configured with a valid domain");
+  return domain;
+}
+
+function configuredSenderDomains(env: Pick<Env, "APP_DOMAIN" | "ALLOWED_SENDER_DOMAINS">): string[] {
+  const configured = String(env.ALLOWED_SENDER_DOMAINS || "")
+    .split(/[\s,;]+/)
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => isValidDomain(value));
+  return [...new Set([configuredAppDomain(env), ...configured])];
+}
+
+function isConfiguredSenderAddress(env: Pick<Env, "APP_DOMAIN" | "ALLOWED_SENDER_DOMAINS">, address: string): boolean {
+  const normalized = cleanAddress(address);
+  const domain = normalized.slice(normalized.lastIndexOf("@") + 1);
+  return isValidEmailAddress(normalized) && configuredSenderDomains(env).includes(domain);
+}
+
+function defaultMailboxAddress(env: Pick<Env, "APP_DOMAIN" | "DEFAULT_FROM_EMAIL" | "ALLOWED_SENDER_DOMAINS">): string {
+  const fallback = `postmaster@${configuredAppDomain(env)}`;
+  const address = cleanAddress(env.DEFAULT_FROM_EMAIL?.trim() || fallback);
+  if (!isConfiguredSenderAddress(env, address)) throw new Error("DEFAULT_FROM_EMAIL must use an allowed sender domain");
+  return address;
 }
 
 function constantTimeEqual(left: string, right: string): boolean {
@@ -90,8 +129,43 @@ function constantTimeEqual(left: string, right: string): boolean {
 }
 
 function splitAddresses(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String).map(cleanAddress).filter(Boolean);
-  return String(value ?? "").split(/[\n,;]+/).map(cleanAddress).filter(Boolean);
+  const values = Array.isArray(value) ? value : String(value ?? "").split(/[\n,;]+/);
+  return values
+    .map((item) => cleanAddress(String(item)))
+    .filter((address) => isValidEmailAddress(address));
+}
+
+function parseAddressList(value: unknown): { addresses: string[]; invalid: boolean } {
+  const values = Array.isArray(value) ? value : String(value ?? "").split(/[\n,;]+/);
+  let invalid = false;
+  const addresses: string[] = [];
+  for (const item of values) {
+    const raw = String(item ?? "").trim();
+    if (!raw) continue;
+    const address = cleanAddress(raw);
+    if (!isValidEmailAddress(address)) {
+      invalid = true;
+      continue;
+    }
+    addresses.push(address);
+  }
+  return { addresses, invalid };
+}
+
+async function enforceRequestBodyLimit(request: Request): Promise<void> {
+  if (!["POST", "PUT", "PATCH"].includes(request.method)) return;
+  const contentType = request.headers.get("content-type")?.toLowerCase() || "";
+  const maxBytes = contentType.startsWith("multipart/form-data")
+    ? MAX_MULTIPART_REQUEST_BYTES
+    : MAX_JSON_BODY_BYTES;
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    const length = Number(declaredLength);
+    if (!Number.isFinite(length) || length < 0) throw new RequestInputError("Invalid request length");
+    if (length > maxBytes) throw new RequestInputError("Request body is too large", 413);
+  }
+  const bytes = await request.clone().arrayBuffer();
+  if (bytes.byteLength > maxBytes) throw new RequestInputError("Request body is too large", 413);
 }
 
 function normalizeSubject(subject: string): string {
@@ -145,15 +219,6 @@ async function verifiedFactorCount(env: Env, userId: string, token: string): Pro
   const result = await client.auth.admin.mfa.listFactors({ userId });
   if (result.error) throw result.error;
   return (result.data?.factors || []).filter((factor) => factor.status === "verified").length;
-}
-
-async function probeSupabase(env: Env): Promise<{ ok: boolean; status: number; detail?: string }> {
-  try {
-    const response = await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?select=id&limit=1`, { headers: supabaseHeaders(env) });
-    return { ok: response.ok, status: response.status, ...(response.ok ? {} : { detail: (await response.text()).slice(0, 180) }) };
-  } catch (probeError) {
-    return { ok: false, status: 0, detail: probeError instanceof Error ? probeError.message.slice(0, 180) : "Probe failed" };
-  }
 }
 
 async function getUser(request: Request, env: Env): Promise<User | null> {
@@ -234,7 +299,8 @@ async function ensureProfileAndMailbox(env: Env, user: User): Promise<Mailbox> {
   await dbRequest(env, "user_settings", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: user.id }) });
   const existing = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&order=is_default.desc,created_at.asc&limit=1`);
   if (existing[0]) return existing[0];
-  const created = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address: `james@${env.APP_DOMAIN}`, display_name: "James", is_default: true }) });
+  const address = defaultMailboxAddress(env);
+  const created = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: address.split("@")[0], is_default: true }) });
   return created[0];
 }
 
@@ -383,7 +449,7 @@ async function saveAttachments(env: Env, ownerId: string, messageId: string, att
     const content = attachment.content instanceof Uint8Array ? attachment.content : attachment.content instanceof ArrayBuffer ? new Uint8Array(attachment.content) : new TextEncoder().encode(attachment.content);
     const detectedContentType = detectAttachmentContentType(filename, declaredContentType, content);
     const safety = buildAttachmentSafety(filename, declaredContentType, detectedContentType, content.byteLength);
-    if (content.byteLength > 15 * 1024 * 1024 || safety.safetyStatus === "blocked") { blocked.push(filename); continue; }
+    if (content.byteLength > MAX_ATTACHMENT_BYTES || safety.safetyStatus === "blocked") { blocked.push(filename); continue; }
     const objectKey = `attachments/${ownerId}/${messageId}/${crypto.randomUUID()}-${filename}`;
     await putObject(env, objectKey, content, detectedContentType);
     stored.push({ object_key: objectKey, filename, content_type: declaredContentType, detected_content_type: detectedContentType, byte_size: content.byteLength, sha256: await sha256Hex(content), preview_state: safety.previewState, safety_status: safety.safetyStatus, safety_reasons: safety.safetyReasons, content_id: attachment.contentId || undefined, disposition: attachment.disposition });
@@ -662,9 +728,9 @@ async function defaultFromAddress(env: Env, ownerId?: string): Promise<string> {
       env,
       `mailboxes?owner_id=eq.${encodeURIComponent(ownerId)}&is_default=eq.true&select=address&limit=1`,
     );
-    if (rows[0]?.address) return rows[0].address;
+    if (rows[0]?.address && isConfiguredSenderAddress(env, rows[0].address)) return rows[0].address;
   }
-  return env.DEFAULT_FROM_EMAIL || "james@jamesfontanilla.com";
+  return defaultMailboxAddress(env);
 }
 
 async function generateRecoveryLink(env: Env, email: string, redirectTo: string): Promise<string> {
@@ -762,7 +828,7 @@ async function handleRecoveryRequest(request: Request, env: Env): Promise<Respon
   }
   let body: JsonRecord;
   try {
-    body = (await request.json()) as JsonRecord;
+    body = await readJsonBody<JsonRecord>(request);
   } catch {
     await recordRecoveryIpAttempt(env, ip, ipRate?.row || null).catch(() => undefined);
     return generic;
@@ -807,6 +873,7 @@ async function handleRecoveryRequest(request: Request, env: Env): Promise<Respon
 }
 
 async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, envelopeTo: string, forwardInbound?: (address: string) => Promise<void>, ctx?: ExecutionContext): Promise<void> {
+  if (raw.byteLength > MAX_RAW_EMAIL_BYTES) throw new Error("Inbound message exceeds the 25 MB limit");
   const destination = cleanAddress(envelopeTo);
   const ownerId = env.OWNER_USER_ID;
   if (!ownerId) throw new Error("OWNER_USER_ID is not configured");
@@ -816,7 +883,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   const subject = String(parsed.subject || "(no subject)");
   const textBody = String(parsed.text || "");
   const htmlBody = String(parsed.html || "");
-  const messageIdHeader = headerValue(parsed, "message-id") || `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`;
+  const messageIdHeader = headerValue(parsed, "message-id") || `<${crypto.randomUUID()}@${configuredAppDomain(env)}>`;
   const duplicate = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&message_id_header=eq.${encodeURIComponent(messageIdHeader)}&limit=1`);
   if (duplicate[0]) return;
   const sender = senderIdentity(parsed, envelopeFrom);
@@ -904,32 +971,50 @@ async function processOutbox(env: Env, limit = 25): Promise<void> {
   }
 }
 
-async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ctx?: ExecutionContext): Promise<Response> {
-  const fromAddress = cleanAddress(String(body.fromAddress || `james@${env.APP_DOMAIN}`));
-  const to = splitAddresses(body.to);
-  const cc = splitAddresses(body.cc);
-  const bcc = splitAddresses(body.bcc);
-  if (!fromAddress || !to.length) return error("A sender and at least one recipient are required");
-  const mailbox = ownerId ? await getMailbox(env, ownerId, fromAddress) : null;
-  if (ownerId && !mailbox?.can_send) return error("This sender address is not enabled for sending", 403);
+async function handleSend(env: Env, ownerId: string, body: JsonRecord, ctx?: ExecutionContext): Promise<Response> {
+  const requestedFrom = String(body.fromAddress || "").trim();
+  const fromAddress = cleanAddress(requestedFrom || await defaultFromAddress(env, ownerId));
+  const toResult = parseAddressList(body.to);
+  const ccResult = parseAddressList(body.cc);
+  const bccResult = parseAddressList(body.bcc);
+  const to = toResult.addresses;
+  const cc = ccResult.addresses;
+  const bcc = bccResult.addresses;
+  if (!isConfiguredSenderAddress(env, fromAddress)) return error("Use a valid sender address on an allowed domain", 403);
+  if (toResult.invalid || ccResult.invalid || bccResult.invalid) return error("Every recipient must be a valid email address");
+  if (!to.length) return error("A sender and at least one recipient are required");
+  if (to.length + cc.length + bcc.length > MAX_RECIPIENTS) return error(`Messages are limited to ${MAX_RECIPIENTS} recipients`, 413);
+  const mailbox = await getMailbox(env, ownerId, fromAddress);
+  if (!mailbox?.can_send) return error("This sender address is not enabled for sending", 403);
   const subject = String(body.subject || "(no subject)");
   const text = String(body.text || "");
   const html = typeof body.html === "string" ? body.html : undefined;
   const replyTo = cleanAddress(String(body.replyTo || fromAddress));
-  const attachments: OutboundAttachment[] = Array.isArray(body.attachments) ? body.attachments.filter((item): item is OutboundAttachment => Boolean(item && typeof item.filename === "string" && typeof item.object_key === "string")).map((item) => ({ filename: item.filename.slice(0, 180), object_key: item.object_key, byte_size: Number(item.byte_size || 0), content_type: item.content_type, detected_content_type: item.detected_content_type, sha256: item.sha256, preview_state: item.preview_state, safety_status: item.safety_status, safety_reasons: item.safety_reasons })) : [];
-  const warnings = ownerId ? buildSendWarnings({ fromAddress, mailboxAddress: mailbox?.address, mailboxCanSend: mailbox?.can_send, to, cc, bcc, replyTo, subject, text, attachmentCount: attachments.length }) : [];
+  if (subject.length > MAX_SUBJECT_LENGTH) return error("The subject is too long");
+  if (text.length > MAX_MESSAGE_LENGTH || (html && html.length > MAX_MESSAGE_LENGTH)) return error("The message body is too large", 413);
+  if (!isValidEmailAddress(replyTo)) return error("Reply-To must be a valid email address");
+  const rawAttachments = body.attachments === undefined ? [] : body.attachments;
+  if (!Array.isArray(rawAttachments)) return error("Attachments must be a list");
+  if (rawAttachments.length > 10) return error("Messages are limited to 10 attachments", 413);
+  if (rawAttachments.some((item) => !item || typeof item !== "object" || typeof (item as JsonRecord).filename !== "string" || typeof (item as JsonRecord).object_key !== "string")) return error("Every attachment must include a filename and object key");
+  const attachments: OutboundAttachment[] = rawAttachments.map((item) => {
+    const record = item as JsonRecord;
+    return { filename: String(record.filename).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 180), object_key: String(record.object_key), byte_size: Number(record.byte_size || 0), content_type: typeof record.content_type === "string" ? record.content_type : undefined, detected_content_type: typeof record.detected_content_type === "string" ? record.detected_content_type : undefined, sha256: typeof record.sha256 === "string" ? record.sha256 : undefined, preview_state: typeof record.preview_state === "string" ? record.preview_state : undefined, safety_status: typeof record.safety_status === "string" ? record.safety_status : undefined, safety_reasons: Array.isArray(record.safety_reasons) ? record.safety_reasons.map(String).slice(0, 10) : undefined };
+  });
+  for (const attachment of attachments) {
+    if ((!attachment.object_key.startsWith(`drafts/${ownerId}/`) && !attachment.object_key.startsWith(`attachments/${ownerId}/`)) || attachment.object_key.includes("..") || /[\\\r\n]/.test(attachment.object_key)) return error("Attachment ownership could not be verified", 403);
+    const byteSize = Number(attachment.byte_size ?? 0);
+    if (!Number.isFinite(byteSize) || byteSize < 0 || byteSize > MAX_ATTACHMENT_BYTES) return error("An attachment exceeds the 15 MB limit", 413);
+    if (["blocked", "infected"].includes(String(attachment.safety_status))) return error("A blocked attachment cannot be sent", 422);
+  }
+  const warnings = buildSendWarnings({ fromAddress, mailboxAddress: mailbox.address, mailboxCanSend: mailbox.can_send, to, cc, bcc, replyTo, subject, text, attachmentCount: attachments.length });
   const acknowledged = new Set(Array.isArray(body.warningsAcknowledged) ? body.warningsAcknowledged.map(String) : []);
   const unacknowledgedWarnings = warnings.filter((warning) => !acknowledged.has(warning.code));
   if (unacknowledgedWarnings.length) return json({ ok: false, requiresConfirmation: true, warnings: unacknowledgedWarnings }, 409);
-  const messageIdHeader = `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`;
-  if (!ownerId) {
-    const result = await sendViaBrevo(env, { fromAddress, to, cc, bcc, subject, text, html, replyTo, attachments });
-    return json({ ok: true, providerMessageId: result.messageId });
-  }
+  const messageIdHeader = `<${crypto.randomUUID()}@${configuredAppDomain(env)}>`;
   const idempotencyKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() ? body.idempotencyKey.trim().slice(0, 200) : crypto.randomUUID();
   const duplicate = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&send_idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=id,status,folder,send_after,scheduled_at&limit=1`);
   if (duplicate[0]) return json({ ok: true, replayed: true, id: duplicate[0].id, status: duplicate[0].status, scheduled: duplicate[0].status === "scheduled" });
-  for (const attachment of attachments) if (!attachment.object_key.startsWith(`drafts/${ownerId}/`) && !attachment.object_key.startsWith(`attachments/${ownerId}/`)) return error("Attachment ownership could not be verified", 403);
   let threadId = typeof body.threadId === "string" && body.threadId.trim() ? body.threadId.trim() : "";
   if (threadId) {
     const ownedThread = await dbRequest<Array<{ id: string }>>(env, `threads?id=eq.${encodeURIComponent(threadId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id&limit=1`);
@@ -992,14 +1077,24 @@ async function processDueFollowUps(env: Env, now = new Date().toISOString()): Pr
 }
 
 async function handleDraft(env: Env, user: User, body: JsonRecord): Promise<Response> {
-  const fromAddress = cleanAddress(String(body.fromAddress || `james@${env.APP_DOMAIN}`));
+  const fromAddress = cleanAddress(String(body.fromAddress || await defaultFromAddress(env, user.id)));
+  if (!isConfiguredSenderAddress(env, fromAddress)) return error("Use a valid sender address on an allowed domain", 403);
   const mailbox = await getMailbox(env, user.id, fromAddress);
   if (!mailbox) return error("Sender mailbox not found", 404);
   const id = typeof body.id === "string" ? body.id : "";
-   const patch = { subject: String(body.subject || ""), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, to_addresses: splitAddresses(body.to), cc_addresses: splitAddresses(body.cc), bcc_addresses: splitAddresses(body.bcc), from_name: mailbox.display_name || "", from_address: fromAddress, snippet: snippet(String(body.text || "")), updated_at: new Date().toISOString() };
+  const toResult = parseAddressList(body.to);
+  const ccResult = parseAddressList(body.cc);
+  const bccResult = parseAddressList(body.bcc);
+  const subject = String(body.subject || "");
+  const text = String(body.text || "");
+  const html = typeof body.html === "string" ? body.html : null;
+  if (toResult.invalid || ccResult.invalid || bccResult.invalid) return error("Every recipient must be a valid email address");
+  if (toResult.addresses.length + ccResult.addresses.length + bccResult.addresses.length > MAX_RECIPIENTS) return error(`Messages are limited to ${MAX_RECIPIENTS} recipients`, 413);
+  if (subject.length > MAX_SUBJECT_LENGTH || text.length > MAX_MESSAGE_LENGTH || (html && html.length > MAX_MESSAGE_LENGTH)) return error("The draft is too large", 413);
+  const patch = { subject, text_body: text, html_body: html, to_addresses: toResult.addresses, cc_addresses: ccResult.addresses, bcc_addresses: bccResult.addresses, from_name: mailbox.display_name || "", from_address: fromAddress, snippet: snippet(text), updated_at: new Date().toISOString() };
   if (id) { const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.drafts`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows?.[0] || null); }
   const threadId = await findOrCreateThread(env, user.id, patch.subject);
-  const rows = await dbRequest<JsonRecord[]>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: "drafts", status: "draft", message_id_header: `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`, ...patch }) });
+  const rows = await dbRequest<JsonRecord[]>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: "drafts", status: "draft", message_id_header: `<${crypto.randomUUID()}@${configuredAppDomain(env)}>`, ...patch }) });
   return json(rows?.[0] || null, 201);
 }
 
@@ -1317,7 +1412,7 @@ async function applyBulkMessageAction(env: Env, ownerId: string, message: JsonRe
   return { changed: true };
 }
 
-function protectedHeaders(response: Response, noStore = false): Response {
+function protectedHeaders(response: Response, noStore = false, supabaseUrl?: string): Response {
   const headers = new Headers(response.headers);
   const isHtml = headers.get("content-type")?.toLowerCase().includes("text/html") === true;
   headers.set("X-Content-Type-Options", "nosniff");
@@ -1326,14 +1421,24 @@ function protectedHeaders(response: Response, noStore = false): Response {
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   headers.set("X-Permitted-Cross-Domain-Policies", "none");
+  headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
   if (isHtml) {
+    const connectSources = ["'self'"];
+    try {
+      const origin = new URL(String(supabaseUrl || ""));
+      if (origin.protocol === "https:") {
+        connectSources.push(origin.origin, `wss://${origin.host}`);
+      }
+    } catch {
+      // The application will show its configuration screen when no project URL is set.
+    }
     headers.set("Content-Security-Policy", [
       "default-src 'self'",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
       "img-src 'self' data: https:",
-      "connect-src 'self' https://npdyvfvvhuhntodiemjg.supabase.co wss://npdyvfvvhuhntodiemjg.supabase.co",
+      `connect-src ${connectSources.join(" ")}`,
       "worker-src 'self'",
       "manifest-src 'self'",
       "object-src 'none'",
@@ -1351,20 +1456,30 @@ function protectedHeaders(response: Response, noStore = false): Response {
 
 async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname === "/api/health") return json({ ok: true, service: "email-service", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
+  await enforceRequestBodyLimit(request);
+  if (url.pathname === "/api/health") return json({ ok: true, service: "email-service", status: "healthy" });
   if (url.pathname === "/api/webhooks/brevo") {
+    if (request.method !== "POST") return error("Method not allowed", 405);
     const configuredSecret = env.BREVO_WEBHOOK_SECRET?.trim();
-    const suppliedSecret = request.headers.get("x-webhook-secret")?.trim() || url.searchParams.get("token")?.trim();
-    if (!configuredSecret || !suppliedSecret || !constantTimeEqual(suppliedSecret, configuredSecret)) return error("Unauthorized", 401);
-    const event = (await request.json()) as JsonRecord;
-    const providerMessageId = typeof event["message-id"] === "string" ? event["message-id"] : String(event.messageId || "");
+    const suppliedSecret = request.headers.get("x-webhook-secret")?.trim();
+    if (!configuredSecret || !suppliedSecret || suppliedSecret.length > 256 || !constantTimeEqual(suppliedSecret, configuredSecret)) return error("Unauthorized", 401);
+    const event = await readJsonBody<JsonRecord>(request, MAX_WEBHOOK_BODY_BYTES);
+    if (!event || typeof event !== "object" || Array.isArray(event)) return error("Invalid webhook payload");
+    const providerMessageId = typeof event["message-id"] === "string"
+      ? event["message-id"].trim().slice(0, 254)
+      : typeof event.messageId === "string" ? event.messageId.trim().slice(0, 254) : "";
+    const eventType = String(event.event || "unknown").trim().toLowerCase().slice(0, 80) || "unknown";
     const rows = providerMessageId ? await dbRequest<Array<{ id: string; owner_id: string }>>(env, `messages?provider_message_id=eq.${encodeURIComponent(providerMessageId)}&limit=1`) : [];
     const statusMap: Record<string, string> = { delivered: "delivered", hard_bounce: "bounced", soft_bounce: "bounced", blocked: "failed", error: "failed" };
-    if (rows[0]) { const status = statusMap[String(event.event || "").toLowerCase()]; if (status) await dbRequest(env, `messages?id=eq.${encodeURIComponent(rows[0].id)}&owner_id=eq.${encodeURIComponent(rows[0].owner_id)}`, { method: "PATCH", body: JSON.stringify({ status }) }); await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: rows[0].owner_id, message_id: rows[0].id, provider: "brevo", event_type: String(event.event || "unknown"), provider_message_id: providerMessageId, payload: event }) }); }
+    if (rows[0]) {
+      const status = statusMap[eventType];
+      if (status) await dbRequest(env, `messages?id=eq.${encodeURIComponent(rows[0].id)}&owner_id=eq.${encodeURIComponent(rows[0].owner_id)}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      const previousEvents = await dbRequest<Array<{ id: string }>>(env, `mail_events?provider=eq.brevo&provider_message_id=eq.${encodeURIComponent(providerMessageId)}&event_type=eq.${encodeURIComponent(eventType)}&select=id&limit=1`).catch(() => []);
+      if (!previousEvents[0]) await dbRequest(env, "mail_events", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ owner_id: rows[0].owner_id, message_id: rows[0].id, provider: "brevo", event_type: eventType, provider_message_id: providerMessageId, payload: event }) });
+    }
     return json({ ok: true });
   }
   if (request.method === "POST" && url.pathname === "/api/auth/recovery-request") return handleRecoveryRequest(request, env);
-  if (url.pathname === "/api/internal/send-test") { const configuredToken = env.INTERNAL_TEST_TOKEN?.trim(); const suppliedToken = request.headers.get("x-internal-test-token")?.trim(); if (!configuredToken || !suppliedToken || !constantTimeEqual(suppliedToken, configuredToken)) return error("Unauthorized", 401); try { return await handleSend(env, null, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
   const user = await getUser(request, env);
   if (!user) return error("Sign in required", 401);
   if (user.mfaRequired) return error("Complete two-step verification to continue", 401);
@@ -1447,7 +1562,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
 
   if (request.method === "GET" && url.pathname === "/api/mailboxes") return json(await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&order=is_default.desc,created_at.asc`));
-  if (request.method === "POST" && url.pathname === "/api/mailboxes") { const body = (await request.json()) as JsonRecord; const address = cleanAddress(String(body.address || "")); if (!address.includes("@")) return error("Enter a valid email address"); const rows = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: false }) }); return json(rows[0], 201); }
+  if (request.method === "POST" && url.pathname === "/api/mailboxes") { const body = (await request.json()) as JsonRecord; const address = cleanAddress(String(body.address || "")); if (!isConfiguredSenderAddress(env, address)) return error("Use an address on an allowed sender domain", 403); const displayName = String(body.displayName || address.split("@")[0]).trim(); if (displayName.length > 200) return error("Mailbox name is too long"); const rows = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: displayName, is_default: false, can_send: true, can_receive: true }) }); return json(rows[0], 201); }
   const mailboxMatch = url.pathname.match(/^\/api\/mailboxes\/([^/]+)$/);
   if (request.method === "PATCH" && mailboxMatch) { const body = (await request.json()) as JsonRecord; const patch: JsonRecord = {}; for (const key of ["display_name", "can_send", "can_receive", "is_default", "reply_to", "settings"]) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || null); }
 
@@ -1782,7 +1897,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "POST" && url.pathname === "/api/labels") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "labels", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: String(body.name || "Untitled"), color: String(body.color || "#2d5bff") }) }); return json(rows[0], 201); }
   if (request.method === "POST" && url.pathname === "/api/labels/assign") { const body = (await request.json()) as JsonRecord; const labelId = String(body.labelId || ""); const messageId = String(body.messageId || ""); if (!labelId || !messageId) return error("Message and label are required"); const messageOwned = await hasOwnedRecord(env, "messages", user.id, messageId); const labelOwned = await hasOwnedRecord(env, "labels", user.id, labelId); if (!messageOwned || !labelOwned) return error("Message or label not found", 404); await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, label_id: labelId }) }); return json({ ok: true }); }
   if (request.method === "GET" && url.pathname === "/api/contacts") { const q = url.searchParams.get("q")?.trim(); const path = `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc${q ? `&or=${encodeURIComponent(`email.ilike.*${q}*,display_name.ilike.*${q}*`)}` : ""}`; return json(await dbRequest(env, path)); }
-  if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!email.includes("@")) return error("A valid email is required"); const avatarUrl = typeof body.avatarUrl === "string" && body.avatarUrl.trim() ? body.avatarUrl.trim() : null; if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return error("Profile image URL must use https://"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]), avatar_url: avatarUrl, company: body.company || null, notes: body.notes || null }) }); return json(rows[0], 201); }
+  if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!isValidEmailAddress(email)) return error("A valid email is required"); const avatarUrl = typeof body.avatarUrl === "string" && body.avatarUrl.trim() ? body.avatarUrl.trim() : null; if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return error("Profile image URL must use https://"); const displayName = String(body.displayName || email.split("@")[0]).trim(); const company = String(body.company || "").trim(); const notes = String(body.notes || ""); if (displayName.length > 200 || company.length > 200 || notes.length > 5000) return error("Contact details are too long"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: displayName, avatar_url: avatarUrl, company: company || null, notes: notes || null }) }); return json(rows[0], 201); }
   if (request.method === "GET" && url.pathname === "/api/sender-policies") return json(await dbRequest<SenderPolicy[]>(env, `sender_policies?owner_id=eq.${encodeURIComponent(user.id)}&order=enabled.desc,match_type.asc,match_value.asc`).catch(() => []));
   if (request.method === "POST" && url.pathname === "/api/sender-policies") {
     const body = (await request.json()) as JsonRecord;
@@ -2037,9 +2152,9 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "POST" && url.pathname === "/api/auto-replies") { const body = (await request.json()) as JsonRecord; const mailboxId = String(body.mailboxId || mailbox.id); if (!(await hasOwnedRecord(env, "mailboxes", user.id, mailboxId))) return error("Mailbox not found", 404); const rows = await dbRequest<JsonRecord[]>(env, "auto_replies", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: mailboxId, enabled: body.enabled === true, subject: String(body.subject || "Automatic reply"), body: String(body.body || ""), starts_at: body.startsAt || null, ends_at: body.endsAt || null }) }); return json(rows[0] || null); }
   if (request.method === "GET" && url.pathname === "/api/integrations") return json(await dbRequest(env, `integrations?owner_id=eq.${encodeURIComponent(user.id)}&order=provider.asc`));
   if (request.method === "PATCH" && url.pathname === "/api/integrations") { const body = (await request.json()) as JsonRecord; const provider = String(body.provider || ""); if (!provider) return error("Provider is required"); const rows = await dbRequest<JsonRecord[]>(env, "integrations", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, provider, status: String(body.status || "not_configured"), settings: body.settings || {} }) }); return json(rows[0] || null); }
-  if (request.method === "POST" && url.pathname === "/api/drafts") return handleDraft(env, user, (await request.json()) as JsonRecord);
-  if (request.method === "POST" && url.pathname === "/api/attachments") { const form = await request.formData(); const file = form.get("file"); if (!(file instanceof File)) return error("File is required"); if (file.size > 15 * 1024 * 1024) return error("Attachments are limited to 15 MB"); const bytes = new Uint8Array(await file.arrayBuffer()); const declaredContentType = file.type || "application/octet-stream"; const detectedContentType = detectAttachmentContentType(file.name, declaredContentType, bytes); const safety = buildAttachmentSafety(file.name, declaredContentType, detectedContentType, file.size); if (safety.safetyStatus === "blocked") return error("This attachment type is blocked for safety"); const objectKey = `drafts/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; await putObject(env, objectKey, bytes, detectedContentType); return json({ object_key: objectKey, filename: file.name, content_type: declaredContentType, detected_content_type: detectedContentType, byte_size: file.size, sha256: await sha256Hex(bytes), preview_state: safety.previewState, safety_status: safety.safetyStatus, safety_reasons: safety.safetyReasons }); }
-  if (request.method === "POST" && url.pathname === "/api/send") { try { return await handleSend(env, user.id, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
+  if (request.method === "POST" && url.pathname === "/api/drafts") return handleDraft(env, user, await readJsonBody<JsonRecord>(request));
+  if (request.method === "POST" && url.pathname === "/api/attachments") { const form = await request.formData(); const file = form.get("file"); if (!(file instanceof File)) return error("File is required"); if (file.size > MAX_ATTACHMENT_BYTES) return error("Attachments are limited to 15 MB", 413); const bytes = new Uint8Array(await file.arrayBuffer()); const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 180) || "attachment"; const declaredContentType = file.type || "application/octet-stream"; const detectedContentType = detectAttachmentContentType(safeFilename, declaredContentType, bytes); const safety = buildAttachmentSafety(safeFilename, declaredContentType, detectedContentType, file.size); if (safety.safetyStatus === "blocked") return error("This attachment type is blocked for safety"); const objectKey = `drafts/${user.id}/${crypto.randomUUID()}-${safeFilename}`; await putObject(env, objectKey, bytes, detectedContentType); return json({ object_key: objectKey, filename: safeFilename, content_type: declaredContentType, detected_content_type: detectedContentType, byte_size: file.size, sha256: await sha256Hex(bytes), preview_state: safety.previewState, safety_status: safety.safetyStatus, safety_reasons: safety.safetyReasons }); }
+  if (request.method === "POST" && url.pathname === "/api/send") { try { return await handleSend(env, user.id, await readJsonBody<JsonRecord>(request), ctx); } catch (sendError) { console.error("Outbound message failed", sendError); return error("Message could not be sent. Please try again.", 502); } }
   const downloadAllMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/attachments\/download$/);
   if (request.method === "GET" && downloadAllMatch) { const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!messageRows[0]) return error("Message not found", 404); const rows = await dbRequest<Array<{ filename: string; object_key: string; byte_size: number }>>(env, `attachments?message_id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc&limit=10`); if (!rows.length) return error("There are no attachments to download", 404); const totalBytes = rows.reduce((sum, row) => sum + Number(row.byte_size || 0), 0); if (totalBytes > 25 * 1024 * 1024) return error("The download is limited to 25 MB", 413); const entries: Array<{ filename: string; data: Uint8Array }> = []; for (const row of rows) entries.push({ filename: row.filename, data: await readObject(env, row.object_key) }); const archive = buildZip(entries); const archiveName = `${String(messageRows[0].subject || "attachments").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "attachments"}.zip`; return new Response(archive, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${archiveName}"`, "cache-control": "no-store" } }); }
   const previewMatch = url.pathname.match(/^\/api\/attachments\/([^/]+)\/preview$/);
@@ -2048,17 +2163,55 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   return error("Not found", 404);
 }
 
+async function readStreamWithLimit(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<ArrayBuffer> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      const chunk = result.value;
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel("Inbound message is too large");
+        throw new Error(`Inbound message exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit`);
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return output.buffer;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/")) { try { return protectedHeaders(await api(request, env, ctx)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
+    if (url.pathname.startsWith("/api/")) {
+      try {
+        return protectedHeaders(await api(request, env, ctx), false, env.SUPABASE_URL);
+      } catch (requestError) {
+        const requestId = crypto.randomUUID();
+        console.error("API request failed", { requestId, error: requestError });
+        const response = error(requestError instanceof RequestInputError ? requestError.message : "Internal server error", requestError instanceof RequestInputError ? requestError.status : 500);
+        response.headers.set("x-request-id", requestId);
+        return response;
+      }
+    }
     const assetResponse = await env.ASSETS.fetch(request);
     const noStoreAsset = url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest";
-    return protectedHeaders(assetResponse, noStoreAsset);
+    return protectedHeaders(assetResponse, noStoreAsset, env.SUPABASE_URL);
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await processScheduled(env); },
   async email(message: { from: string; to: string; raw: ReadableStream<Uint8Array>; forward: (address: string) => Promise<void>; setReject: (reason: string) => void }, env: Env, ctx: ExecutionContext): Promise<void> {
-    try { const raw = await new Response(message.raw).arrayBuffer(); await ingestRawEmail(env, raw, message.from, message.to, async (address) => message.forward(address), ctx); if (env.OUTLOOK_FORWARD_TO) await message.forward(env.OUTLOOK_FORWARD_TO); }
+    try { const raw = await readStreamWithLimit(message.raw, MAX_RAW_EMAIL_BYTES); await ingestRawEmail(env, raw, message.from, message.to, async (address) => message.forward(address), ctx); if (env.OUTLOOK_FORWARD_TO) await message.forward(env.OUTLOOK_FORWARD_TO); }
     catch (ingestError) { message.setReject(ingestError instanceof Error ? ingestError.message.slice(0, 180) : "Inbound processing failed"); }
   },
 };

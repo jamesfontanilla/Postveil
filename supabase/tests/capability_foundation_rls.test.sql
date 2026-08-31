@@ -19,7 +19,7 @@ values
 
 insert into public.mailboxes (id, owner_id, address, display_name)
 values
-  ('11111111-1111-1111-1111-111111111103', '11111111-1111-1111-1111-111111111111', 'owner-test@jamesfontanilla.com', 'Owner test');
+  ('11111111-1111-1111-1111-111111111103', '11111111-1111-1111-1111-111111111111', 'owner-test@example.com', 'Owner test');
 
 insert into public.mailbox_members (mailbox_id, member_id, role)
 values
