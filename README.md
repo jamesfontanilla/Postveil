@@ -65,10 +65,11 @@ Configure the Brevo webhook to send `POST` requests with the secret in the `x-we
 2. Create a private Backblaze B2 bucket and a least-privilege, expiring application key.
 3. Authenticate your sending domain and sender in Brevo.
 4. Configure DNS for MX, SPF, DKIM, and DMARC.
-5. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
-6. Set your domain values in `wrangler.toml` and configure the Cloudflare custom domain in the dashboard.
-7. Run `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
-8. Deploy with `npm run deploy` and verify authenticated API routes, inbound mail, outbound mail, webhook delivery, and signed attachment downloads.
+5. For a Cloudflare Git deployment, set the build variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the project's build settings. The publishable key is intended for the browser; never use a service-role key here.
+6. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
+7. Set your domain values in `wrangler.toml` and configure the Cloudflare custom domain in the dashboard.
+8. Run `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
+9. Deploy with `npm run deploy` and verify authenticated API routes, inbound mail, outbound mail, webhook delivery, and signed attachment downloads.
 
 Do not deploy the example domain or example credentials. Do not reuse another deployment's Supabase project, B2 bucket, Brevo account, or secrets.
 
