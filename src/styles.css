@@ -792,7 +792,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
     height: 100%;
     overflow-y: auto;
     overscroll-behavior: contain;
-    scrollbar-gutter: stable;
+    /* Do not reserve a phantom scrollbar lane when the navigation fits. */
+    scrollbar-gutter: auto;
   }
 
   .message-column {
