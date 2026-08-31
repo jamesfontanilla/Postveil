@@ -1130,6 +1130,7 @@ function SettingsPanel({
     | "mailboxes"
     | "integrations"
   >("appearance");
+  const [settingsQuery, setSettingsQuery] = useState("");
   const [folderName, setFolderName] = useState("");
   const [labelName, setLabelName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -1759,13 +1760,55 @@ function SettingsPanel({
     if (tab === "security") void loadSecurity();
     if (tab === "spam") void loadScreeningQueue();
   }, [tab]);
+  const settingsNavigation = [
+    {
+      label: "General",
+      items: [
+        { key: "appearance" as const, label: "Appearance", icon: SlidersHorizontal, description: "Choose how Parcel looks and how it gets your attention." },
+      ],
+    },
+    {
+      label: "Mail",
+      items: [
+        { key: "organize" as const, label: "Folders & labels", icon: FolderPlus, description: "Keep messages organized with your own filing system." },
+        { key: "spam" as const, label: "Spam & trust", icon: ShieldAlert, description: "Review screening signals and shape who reaches your inbox." },
+        { key: "automation" as const, label: "Rules & signatures", icon: SlidersHorizontal, description: "Automate incoming mail and set up your sending identity." },
+      ],
+    },
+    {
+      label: "People",
+      items: [
+        { key: "contacts" as const, label: "Contacts", icon: Users, description: "Save people you know and help Parcel recognize them." },
+      ],
+    },
+    {
+      label: "Accounts",
+      items: [
+        { key: "mailboxes" as const, label: "Mailboxes", icon: Mail, description: "Manage the addresses connected to this deployment." },
+        { key: "integrations" as const, label: "Connected services", icon: Briefcase, description: "See the services that can extend your mailbox." },
+        { key: "security" as const, label: "Security & access", icon: ShieldAlert, description: "Protect sign-in, recovery, and authenticator access." },
+      ],
+    },
+  ];
+  const filteredSettingsNavigation = settingsNavigation
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) =>
+        `${group.label} ${item.label} ${item.description}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()),
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
+  const activeSettingsItem = settingsNavigation
+    .flatMap((group) => group.items.map((item) => ({ ...item, group: group.label })))
+    .find((item) => item.key === tab);
   return (
     <div className="modal-backdrop">
       <section className="settings-panel">
         <div className="panel-title">
           <div>
-            <p className="eyebrow">MAILBOX SETTINGS</p>
-            <h2>Settings & organization</h2>
+            <p className="eyebrow">PARCEL SETTINGS</p>
+            <h2>Settings</h2>
+            <p className="settings-subtitle">Tune your mailbox, account, and connected services.</p>
           </div>
           <button
             className="icon-button"
@@ -1775,28 +1818,48 @@ function SettingsPanel({
             <X size={18} />
           </button>
         </div>
-        <div className="settings-tabs">
-          {(
-            [
-              ["appearance", "Appearance"],
-              ["security", "Security & access"],
-              ["organize", "Folders & labels"],
-              ["contacts", "Contacts"],
-              ["spam", "Spam & trust"],
-              ["automation", "Rules & signatures"],
-              ["mailboxes", "Mailboxes"],
-              ["integrations", "Integrations"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              className={tab === key ? "active" : ""}
-              onClick={() => setTab(key)}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="settings-search" role="search">
+          <Search size={15} aria-hidden="true" />
+          <label className="sr-only" htmlFor="settings-search-input">Search settings</label>
+          <input
+            id="settings-search-input"
+            value={settingsQuery}
+            onChange={(event) => setSettingsQuery(event.target.value)}
+            placeholder="Search settings"
+            type="search"
+            aria-label="Search settings"
+          />
+          {settingsQuery && <button type="button" onClick={() => setSettingsQuery("")} aria-label="Clear settings search"><X size={13} /></button>}
         </div>
+        <div className="settings-layout">
+          <nav className="settings-tabs settings-sidebar" aria-label="Settings categories">
+            {filteredSettingsNavigation.length === 0 ? (
+              <div className="settings-nav-empty">No settings found.</div>
+            ) : filteredSettingsNavigation.map((group) => (
+              <div className="settings-nav-group" key={group.label}>
+                <p>{group.label}</p>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.key}
+                      className={tab === item.key ? "active" : ""}
+                      onClick={() => setTab(item.key)}
+                    >
+                      <Icon size={15} aria-hidden="true" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+          <main className="settings-content">
+            <div className="settings-content-head">
+              <p className="eyebrow">{activeSettingsItem?.group || "SETTINGS"}</p>
+              <h3>{activeSettingsItem?.label || "Settings"}</h3>
+              <p>{activeSettingsItem?.description || "Manage your mailbox preferences."}</p>
+            </div>
         {tab === "security" && securityError && <div className="settings-alert settings-error" role="alert">{securityError}</div>}
         {tab === "security" && (
           <div className="settings-grid security-settings-grid">
@@ -2555,7 +2618,9 @@ function SettingsPanel({
             </div>
           </div>
         )}
-        {notice && <div className="form-notice">{notice}</div>}
+          {notice && <div className="form-notice">{notice}</div>}
+          </main>
+        </div>
       </section>
     </div>
   );
