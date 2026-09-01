@@ -1448,8 +1448,19 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (rows[0]) {
       const status = statusMap[eventType];
       if (status) await dbRequest(env, `messages?id=eq.${encodeURIComponent(rows[0].id)}&owner_id=eq.${encodeURIComponent(rows[0].owner_id)}`, { method: "PATCH", body: JSON.stringify({ status }) });
-      const previousEvents = await dbRequest<Array<{ id: string }>>(env, `mail_events?provider=eq.brevo&provider_message_id=eq.${encodeURIComponent(providerMessageId)}&event_type=eq.${encodeURIComponent(eventType)}&select=id&limit=1`).catch(() => []);
-      if (!previousEvents[0]) await dbRequest(env, "mail_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: rows[0].owner_id, message_id: rows[0].id, provider: "brevo", event_type: eventType, provider_message_id: providerMessageId, payload: event }) });
+      const eventFilter = `mail_events?provider=eq.brevo&provider_message_id=eq.${encodeURIComponent(providerMessageId)}&event_type=eq.${encodeURIComponent(eventType)}&select=id&limit=1`;
+      const previousEvents = await dbRequest<Array<{ id: string }>>(env, eventFilter).catch(() => []);
+      if (!previousEvents[0]) {
+        try {
+          await dbRequest(env, "mail_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: rows[0].owner_id, message_id: rows[0].id, provider: "brevo", event_type: eventType, provider_message_id: providerMessageId, payload: event }) });
+        } catch (insertError) {
+          // Two provider deliveries can pass the read check together. If the
+          // unique index won the race, the event is already recorded and the
+          // webhook should still acknowledge it instead of returning 500.
+          const recordedAfterRace = await dbRequest<Array<{ id: string }>>(env, eventFilter).catch(() => []);
+          if (!recordedAfterRace[0]) throw insertError;
+        }
+      }
     }
     return json({ ok: true });
   }
