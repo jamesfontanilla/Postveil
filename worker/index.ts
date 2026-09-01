@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { DOMParser as WorkerDOMParser, Node as WorkerNode } from "@xmldom/xmldom";
 import { createClient } from "@supabase/supabase-js";
 import PostalMime from "postal-mime";
 import {
@@ -48,6 +49,10 @@ import {
   type TrustAuthResults,
   type TrustPolicy,
 } from "./trust.ts";
+
+const workerGlobal = globalThis as typeof globalThis & { DOMParser?: typeof WorkerDOMParser; Node?: typeof WorkerNode };
+if (typeof workerGlobal.DOMParser !== "function") workerGlobal.DOMParser = WorkerDOMParser;
+if (typeof workerGlobal.Node !== "function") workerGlobal.Node = WorkerNode;
 
 interface Env {
   ASSETS: Fetcher;
@@ -2160,7 +2165,10 @@ export default {
         return protectedHeaders(await api(request, env, ctx), false, env.SUPABASE_URL);
       } catch (requestError) {
         const requestId = crypto.randomUUID();
-        console.error("API request failed", { requestId, error: requestError });
+        const errorDetails = requestError instanceof Error
+          ? { name: requestError.name, message: requestError.message, stack: requestError.stack?.slice(0, 2000) }
+          : { value: String(requestError) };
+        console.error("API request failed", { requestId, error: errorDetails });
         const response = error(requestError instanceof RequestInputError ? requestError.message : "Internal server error", requestError instanceof RequestInputError ? requestError.status : 500);
         response.headers.set("x-request-id", requestId);
         return response;

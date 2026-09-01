@@ -154,6 +154,14 @@ revoke all on function public.consume_recovery_ip_rate_limit(text, integer, inte
 grant execute on function public.consume_recovery_email_rate_limit(text, integer, integer, integer) to service_role;
 grant execute on function public.consume_recovery_ip_rate_limit(text, integer, integer, integer) to service_role;
 
+-- The Worker talks to PostgREST with the server-only service_role key. Keep
+-- these grants server-side: authenticated clients remain governed by RLS.
+grant usage on schema public to service_role;
+grant select, insert, update, delete on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to service_role;
+alter default privileges in schema public grant select, insert, update, delete on tables to service_role;
+alter default privileges in schema public grant usage, select on sequences to service_role;
+
 -- Supabase may expose this helper in the public schema. Keep it unavailable
 -- to API roles while preserving the owner/service-role ability to use it.
 do $$
