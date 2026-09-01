@@ -109,4 +109,11 @@ Parcel includes mail workflow, local spam scoring, static attachment safety chec
 
 ## License
 
-No license has been selected for this repository yet. Add an OSI-approved license before presenting the project as open source; until then, the source is publicly viewable but reuse rights are not granted.
+Parcel is released under the [MIT License](LICENSE). The license grants reuse
+rights for the source code, but it does not provide a warranty, security
+guarantee, hosted service, provider account, domain, or permission to use
+third-party trademarks.
+
+Before publishing a deployment, operators must run the checks above, scan the
+full Git history for secrets, use separate provider accounts and storage, and
+rotate any credential that may have been exposed.
