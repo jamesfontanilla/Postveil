@@ -1432,9 +1432,18 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const providerMessageId = typeof event["message-id"] === "string"
       ? event["message-id"].trim().slice(0, 254)
       : typeof event.messageId === "string" ? event.messageId.trim().slice(0, 254) : "";
+    if (!providerMessageId) return error("Webhook event is missing message-id", 400);
     const eventType = String(event.event || "unknown").trim().toLowerCase().slice(0, 80) || "unknown";
-    const rows = providerMessageId ? await dbRequest<Array<{ id: string; owner_id: string }>>(env, `messages?provider_message_id=eq.${encodeURIComponent(providerMessageId)}&limit=1`) : [];
-    const statusMap: Record<string, string> = { delivered: "delivered", hard_bounce: "bounced", soft_bounce: "bounced", blocked: "failed", error: "failed" };
+    const rows = await dbRequest<Array<{ id: string; owner_id: string }>>(env, `messages?provider_message_id=eq.${encodeURIComponent(providerMessageId)}&limit=1`);
+    const statusMap: Record<string, string> = {
+      delivered: "delivered",
+      hard_bounce: "bounced",
+      hardbounce: "bounced",
+      soft_bounce: "bounced",
+      softbounce: "bounced",
+      blocked: "failed",
+      error: "failed",
+    };
     if (rows[0]) {
       const status = statusMap[eventType];
       if (status) await dbRequest(env, `messages?id=eq.${encodeURIComponent(rows[0].id)}&owner_id=eq.${encodeURIComponent(rows[0].owner_id)}`, { method: "PATCH", body: JSON.stringify({ status }) });
