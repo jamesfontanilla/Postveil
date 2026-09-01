@@ -1425,7 +1425,8 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (request.method !== "POST") return error("Method not allowed", 405);
     if (!hasCoreServiceConfig(env)) return error("Service temporarily unavailable", 503);
     const configuredSecret = env.BREVO_WEBHOOK_SECRET?.trim();
-    const suppliedSecret = request.headers.get("x-webhook-secret")?.trim();
+    const bearerSecret = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+    const suppliedSecret = request.headers.get("x-webhook-secret")?.trim() || bearerSecret;
     if (!configuredSecret || !suppliedSecret || suppliedSecret.length > 256 || !constantTimeEqual(suppliedSecret, configuredSecret)) return error("Unauthorized", 401);
     const event = await readJsonBody<JsonRecord>(request, MAX_WEBHOOK_BODY_BYTES);
     if (!event || typeof event !== "object" || Array.isArray(event)) return error("Invalid webhook payload");
