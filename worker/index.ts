@@ -2027,14 +2027,18 @@ async function handleDraft(env: Env, user: User, body: JsonRecord): Promise<Resp
 
 type SearchToken = { value: string; quoted: boolean; negated: boolean };
 type SearchTextPart = { value: string; negated: boolean };
-type SearchField = "from" | "to" | "cc" | "subject" | "filename" | "rfc822msgid";
+type SearchField = "from" | "to" | "cc" | "bcc" | "subject" | "filename" | "rfc822msgid";
 type SearchStateField = "is_read" | "is_starred" | "is_flagged" | "is_pinned" | "is_important" | "is_muted" | "is_ignored" | "has_attachment";
 type SearchFilter =
   | { kind: "field"; field: SearchField; value: string; negated: boolean }
   | { kind: "state"; field: SearchStateField; value: boolean; negated: boolean }
   | { kind: "folder"; value: string; negated: boolean }
   | { kind: "date"; operator: "after" | "before"; value: string; negated: boolean }
-  | { kind: "size"; operator: "larger" | "smaller"; bytes: number; negated: boolean };
+  | { kind: "size"; operator: "larger" | "smaller"; bytes: number; negated: boolean }
+  | { kind: "numeric"; field: "spam_score" | "link_count"; operator: "gt" | "gte" | "lt" | "lte" | "eq"; value: number; negated: boolean }
+  | { kind: "domain"; value: string; negated: boolean }
+  | { kind: "auth"; value: string; negated: boolean }
+  | { kind: "relation"; relation: "filetype" | "label" | "calendar" | "work" | "project"; value: string; negated: boolean };
 type ParsedSearch = { normalized: string; terms: SearchTextPart[]; phrases: SearchTextPart[]; filters: SearchFilter[] };
 
 function tokenizeSearch(value: string): SearchToken[] {
@@ -2047,20 +2051,20 @@ function tokenizeSearch(value: string): SearchToken[] {
     if (value[index] === "-") { negated = true; index += 1; }
     let token = "";
     let quoted = false;
-    while (index < value.length && !/\s/.test(value[index])) {
-      if (value[index] === '"') {
+    let inQuotes = false;
+    while (index < value.length) {
+      const character = value[index];
+      if (character === '"') {
         quoted = true;
+        inQuotes = !inQuotes;
         index += 1;
-        const start = index;
-        while (index < value.length && value[index] !== '"') index += 1;
-        if (index >= value.length) throw new Error("Unclosed quoted phrase");
-        token += value.slice(start, index);
-        index += 1;
-      } else {
-        token += value[index];
-        index += 1;
+        continue;
       }
+      if (!inQuotes && /\s/.test(character)) break;
+      token += character;
+      index += 1;
     }
+    if (inQuotes) throw new Error("Unclosed quoted phrase");
     if (!token.trim()) throw new Error("A negation must be followed by a search term");
     tokens.push({ value: token.trim(), quoted, negated });
   }
@@ -2097,8 +2101,38 @@ function parseSearchBytes(value: string, operator: string): number {
   return Math.round(Number(match[1]) * (multipliers[match[2] || "b"] || 1));
 }
 
+function expandNaturalLanguageSearch(input: string): string {
+  let value = input.trim();
+  value = value.replace(/\bwithout\s+(?:any\s+)?(?:attachments?|files?)\b/gi, "-has:attachment");
+  value = value.replace(/\bwith\s+(?:any\s+)?(?:attachments?|files?)\b/gi, "has:attachment");
+  value = value.replace(/\bwithout\s+(?:any\s+)?links?\b/gi, "-has:link");
+  value = value.replace(/\bwith\s+(?:any\s+)?links?\b/gi, "has:link");
+  value = value.replace(/\bnot\s+read\b/gi, "is:unread");
+  value = value.replace(/\bunread\b/gi, "is:unread");
+  value = value.replace(/\bread\s+messages?\b/gi, "is:read");
+  value = value.replace(/\bfrom\s+([\w.+-]+@[\w.-]+\.[a-z]{2,})\b/gi, "from:$1");
+  value = value.replace(/\bto\s+([\w.+-]+@[\w.-]+\.[a-z]{2,})\b/gi, "to:$1");
+  value = value.replace(/\b(?:in\s+)?the\s+last\s+(\d+)\s+(days?|weeks?|months?|years?)\b/gi, (_match, amount: string, unit: string) => {
+    const suffix = unit.toLowerCase().startsWith("day") ? "d" : unit.toLowerCase().startsWith("week") ? "w" : unit.toLowerCase().startsWith("month") ? "m" : "y";
+    return `after:${amount}${suffix}`;
+  });
+  value = value.replace(/\b(?:this|past)\s+week\b/gi, "after:7d");
+  value = value.replace(/\bold(?:er)?\s+than\s+(\d+(?:\.\d+)?\s*(?:kb|kib|mb|mib|gb|gib))\b/gi, "larger:$1");
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function parseSearchNumber(value: string, operator: string, field: "spam_score" | "link_count"): { operator: "gt" | "gte" | "lt" | "lte" | "eq"; value: number } {
+  const match = value.trim().match(/^(>=|<=|>|<|=)?\s*(\d+(?:\.\d+)?)(%)?$/);
+  if (!match) throw new Error(`${operator}: invalid number "${value}"`);
+  let number = Number(match[2]);
+  if (field === "spam_score" && (match[3] || number > 1)) number /= 100;
+  if (!Number.isFinite(number) || number < 0 || (field === "spam_score" && number > 1)) throw new Error(`${operator}: value must be between 0 and 1`);
+  const comparison = match[1] || "=";
+  return { operator: comparison === ">" ? "gt" : comparison === ">=" ? "gte" : comparison === "<" ? "lt" : comparison === "<=" ? "lte" : "eq", value: number };
+}
+
 function parseSearchQuery(input: string): ParsedSearch {
-  const query = input.trim();
+  const query = expandNaturalLanguageSearch(input);
   if (query.length > 1000) throw new Error("Search query is too long; keep it under 1,000 characters");
   const terms: SearchTextPart[] = [];
   const phrases: SearchTextPart[] = [];
@@ -2116,13 +2150,47 @@ function parseSearchQuery(input: string): ParsedSearch {
     const operand = token.value.slice(colon + 1).trim();
     if (!operand) throw new Error(`${operator}: needs a value`);
     normalized.push(`${token.negated ? "-" : ""}${operator}:${token.quoted ? `"${operand}"` : operand}`);
-    if (["from", "to", "cc", "subject", "filename", "rfc822msgid"].includes(operator)) {
+    if (["from", "to", "cc", "bcc", "subject", "filename", "rfc822msgid"].includes(operator)) {
       filters.push({ kind: "field", field: operator as SearchField, value: operand, negated: token.negated });
       continue;
     }
+    if (operator === "domain") {
+      filters.push({ kind: "domain", value: operand.toLowerCase().replace(/^@/, ""), negated: token.negated });
+      continue;
+    }
+    if (operator === "auth" || operator === "authentication") {
+      const authValue = operand.toLowerCase();
+      if (!["pass", "fail", "none", "neutral", "missing"].includes(authValue)) throw new Error(`auth: unsupported value "${operand}"; use pass, fail, none, neutral, or missing`);
+      filters.push({ kind: "auth", value: authValue, negated: token.negated });
+      continue;
+    }
+    if (["type", "filetype", "mime"].includes(operator)) {
+      filters.push({ kind: "relation", relation: "filetype", value: operand.toLowerCase().replace(/^\./, ""), negated: token.negated });
+      continue;
+    }
+    if (operator === "label") {
+      filters.push({ kind: "relation", relation: "label", value: operand, negated: token.negated });
+      continue;
+    }
+    if (operator === "calendar" || operator === "event") {
+      filters.push({ kind: "relation", relation: "calendar", value: operand, negated: token.negated });
+      continue;
+    }
+    if (operator === "work" || operator === "task") {
+      filters.push({ kind: "relation", relation: "work", value: operand.toLowerCase(), negated: token.negated });
+      continue;
+    }
+    if (operator === "project") {
+      filters.push({ kind: "relation", relation: "project", value: operand, negated: token.negated });
+      continue;
+    }
     if (operator === "has") {
-      if (operand.toLowerCase() !== "attachment") throw new Error(`has: unsupported value "${operand}"; use has:attachment`);
-      filters.push({ kind: "state", field: "has_attachment", value: true, negated: token.negated });
+      const hasValue = operand.toLowerCase();
+      if (["attachment", "attachments", "file", "files"].includes(hasValue)) filters.push({ kind: "state", field: "has_attachment", value: true, negated: token.negated });
+      else if (["link", "links"].includes(hasValue)) filters.push({ kind: "numeric", field: "link_count", operator: "gt", value: 0, negated: token.negated });
+      else if (["calendar", "event", "events"].includes(hasValue)) filters.push({ kind: "relation", relation: "calendar", value: "any", negated: token.negated });
+      else if (["work", "task", "tasks"].includes(hasValue)) filters.push({ kind: "relation", relation: "work", value: "any", negated: token.negated });
+      else throw new Error(`has: unsupported value "${operand}"; use attachment, link, calendar, or work`);
       continue;
     }
     if (operator === "is") {
@@ -2135,7 +2203,7 @@ function parseSearchQuery(input: string): ParsedSearch {
         muted: { field: "is_muted", value: true }, ignored: { field: "is_ignored", value: true },
       };
       const state = states[operand.toLowerCase()];
-      if (!state) throw new Error(`is: unsupported value "${operand}"; use unread, read, starred, flagged, or pinned`);
+      if (!state) throw new Error(`is: unsupported value "${operand}"; use unread, read, starred, flagged, pinned, important, muted, or ignored`);
       filters.push({ kind: "state", ...state, negated: token.negated });
       continue;
     }
@@ -2153,6 +2221,17 @@ function parseSearchQuery(input: string): ParsedSearch {
     }
     if (operator === "larger" || operator === "smaller") {
       filters.push({ kind: "size", operator, bytes: parseSearchBytes(operand, operator), negated: token.negated });
+      continue;
+    }
+    if (["spam", "spam_score", "risk", "score"].includes(operator)) {
+      filters.push({ kind: "numeric", field: "spam_score", ...parseSearchNumber(operand, operator, "spam_score"), negated: token.negated });
+      continue;
+    }
+    if (["links", "link_count"].includes(operator)) {
+      const linksValue = operand.toLowerCase();
+      if (["yes", "true", "present"].includes(linksValue)) filters.push({ kind: "numeric", field: "link_count", operator: "gt", value: 0, negated: token.negated });
+      else if (["no", "false", "none", "absent"].includes(linksValue)) filters.push({ kind: "numeric", field: "link_count", operator: "eq", value: 0, negated: token.negated });
+      else filters.push({ kind: "numeric", field: "link_count", ...parseSearchNumber(operand, operator, "link_count"), negated: token.negated });
       continue;
     }
     throw new Error(`Unknown search operator "${operator}:"`);
@@ -2181,11 +2260,13 @@ async function attachmentSearchIds(env: Env, ownerId: string, filters: SearchFil
   let include: Set<string> | null = null;
   const exclude = new Set<string>();
   for (const filter of filters) {
-    if (filter.kind !== "field" && filter.kind !== "size") continue;
-    const condition = filter.kind === "field"
+    if (filter.kind !== "field" && filter.kind !== "relation") continue;
+    const isFilename = filter.kind === "field" && filter.field === "filename";
+    const isFileType = filter.kind === "relation" && filter.relation === "filetype";
+    if (!isFilename && !isFileType) continue;
+    const condition = isFilename
       ? `filename=ilike.*${encodeURIComponent(safeLike(filter.value))}*`
-      : `${filter.operator === "larger" ? (filter.negated ? "byte_size=lte." : "byte_size=gt.") : (filter.negated ? "byte_size=gte." : "byte_size=lt.")}${filter.bytes}`;
-    if (filter.kind === "field" && filter.field !== "filename") continue;
+      : `or=${encodeURIComponent(`(content_type.ilike.*${safeLike(filter.value)}*,filename.ilike.*.${safeLike(filter.value)})`)}`;
     const rows = await dbRequest<Array<{ message_id: string }>>(env, `attachments?owner_id=eq.${encodeURIComponent(ownerId)}&${condition}&select=message_id&limit=10000`);
     const ids = new Set(rows.map((row) => row.message_id));
     if (filter.negated) ids.forEach((id) => exclude.add(id));
@@ -2198,6 +2279,81 @@ async function attachmentSearchIds(env: Env, ownerId: string, filters: SearchFil
   return { include: include ? [...include] : null, exclude: [...exclude] };
 }
 
+async function domainSearchIds(env: Env, ownerId: string, filters: SearchFilter[]): Promise<{ include: string[] | null; exclude: string[] }> {
+  let include: Set<string> | null = null;
+  const exclude = new Set<string>();
+  const domainFilters = filters.filter((filter): filter is Extract<SearchFilter, { kind: "domain" }> => filter.kind === "domain");
+  if (!domainFilters.length) return { include: null, exclude: [] };
+  const rows = await dbRequest<Array<{ id: string; from_address?: string; to_addresses?: unknown; cc_addresses?: unknown; bcc_addresses?: unknown }>>(
+    env,
+    `messages?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,from_address,to_addresses,cc_addresses,bcc_addresses&limit=10000`,
+  );
+  for (const filter of domainFilters) {
+    const domain = filter.value.toLowerCase().replace(/^@/, "");
+    const matchingIds = rows
+      .filter((row) => [String(row.from_address || ""), ...splitAddresses(row.to_addresses), ...splitAddresses(row.cc_addresses), ...splitAddresses(row.bcc_addresses)].some((address) => domainOf(address) === domain))
+      .map((row) => String(row.id));
+    const ids = new Set<string>(matchingIds);
+    if (filter.negated) ids.forEach((id) => exclude.add(id));
+    else if (include === null) include = ids;
+    else {
+      const currentInclude = include as Set<string>;
+      include = new Set<string>([...currentInclude].filter((id) => ids.has(id)));
+    }
+  }
+  return { include: include ? [...include] : null, exclude: [...exclude] };
+}
+
+async function relatedSearchIds(env: Env, ownerId: string, filters: SearchFilter[]): Promise<{ include: string[] | null; exclude: string[] }> {
+  let include: Set<string> | null = null;
+  const exclude = new Set<string>();
+  const apply = (ids: Set<string>, negated: boolean) => {
+    if (negated) ids.forEach((id) => exclude.add(id));
+    else if (include === null) include = ids;
+    else include = new Set<string>([...include].filter((id) => ids.has(id)));
+  };
+  for (const filter of filters) {
+    if (filter.kind !== "relation" || ["filetype"].includes(filter.relation)) continue;
+    let ids = new Set<string>();
+    if (filter.relation === "label") {
+      const labels = await dbRequest<Array<{ id: string }>>(env, `labels?owner_id=eq.${encodeURIComponent(ownerId)}&name=ilike.*${encodeURIComponent(safeLike(filter.value))}*&select=id&limit=100`);
+      if (labels.length) {
+        const labelIds = labels.map((row) => row.id).join(",");
+        const rows = await dbRequest<Array<{ message_id: string }>>(env, `message_labels?label_id=in.(${encodeURIComponent(labelIds)})&select=message_id&limit=10000`);
+        ids = new Set(rows.map((row) => row.message_id));
+      }
+    } else if (filter.relation === "calendar") {
+      const value = filter.value.toLowerCase();
+      const path = value === "any" || ["yes", "true", "present"].includes(value)
+        ? `calendar_events?owner_id=eq.${encodeURIComponent(ownerId)}&source_message_id=not.is.null&select=source_message_id&limit=10000`
+        : `calendar_events?owner_id=eq.${encodeURIComponent(ownerId)}&source_message_id=not.is.null&title=ilike.*${encodeURIComponent(safeLike(filter.value))}*&select=source_message_id&limit=10000`;
+      const rows = await dbRequest<Array<{ source_message_id?: string }>>(env, path);
+      ids = new Set(rows.map((row) => row.source_message_id).filter((id): id is string => Boolean(id)));
+    } else if (filter.relation === "work") {
+      const value = filter.value.toLowerCase();
+      if (["any", "yes", "true", "open", "task", "tasks"].includes(value)) {
+        const [tasks, messages] = await Promise.all([
+          dbRequest<Array<{ source_message_id?: string }>>(env, `tasks?owner_id=eq.${encodeURIComponent(ownerId)}&source_message_id=not.is.null&completed=eq.false&select=source_message_id&limit=10000`),
+          dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&work_state=neq.none&select=id&limit=10000`),
+        ]);
+        tasks.forEach((row) => { if (row.source_message_id) ids.add(row.source_message_id); });
+        messages.forEach((row) => ids.add(row.id));
+      } else if (["none", "reply_later", "waiting_on", "i_owe"].includes(value)) {
+        const rows = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&work_state=eq.${encodeURIComponent(value)}&select=id&limit=10000`);
+        ids = new Set(rows.map((row) => row.id));
+      } else {
+        const rows = await dbRequest<Array<{ source_message_id?: string }>>(env, `tasks?owner_id=eq.${encodeURIComponent(ownerId)}&source_message_id=not.is.null&title=ilike.*${encodeURIComponent(safeLike(filter.value))}*&select=source_message_id&limit=10000`);
+        ids = new Set(rows.map((row) => row.source_message_id).filter((id): id is string => Boolean(id)));
+      }
+    } else if (filter.relation === "project") {
+      const rows = await dbRequest<Array<{ source_message_id?: string }>>(env, `tasks?owner_id=eq.${encodeURIComponent(ownerId)}&source_message_id=not.is.null&title=ilike.*${encodeURIComponent(safeLike(filter.value))}*&select=source_message_id&limit=10000`);
+      ids = new Set(rows.map((row) => row.source_message_id).filter((id): id is string => Boolean(id)));
+    }
+    apply(ids, filter.negated);
+  }
+  return { include: include ? [...include] : null, exclude: [...exclude] };
+}
+
 type MailQueryOptions = { folder: string; query?: string; filter?: string; sort?: string; page?: number; pageSize?: number; mailboxIds?: string[] };
 
 async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptions): Promise<{ path: string; parsed?: ParsedSearch; page: number; pageSize: number; searchActive: boolean }> {
@@ -2205,7 +2361,7 @@ async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptio
   const parsed = query ? parseSearchQuery(query) : undefined;
   const page = Math.max(1, Math.min(100, Number(options.page || 1)));
   const pageSize = Math.max(10, Math.min(100, Number(options.pageSize || 80)));
-  const parts = [messageScopeFilter(ownerId, options.mailboxIds || []), "select=id,thread_id,mailbox_id,owner_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,is_important,is_muted,is_ignored,priority,has_attachment,spam_score,spam_reasons,trust_score,trust_reasons,screening_status,focused_score,focused_category,delivery_status,delivery_error_code,delivery_error,provider,provider_message_id,open_tracking_enabled,click_tracking_enabled,message_size_bytes,scheduled_at,next_delivery_at,snoozed_until,work_state,follow_up_at,work_note,reminder_at,reminder_note,unsubscribe_url,retention_expires_at,legal_hold,received_at,sent_at,created_at"];
+  const parts = [messageScopeFilter(ownerId, options.mailboxIds || []), "select=id,thread_id,mailbox_id,owner_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,message_id_header,is_read,is_starred,is_pinned,is_flagged,is_important,is_muted,is_ignored,priority,has_attachment,spam_score,spam_reasons,link_count,auth_spf,auth_dkim,auth_dmarc,auth_arc,auth_tls,trust_score,trust_reasons,screening_status,focused_score,focused_category,delivery_status,delivery_error_code,delivery_error,provider,provider_message_id,open_tracking_enabled,click_tracking_enabled,message_size_bytes,scheduled_at,next_delivery_at,snoozed_until,work_state,follow_up_at,work_note,reminder_at,reminder_note,unsubscribe_url,retention_expires_at,legal_hold,received_at,sent_at,created_at"];
   const explicitFolders = parsed?.filters.filter((filter): filter is Extract<SearchFilter, { kind: "folder" }> => filter.kind === "folder") || [];
   if (!parsed) {
     if (options.folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(options.folder.slice(7))}`); }
@@ -2233,7 +2389,7 @@ async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptio
       if (filter.kind === "field") {
         if (filter.field === "filename") continue;
         if (filter.field === "rfc822msgid") { parts.push(`message_id_header=${filter.negated ? "not.eq" : "eq"}.${encodeURIComponent(filter.value)}`); continue; }
-        if (filter.field === "to" || filter.field === "cc") {
+        if (filter.field === "to" || filter.field === "cc" || filter.field === "bcc") {
           const values = `{${safeLike(filter.value).replace(/[{}]/g, "")}}`;
           parts.push(`${filter.field}_addresses=${filter.negated ? "not.cs" : "cs"}.${encodeURIComponent(values)}`);
           continue;
@@ -2250,10 +2406,44 @@ async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptio
         const operator = filter.negated ? (after ? "lt" : "gte") : (after ? "gte" : "lt");
         parts.push(`created_at=${operator}.${encodeURIComponent(filter.value)}`);
       }
+      if (filter.kind === "size") {
+        const operator = filter.operator === "larger"
+          ? (filter.negated ? "lte" : "gt")
+          : (filter.negated ? "gte" : "lt");
+        parts.push(`message_size_bytes=${operator}.${filter.bytes}`);
+      }
+      if (filter.kind === "numeric") {
+        const inverted: Record<"gt" | "gte" | "lt" | "lte" | "eq", string> = { gt: "lte", gte: "lt", lt: "gte", lte: "gt", eq: "neq" };
+        const operator = filter.negated ? inverted[filter.operator] : filter.operator;
+        parts.push(`${filter.field}=${operator}.${filter.value}`);
+      }
+      if (filter.kind === "auth") {
+        const authFields = ["auth_spf", "auth_dkim", "auth_dmarc", "auth_arc", "auth_tls"];
+        const authValue = filter.value === "missing" ? "" : filter.value;
+        if (filter.value === "missing") {
+          const condition = filter.negated
+            ? `or=(${authFields.map((field) => `${field}.not.is.null`).join(",")})`
+            : `and=(${authFields.map((field) => `${field}.is.null`).join(",")})`;
+          parts.push(condition.startsWith("or=") ? `or=${encodeURIComponent(condition.slice(3))}` : `and=${encodeURIComponent(condition.slice(4))}`);
+        } else {
+          const condition = filter.negated
+            ? `and=(${authFields.map((field) => `${field}.not.eq.${authValue}`).join(",")})`
+            : `or=(${authFields.map((field) => `${field}.eq.${authValue}`).join(",")})`;
+          parts.push(condition.startsWith("or=") ? `or=${encodeURIComponent(condition.slice(3))}` : `and=${encodeURIComponent(condition.slice(4))}`);
+        }
+      }
     }
     const attachmentIds = await attachmentSearchIds(env, ownerId, parsed.filters);
-    if (attachmentIds.include) parts.push(`id=${encodeURIComponent(`in.(${attachmentIds.include.join(",")})`)}`);
-    if (attachmentIds.exclude.length) parts.push(`id=${encodeURIComponent(`not.in.(${attachmentIds.exclude.join(",")})`)}`);
+    const domainIds = await domainSearchIds(env, ownerId, parsed.filters);
+    const relatedIds = await relatedSearchIds(env, ownerId, parsed.filters);
+    const includeSets = [attachmentIds.include, domainIds.include, relatedIds.include].filter((ids): ids is string[] => Boolean(ids));
+    if (includeSets.length) {
+      let combined = new Set(includeSets[0]);
+      for (const ids of includeSets.slice(1)) combined = new Set([...combined].filter((id) => ids.includes(id)));
+      parts.push(combined.size ? `id=${encodeURIComponent(`in.(${[...combined].join(",")})`)}` : "id=eq.00000000-0000-0000-0000-000000000000");
+    }
+    const excludedIds = [...new Set([...attachmentIds.exclude, ...domainIds.exclude, ...relatedIds.exclude])];
+    if (excludedIds.length) parts.push(`id=${encodeURIComponent(`not.in.(${excludedIds.join(",")})`)}`);
   }
   const listFilter = options.filter || "all";
   if (listFilter === "unread") parts.push("is_read=eq.false");
@@ -2261,6 +2451,57 @@ async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptio
   if (listFilter === "attachments") parts.push("has_attachment=eq.true");
   parts.push(`order=${options.sort === "oldest" ? "created_at.asc,id.asc" : "created_at.desc,id.desc"}`, `offset=${(page - 1) * pageSize}`, `limit=${pageSize + 1}`);
   return { path: `messages?${parts.join("&")}`, parsed, page, pageSize, searchActive: Boolean(parsed) };
+}
+
+type SearchHistoryRow = { id: string; owner_id: string; query: string; normalized_query: string; usage_count: number; last_used_at: string; created_at: string };
+type SearchSuggestion = { kind: "recent" | "saved" | "label" | "contact" | "syntax"; value: string; label: string; detail?: string };
+
+async function recordSearchHistory(env: Env, ownerId: string, query: string): Promise<SearchHistoryRow> {
+  const parsed = parseSearchQuery(query);
+  const normalized = parsed.normalized.slice(0, 1000);
+  const now = new Date().toISOString();
+  const existing = await dbRequest<SearchHistoryRow[]>(env, `search_history?owner_id=eq.${encodeURIComponent(ownerId)}&normalized_query=eq.${encodeURIComponent(normalized)}&limit=1`);
+  if (existing[0]) {
+    const rows = await dbRequest<SearchHistoryRow[]>(env, `search_history?id=eq.${encodeURIComponent(existing[0].id)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ query: query.slice(0, 1000), usage_count: Math.min(1000000, Number(existing[0].usage_count || 0) + 1), last_used_at: now }) });
+    return rows[0] || { ...existing[0], query, last_used_at: now, usage_count: Number(existing[0].usage_count || 0) + 1 };
+  }
+  const rows = await dbRequest<SearchHistoryRow[]>(env, "search_history", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, query: query.slice(0, 1000), normalized_query: normalized, usage_count: 1, last_used_at: now }) });
+  return rows[0];
+}
+
+async function searchSuggestions(env: Env, ownerId: string, input: string): Promise<SearchSuggestion[]> {
+  const needle = input.trim().toLowerCase();
+  const [history, saved, labels, contacts] = await Promise.all([
+    dbRequest<SearchHistoryRow[]>(env, `search_history?owner_id=eq.${encodeURIComponent(ownerId)}&order=last_used_at.desc&limit=8`).catch(() => []),
+    dbRequest<Array<{ name: string; query: string }>>(env, `saved_searches?owner_id=eq.${encodeURIComponent(ownerId)}&order=sort_order.asc,name.asc&limit=20`).catch(() => []),
+    dbRequest<Array<{ name: string }>>(env, `labels?owner_id=eq.${encodeURIComponent(ownerId)}&order=name.asc&limit=20`).catch(() => []),
+    dbRequest<Array<{ display_name?: string; email: string }>>(env, `contacts?owner_id=eq.${encodeURIComponent(ownerId)}&order=display_name.asc&limit=20`).catch(() => []),
+  ]);
+  const suggestions: SearchSuggestion[] = [];
+  const add = (suggestion: SearchSuggestion) => {
+    if (suggestions.some((item) => item.value.toLowerCase() === suggestion.value.toLowerCase())) return;
+    if (needle && !`${suggestion.value} ${suggestion.label} ${suggestion.detail || ""}`.toLowerCase().includes(needle)) return;
+    suggestions.push(suggestion);
+  };
+  history.forEach((item) => add({ kind: "recent", value: item.query, label: item.query, detail: `${item.usage_count} use${item.usage_count === 1 ? "" : "s"}` }));
+  saved.forEach((item) => add({ kind: "saved", value: item.query, label: item.name, detail: item.query }));
+  labels.forEach((item) => add({ kind: "label", value: `label:${item.name}`, label: `Label: ${item.name}` }));
+  contacts.forEach((item) => add({ kind: "contact", value: `from:${item.email}`, label: item.display_name || item.email, detail: item.email }));
+  [
+    ["from:", "Sender"], ["to:", "Recipient"], ["subject:", "Subject"], ["filename:", "Attachment name"], ["type:", "File type"],
+    ["label:", "Label"], ["in:", "Folder"], ["domain:", "Domain"], ["auth:pass", "Authentication passed"], ["is:unread", "Unread"],
+    ["has:attachment", "Has attachments"], ["has:calendar", "Has calendar event"], ["has:work", "Has follow-up work"], ["spam:>70%", "Spam score"],
+    ["links:>0", "Has links"], ["after:7d", "Recent messages"], ["larger:5MB", "Message size"], ["work:reply_later", "Work state"], ["project:", "Project or task"],
+  ].forEach(([value, label]) => add({ kind: "syntax", value, label: String(label), detail: String(value) }));
+  return suggestions.slice(0, 12);
+}
+
+function exportSearchRows(rows: JsonRecord[], format: "csv" | "json"): { body: string; contentType: string; extension: string } {
+  const fields = ["created_at", "folder", "from_address", "to_addresses", "subject", "message_size_bytes", "spam_score", "auth_spf", "auth_dkim", "auth_dmarc", "link_count", "has_attachment", "work_state"];
+  if (format === "json") return { body: JSON.stringify(rows.map((row) => Object.fromEntries(fields.map((field) => [field, row[field] ?? null]))), null, 2), contentType: "application/json; charset=utf-8", extension: "json" };
+  const lines = [fields.join(",")];
+  rows.forEach((row) => lines.push(fields.map((field) => csvCell(Array.isArray(row[field]) ? row[field].join("; ") : row[field])).join(",")));
+  return { body: `${lines.join("\n")}\n`, contentType: "text/csv; charset=utf-8", extension: "csv" };
 }
 
 async function dbRequestCount(env: Env, path: string, token?: string): Promise<number | null> {
@@ -2674,6 +2915,25 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
   }
 
+  if (request.method === "GET" && url.pathname === "/api/search/history") {
+    const rows = await dbRequest<SearchHistoryRow[]>(env, `search_history?owner_id=eq.${encodeURIComponent(user.id)}&order=last_used_at.desc&limit=20`).catch(() => []);
+    return json(rows);
+  }
+  if (request.method === "POST" && url.pathname === "/api/search/history") {
+    const body = (await request.json()) as JsonRecord;
+    const queryText = String(body.query || "").trim().slice(0, 1000);
+    if (!queryText) return error("Search query is required");
+    try { return json(await recordSearchHistory(env, user.id, queryText), 201); }
+    catch (historyError) { return error(historyError instanceof Error ? historyError.message : "Search history could not be saved", 400); }
+  }
+  if (request.method === "DELETE" && url.pathname === "/api/search/history") {
+    await dbRequest(env, `search_history?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" }).catch(() => undefined);
+    return json({ ok: true });
+  }
+  if (request.method === "GET" && url.pathname === "/api/search/suggestions") {
+    return json(await searchSuggestions(env, user.id, url.searchParams.get("q") || ""));
+  }
+
   if (request.method === "GET" && url.pathname === "/api/saved-searches") {
     const rows = await dbRequest<JsonRecord[]>(env, `saved_searches?owner_id=eq.${encodeURIComponent(user.id)}&order=sort_order.asc,name.asc`);
     if (url.searchParams.get("counts") !== "true") return json(rows);
@@ -2724,6 +2984,34 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const allowed = new Set(existing.map((row) => row.id));
     await Promise.all(ids.filter((id) => allowed.has(id)).map((id, index) => dbRequest(env, `saved_searches?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ sort_order: index, updated_at: new Date().toISOString() }) })));
     return json({ ok: true });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/mail/export") {
+    try {
+      const requestedFormat = (url.searchParams.get("format") || "csv").toLowerCase();
+      if (requestedFormat !== "csv" && requestedFormat !== "json") return error("Export format must be csv or json", 400);
+      const format = requestedFormat as "csv" | "json";
+      const exportRows: JsonRecord[] = [];
+      for (let pageNumber = 1; pageNumber <= 50; pageNumber += 1) {
+        const query = await buildMailQuery(env, user.id, {
+          folder: url.searchParams.get("folder") || "inbox",
+          query: url.searchParams.get("q") || "",
+          filter: url.searchParams.get("filter") || "all",
+          sort: url.searchParams.get("sort") || "newest",
+          page: pageNumber,
+          pageSize: 100,
+          mailboxIds: await delegatedMailboxIds(env, user.id, "read"),
+        });
+        const rows = await dbRequest<JsonRecord[]>(env, query.path);
+        const hasMore = rows.length > query.pageSize;
+        exportRows.push(...(hasMore ? rows.slice(0, query.pageSize) : rows));
+        if (!hasMore || exportRows.length >= 5000) break;
+      }
+      const exported = exportSearchRows(exportRows.slice(0, 5000), format);
+      return new Response(exported.body, { headers: { "content-type": exported.contentType, "content-disposition": `attachment; filename="postveil-search-${new Date().toISOString().slice(0, 10)}.${exported.extension}"`, "cache-control": "no-store" } });
+    } catch (exportError) {
+      return error(exportError instanceof Error ? exportError.message : "Search results could not be exported", 400);
+    }
   }
 
   if (request.method === "GET" && url.pathname === "/api/mail") {
