@@ -1016,3 +1016,143 @@ button, a, input, select, textarea { touch-action: manipulation; }
   .message-detail { padding-left: 13px; padding-right: 13px; }
   .detail-actions { margin-left: -13px; margin-right: -13px; padding-left: 13px; padding-right: 13px; }
 }
+
+/* Settings workbench: ruled, calm, and task-led instead of a grid of floating tiles. */
+.settings-panel {
+  width: min(980px, 100%);
+  border-color: color-mix(in srgb, var(--ink) 18%, var(--line));
+  border-radius: 4px;
+  background: var(--canvas);
+  box-shadow: 0 28px 80px rgba(23, 33, 31, .2);
+  padding: 30px 34px 34px;
+}
+.settings-panel .panel-title {
+  align-items: center;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 17px;
+}
+.settings-panel .panel-title h2 {
+  font-size: 26px;
+  letter-spacing: -.045em;
+}
+.settings-panel .panel-title .icon-button {
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--surface);
+}
+.settings-panel .settings-tabs {
+  gap: 0;
+  margin: 0 -34px;
+  padding: 0 26px;
+  border-bottom: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--surface) 60%, var(--canvas));
+}
+.settings-panel .settings-tabs button {
+  position: relative;
+  border-bottom: 0;
+  padding: 14px 10px 13px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+.settings-panel .settings-tabs button::after {
+  position: absolute;
+  right: 10px;
+  bottom: -1px;
+  left: 10px;
+  height: 3px;
+  background: transparent;
+  content: "";
+}
+.settings-panel .settings-tabs button.active {
+  border-color: transparent;
+  color: var(--ink);
+}
+.settings-panel .settings-tabs button.active::after { background: var(--accent); }
+.settings-panel .settings-grid {
+  align-items: stretch;
+  gap: 0 34px;
+}
+.settings-panel .setting-card {
+  position: relative;
+  min-width: 0;
+  gap: 13px;
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  border-radius: 0;
+  background: transparent;
+  padding: 22px 0 26px;
+}
+.settings-panel .setting-card::before {
+  position: absolute;
+  top: 22px;
+  left: -10px;
+  width: 3px;
+  height: 18px;
+  background: var(--line-strong);
+  content: "";
+}
+.settings-panel .setting-card:focus-within::before { background: var(--accent); }
+.settings-panel .setting-card h3 {
+  color: var(--ink);
+  font-size: 15px;
+  letter-spacing: -.02em;
+}
+.settings-panel .setting-card p {
+  max-width: 54ch;
+  margin: 1px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.settings-panel .setting-card-head > svg { margin-top: 2px; color: var(--accent); opacity: .72; }
+.settings-panel .setting-card input,
+.settings-panel .setting-card textarea,
+.settings-panel .setting-card select {
+  background: var(--surface);
+}
+.settings-panel .setting-card .choice-row button {
+  border-radius: 3px;
+  background: var(--surface);
+}
+.settings-panel .setting-card .settings-item,
+.settings-panel .setting-card .integration-row {
+  border-top-color: var(--line-strong);
+  padding-top: 12px;
+}
+.settings-panel .rule-count,
+.settings-panel .security-status {
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--surface);
+}
+.settings-panel .rule-count { min-width: 30px; height: 26px; }
+.settings-panel .security-status.enabled { border-color: #8dc7a5; background: #eef8f1; }
+.settings-panel .security-status.pending { border-color: #e2bf79; background: #fff8e8; }
+.settings-panel .rule-builder-card,
+.settings-panel .rules-list-card,
+.settings-panel .rule-lab-panel { grid-column: 1 / -1; }
+.settings-panel .rule-lab-panel {
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent-soft) 35%, var(--canvas));
+  padding: 22px;
+}
+.settings-panel .rule-lab-panel::before { top: 22px; left: 0; background: var(--accent); }
+.settings-panel .rule-lab-panel .rule-impact-grid div { border-radius: 3px; background: var(--surface); }
+.settings-panel .settings-alert { border-radius: 3px; }
+
+@media (max-width: 720px) {
+  .settings-panel { border-radius: 0; padding: calc(20px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom)); }
+  .settings-panel .panel-title { margin: calc(-1 * (20px + env(safe-area-inset-top))) -18px 0; padding: calc(20px + env(safe-area-inset-top)) 18px 13px; }
+  .settings-panel .settings-tabs { margin-left: -18px; margin-right: -18px; padding-left: 12px; padding-right: 12px; }
+  .settings-panel .settings-tabs button { padding-left: 9px; padding-right: 9px; }
+  .settings-panel .settings-tabs button::after { right: 9px; left: 9px; }
+  .settings-panel .setting-card { padding-top: 20px; padding-bottom: 23px; }
+  .settings-panel .setting-card::before { top: 20px; left: -8px; }
+  .settings-panel .rule-lab-panel { padding: 18px 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel .settings-tabs button::after { transition: none; }
+}
