@@ -13,10 +13,12 @@
     "test:phase1": "node --experimental-strip-types --test tests/phase1-search.test.ts",
     "test:phase2": "node --experimental-strip-types --test tests/phase2-rules-work.test.ts",
     "test:phase3": "node --experimental-strip-types --test tests/phase3-send-attachments.test.ts",
-    "test:phase4": "node --experimental-strip-types --test tests/phase4-trust-screening.test.ts"
+    "test:phase4": "node --experimental-strip-types --test tests/phase4-trust-screening.test.ts",
+    "test:delivery": "node --experimental-strip-types --test tests/delivery.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.879.0",
+    "@aws-sdk/client-sesv2": "^3.879.0",
     "@aws-sdk/s3-request-presigner": "^3.879.0",
     "@supabase/supabase-js": "^2.105.0",
     "dompurify": "^3.4.14",

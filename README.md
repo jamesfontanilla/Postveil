@@ -7,7 +7,8 @@ Parcel is a small, personal webmail application for `jamesfontanilla.com`.
 - Cloudflare Email Routing sends inbound mail to the email Worker.
 - The Worker parses MIME messages, stores metadata in Supabase Postgres, and stores raw messages/attachments in a private Backblaze B2 bucket.
 - Supabase Auth provides the application session and Row Level Security protects direct database access.
-- Brevo sends outbound messages and can call the webhook endpoint with delivery events.
+- The Worker supports Brevo, Amazon SES, Mailgun, Postmark, SendGrid, and an HTTPS generic-SMTP relay. Providers are selected by priority and fail over when a provider is unavailable.
+- Provider webhooks update delivery state, bounce/complaint suppression, reputation, and the message timeline with replay protection.
 - The same Worker serves the built responsive web app through Cloudflare Workers Assets.
 
 ## Local development
@@ -58,6 +59,26 @@ INBOUND_SHARED_SECRET
 BREVO_WEBHOOK_SECRET
 INTERNAL_TEST_TOKEN
 OUTLOOK_FORWARD_TO (optional)
+AWS_ACCESS_KEY_ID (optional, SES)
+AWS_SECRET_ACCESS_KEY (optional, SES)
+AWS_SES_REGION (optional, defaults to us-east-1)
+MAILGUN_API_KEY (optional)
+MAILGUN_DOMAIN (optional)
+MAILGUN_BASE_URL (optional)
+POSTMARK_SERVER_TOKEN (optional)
+POSTMARK_MESSAGE_STREAM (optional)
+SENDGRID_API_KEY (optional)
+SMTP_RELAY_URL (optional HTTPS relay; Workers cannot open arbitrary SMTP TCP connections)
+SMTP_USERNAME (optional)
+SMTP_PASSWORD (optional)
+MAX_EMAIL_BYTES (optional, default 10485760)
+MAX_RECIPIENTS (optional, default 50)
+MAX_RETRY_ATTEMPTS (optional, default 5)
+MAILGUN_WEBHOOK_SIGNING_KEY (optional)
+POSTMARK_WEBHOOK_SECRET (optional)
+SENDGRID_WEBHOOK_SECRET (optional)
+SES_WEBHOOK_SECRET (optional)
+SMTP_WEBHOOK_SECRET (optional)
 ```
 
 The Backblaze bucket should be private. The application uses short-lived signed URLs for attachment downloads and Brevo attachment fetches.
@@ -79,9 +100,16 @@ The Backblaze bucket should be private. The application uses short-lived signed 
 - `/api/auto-replies` — vacation-response configuration
 - `/api/integrations` — provider connection metadata
 - `/api/drafts` — autosaved drafts
-- `/api/send` — authenticated Brevo send with threading, CC/BCC, attachments, and scheduled send
+- `/api/send` — authenticated provider-routed send with threading, CC/BCC, attachments, quotas, suppression checks, tracking controls, and scheduled send
 - `/api/attachments` — private B2 upload and signed download URLs
-- `/api/webhooks/brevo` — delivery-status callback
+- `/api/webhooks/:provider` — provider delivery callback with idempotency and replay protection
+- `/api/webhooks/inbound/:provider` — normalized inbound webhook adapter
+- `/api/mail/:id/inspection` — delivery attempts, provider events, headers, and MIME metadata
+- `/api/mail/:id/source` — authorization-checked raw RFC 822 source
+- `/api/delivery/overview` — delivery health for the signed-in workspace
+- `/api/admin/delivery-ops` — administrator delivery queue, provider, and reputation dashboard
+- `/api/admin/providers` — provider routing priority and non-secret adapter configuration
+- `/api/admin/domains/:domain` — per-domain quota and reputation controls
 - `/api/internal/send-test` — secret-protected smoke test only
 - `/api/admin/overview` — workspace administration dashboard data
 - `/api/admin/organization` — organization defaults and inactivity policy
@@ -97,7 +125,10 @@ attachment safety checks, custom organization, scheduled send, snooze, PWA
 shell, polling, optional Supabase Realtime updates, mailbox administration,
 delegated mailboxes, and organization group-address expansion. Passkeys use
 the experimental Supabase Auth passkey API and require the corresponding Auth
-configuration in the target project. Provider-specific
+configuration in the target project. Outbound provider credentials and inbound
+webhook signing secrets are intentionally Worker-only. The HTTPS generic SMTP
+adapter requires a relay because Cloudflare Workers do not provide arbitrary
+outbound TCP sockets. Provider-specific
 Google/Microsoft calendar, OneDrive, Teams, AI, push delivery, and third-party
 antivirus scanning still require provider credentials or a separately operated
 service; the UI exposes these as integration points rather than pretending they

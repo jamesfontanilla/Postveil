@@ -119,6 +119,27 @@ type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
   work_note?: string | null;
   received_at?: string;
   sent_at?: string;
+  provider?: string | null;
+  provider_message_id?: string | null;
+  provider_event_id?: string | null;
+  delivery_status?: string | null;
+  delivery_error_code?: string | null;
+  delivery_error?: string | null;
+  next_delivery_at?: string | null;
+  delivered_at?: string | null;
+  delayed_at?: string | null;
+  bounced_at?: string | null;
+  complained_at?: string | null;
+  opened_at?: string | null;
+  clicked_at?: string | null;
+  delayed_count?: number;
+  message_size_bytes?: number;
+  max_size_bytes?: number;
+  open_tracking_enabled?: boolean;
+  click_tracking_enabled?: boolean;
+  raw_object_key?: string | null;
+  raw_headers?: Array<{ key?: string; value?: string }>;
+  mime_parts?: Array<Record<string, unknown>>;
   created_at: string;
   attachments?: Array<{
     id: string;
@@ -178,6 +199,7 @@ type SenderPolicy = {
 };
 type ScreeningEvent = { id: string; decision: string; previous_folder?: string | null; created_at: string; restored_at?: string | null };
 type TrustData = Message & { screening_history?: ScreeningEvent[] };
+type DeliveryInspection = { message: Message; attempts: Array<Record<string, unknown>>; events: Array<Record<string, unknown>> };
 type Signature = {
   id: string;
   name: string;
@@ -287,6 +309,12 @@ type AdminOverview = {
   activity: AdminActivity[];
   groups: AdminGroup[];
   stats: { users: number; active_users: number; suspended_users: number; mailboxes: number; storage_used_bytes: number };
+};
+type DeliveryOpsView = {
+  providers: Array<{ provider: string; label: string; configured: boolean; circuit?: { status?: string; consecutive_failures?: number; last_latency_ms?: number; circuit_open_until?: string | null } | null }>;
+  domains: Array<{ domain: string; score?: number; status?: string; sent_count?: number; bounced_count?: number; complaint_count?: number; daily_limit?: number; sent_used_today?: number }>;
+  queue: { queued: number; retrying: number; running: number; dead: number };
+  recentAttempts: Array<{ id?: string; provider?: string; status?: string; error_message?: string; started_at?: string }>;
 };
 type Task = {
   id: string;
@@ -740,6 +768,8 @@ function Compose({
   const [isDragging, setIsDragging] = useState(false);
   const [showCcBcc, setShowCcBcc] = useState(Boolean(seed?.cc));
   const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [openTrackingEnabled, setOpenTrackingEnabled] = useState(false);
+  const [clickTrackingEnabled, setClickTrackingEnabled] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [error, setError] = useState("");
@@ -870,6 +900,8 @@ function Compose({
           inReplyTo: seed?.inReplyTo,
           references: seed?.references,
           attachments,
+          openTrackingEnabled,
+          clickTrackingEnabled,
         }),
       });
       onSent();
@@ -1081,8 +1113,8 @@ function Compose({
               </select>
             </label>
           )}
-          {showMoreOptions && (
-            <label className="schedule-field">
+           {showMoreOptions && (
+             <label className="schedule-field">
               <Clock3 size={14} aria-hidden="true" />
               <span>Send later</span>
               <input
@@ -1090,10 +1122,16 @@ function Compose({
                 value={scheduledAt}
                 onChange={(event) => setScheduledAt(event.target.value)}
                 aria-label="Schedule send"
-              />
-            </label>
-          )}
-        </div>
+               />
+             </label>
+           )}
+           {showMoreOptions && (
+             <div className="compose-tracking-controls" aria-label="Tracking controls">
+               <label className="checkbox-row"><input type="checkbox" checked={openTrackingEnabled} onChange={(event) => setOpenTrackingEnabled(event.target.checked)} /> Track opens</label>
+               <label className="checkbox-row"><input type="checkbox" checked={clickTrackingEnabled} onChange={(event) => setClickTrackingEnabled(event.target.checked)} /> Track link clicks</label>
+             </div>
+           )}
+         </div>
         <div
           className={`attachment-dropzone${isDragging ? " is-dragging" : ""}`}
           role="group"
@@ -1205,6 +1243,7 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [deliveryOps, setDeliveryOps] = useState<DeliveryOpsView | null>(null);
   const [search, setSearch] = useState("");
   const [orgName, setOrgName] = useState("");
   const [inactivityDays, setInactivityDays] = useState("90");
@@ -1244,6 +1283,7 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
     try {
       const data = await apiFetch<AdminOverview>("/api/admin/overview");
       setOverview(data);
+      setDeliveryOps(await apiFetch<DeliveryOpsView>("/api/admin/delivery-ops").catch(() => null));
       setOrgName(data.organization.name);
       const settings = data.organization.settings || {};
       setInactivityDays(String(settings.inactivity_days ?? 90));
@@ -1456,6 +1496,7 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
       {error && <div className="settings-alert settings-error" role="alert">{error}</div>}
       {notice && <div className="form-notice" role="status">{notice}</div>}
       <div className="admin-stats"><div><strong>{overview.stats.users}</strong><span>Accounts</span></div><div><strong>{overview.stats.active_users}</strong><span>Active</span></div><div><strong>{overview.stats.mailboxes}</strong><span>Mailboxes</span></div><div><strong>{formatBytes(overview.stats.storage_used_bytes)}</strong><span>Storage used</span></div></div>
+      {deliveryOps && <div className="setting-card delivery-ops-card"><div className="setting-card-head"><div><h3>Delivery operations</h3><p>Provider readiness, queue health, and reputation signals. Provider credentials never appear here.</p></div><RefreshCcw size={18} aria-hidden="true" /></div><div className="delivery-ops-grid">{deliveryOps.providers.map((provider) => <div className="delivery-provider" key={provider.provider}><div><strong>{provider.label}</strong><small>{provider.configured ? provider.circuit?.status || "ready" : "not configured"}</small></div><span className={`admin-badge ${provider.configured ? provider.circuit?.status === "circuit_open" ? "suspended" : "active" : "member"}`}>{provider.configured ? provider.circuit?.status || "ready" : "off"}</span></div>)}</div><div className="delivery-queue-stats"><span>{deliveryOps.queue.queued} queued</span><span>{deliveryOps.queue.retrying} retrying</span><span>{deliveryOps.queue.dead} dead-letter</span></div>{deliveryOps.domains.length > 0 && <div className="reputation-list"><strong>Sending-domain reputation</strong>{deliveryOps.domains.map((domain) => <div className="settings-item" key={domain.domain}><div><strong>{domain.domain}</strong><small>{domain.sent_count || 0} sent · {domain.bounced_count || 0} bounces · {domain.complaint_count || 0} complaints</small></div><span className={`admin-badge ${domain.status === "healthy" ? "active" : "security"}`}>{domain.status || "unknown"} · {Math.round(Number(domain.score || 0) * 100)}%</span></div>)}</div>}{deliveryOps.recentAttempts.some((attempt) => attempt.status === "failed") && <div className="delivery-error"><strong>Recent delivery failures</strong><span>{deliveryOps.recentAttempts.filter((attempt) => attempt.status === "failed").slice(0, 3).map((attempt) => `${attempt.provider || "provider"}: ${attempt.error_message || "failed"}`).join(" · ")}</span></div>}</div>}
       <div className="admin-grid">
         <div className="setting-card"><div className="setting-card-head"><div><h3>{overview.organization.name}</h3><p>Organization defaults apply to new mailbox accounts.</p></div><Users size={18} aria-hidden="true" /></div><label>Workspace name<input value={orgName} onChange={(event) => setOrgName(event.target.value)} /></label><div className="admin-form-row"><label>Inactivity days<input type="number" min="0" max="3650" value={inactivityDays} onChange={(event) => setInactivityDays(event.target.value)} /></label><label>Inactive account action<select value={inactivityAction} onChange={(event) => setInactivityAction(event.target.value)}><option value="notify">Notify only</option><option value="suspend">Suspend automatically</option></select></label></div><div className="admin-form-row"><label>Default quota (GB)<input type="number" min="0" step="0.5" value={defaultQuotaGb} onChange={(event) => setDefaultQuotaGb(event.target.value)} /></label><label>Daily sending limit<input type="number" min="0" value={defaultSendingLimit} onChange={(event) => setDefaultSendingLimit(event.target.value)} /></label></div><label className="toggle-row"><input type="checkbox" checked={requireMfa} onChange={(event) => setRequireMfa(event.target.checked)} /> Require two-step verification for this workspace</label><button className="primary-button" onClick={() => void saveOrganization()} disabled={busy}>Save workspace settings</button></div>
         <form className="setting-card" onSubmit={(event) => void createUser(event)}><div className="setting-card-head"><div><h3>Create mailbox account</h3><p>Invite a person, create their mailbox, and apply limits immediately.</p></div><Plus size={18} aria-hidden="true" /></div><label>Login email<input type="email" required value={newEmail} onChange={(event) => setNewEmail(event.target.value)} placeholder="person@example.com" /></label><label>Display name<input value={newDisplayName} onChange={(event) => setNewDisplayName(event.target.value)} placeholder="Person name" /></label><label>Mailbox address<input type="email" value={newMailboxAddress} onChange={(event) => setNewMailboxAddress(event.target.value)} placeholder="person@your-domain.com" /></label><div className="admin-form-row"><label>Workspace role<select value={newRole} onChange={(event) => setNewRole(event.target.value as "member" | "admin")}><option value="member">Member</option><option value="admin">Administrator</option></select></label><label className="toggle-row"><input type="checkbox" checked={newRequireMfa} onChange={(event) => setNewRequireMfa(event.target.checked)} /> Require 2FA</label></div><button className="primary-button" disabled={busy}><Plus size={15} /> Create and invite</button></form>
@@ -3233,6 +3274,9 @@ function MailboxApp({ session }: { session: Session }) {
   const [trustLensOpen, setTrustLensOpen] = useState(false);
   const [trustLensBusy, setTrustLensBusy] = useState(false);
   const [trustData, setTrustData] = useState<TrustData | null>(null);
+  const [deliveryInspection, setDeliveryInspection] = useState<DeliveryInspection | null>(null);
+  const [deliveryInspectionOpen, setDeliveryInspectionOpen] = useState(false);
+  const [deliveryInspectionBusy, setDeliveryInspectionBusy] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [trashBusy, setTrashBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -3589,11 +3633,14 @@ function MailboxApp({ session }: { session: Session }) {
     setThreadMessages([]);
     setTrustLensOpen(false);
     setTrustData(null);
+    setDeliveryInspectionOpen(false);
+    setDeliveryInspection(null);
     setShowMoreActions(false);
     try {
       const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
       if (detailRequestRef.current !== requestId) return;
       setSelected(detail);
+      void apiFetch<DeliveryInspection>(`/api/mail/${message.id}/inspection`).then(setDeliveryInspection).catch(() => undefined);
       const thread = await apiFetch<Message[]>(`/api/threads/${message.thread_id}`);
       if (detailRequestRef.current !== requestId) return;
       setThreadMessages(thread);
@@ -3627,6 +3674,28 @@ function MailboxApp({ session }: { session: Session }) {
     try { setTrustData(await apiFetch<TrustData>(`/api/mail/${selected.id}/trust`)); }
     catch (trustError) { setError(trustError instanceof Error ? trustError.message : "Trust details unavailable"); }
     finally { setTrustLensBusy(false); }
+  }
+  async function toggleDeliveryInspection() {
+    if (!selected) return;
+    if (deliveryInspectionOpen) { setDeliveryInspectionOpen(false); return; }
+    setDeliveryInspectionOpen(true);
+    if (deliveryInspection) return;
+    setDeliveryInspectionBusy(true);
+    try { setDeliveryInspection(await apiFetch<DeliveryInspection>(`/api/mail/${selected.id}/inspection`)); }
+    catch (inspectionError) { setError(inspectionError instanceof Error ? inspectionError.message : "Delivery details unavailable"); }
+    finally { setDeliveryInspectionBusy(false); }
+  }
+  async function openRawSource() {
+    if (!selected) return;
+    try {
+      const current = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch(`/api/mail/${selected.id}/source`, { headers: current?.access_token ? { authorization: `Bearer ${current.access_token}` } : {} });
+      if (!response.ok) throw new Error(`Raw source unavailable (${response.status})`);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (sourceError) { setError(sourceError instanceof Error ? sourceError.message : "Raw source unavailable"); }
   }
   async function submitSpamFeedback(feedback: "spam" | "not_spam") {
     if (!selected) return;
@@ -4477,6 +4546,26 @@ function MailboxApp({ session }: { session: Session }) {
                   })()}
                   {trustLensOpen && !trustData && trustLensBusy && <div className="trust-lens-body"><p className="trust-lens-note">Loading sender evidence…</p></div>}
                 </div>}
+                {deliveryInspectionOpen && <div className="delivery-inspection">
+                  <div className="delivery-inspection-head">
+                    <span><History size={15} /><strong>Delivery timeline</strong></span>
+                    <small>{deliveryInspectionBusy ? "Loading…" : selected.delivery_status || selected.status}</small>
+                  </div>
+                  {deliveryInspection && <>
+                    <div className="delivery-summary-grid">
+                      <div><span>Provider</span><strong>{selected.provider || "Not assigned"}</strong></div>
+                      <div><span>Message size</span><strong>{selected.message_size_bytes ? formatBytes(selected.message_size_bytes) : "Not recorded"}</strong></div>
+                      <div><span>Tracking</span><strong>{selected.open_tracking_enabled || selected.click_tracking_enabled ? `${selected.open_tracking_enabled ? "opens" : ""}${selected.open_tracking_enabled && selected.click_tracking_enabled ? " + " : ""}${selected.click_tracking_enabled ? "clicks" : ""}` : "off"}</strong></div>
+                      <div><span>Provider ID</span><strong>{selected.provider_message_id || "Pending"}</strong></div>
+                    </div>
+                    {selected.delivery_error && <div className="delivery-error"><strong>{selected.delivery_error_code || "Delivery issue"}</strong><span>{selected.delivery_error}</span></div>}
+                    <div className="delivery-timeline-list">
+                      {(() => { const timeline: Array<Record<string, unknown> & { kind: string; at?: unknown }> = [...deliveryInspection.attempts.map((item) => ({ ...item, kind: "attempt", at: item.started_at || item.completed_at })), ...deliveryInspection.events.map((item) => ({ ...item, kind: "event", at: item.occurred_at || item.created_at }))]; return timeline.sort((a, b) => Date.parse(String(a.at || "")) - Date.parse(String(b.at || ""))).map((item, index) => <div className="delivery-timeline-item" key={`${String(item.id || item.event_id || item.at)}-${index}`}><span className="delivery-timeline-dot" /><div><strong>{String(item.kind === "attempt" ? item.status || "attempt" : item.event_type || "event")}</strong><small>{String(item.provider || selected.provider || "provider")} · {item.at ? new Date(String(item.at)).toLocaleString() : "time unavailable"}</small>{typeof item.error_message === "string" && <p>{item.error_message}</p>}{typeof item.payload === "object" && item.payload !== null && <p>{String((item.payload as Record<string, unknown>).reason || "")}</p>}</div></div>); })()}
+                      {!deliveryInspection.attempts.length && !deliveryInspection.events.length && <p className="delivery-empty">No provider events yet. Accepted means the provider took custody; delivery confirmation arrives through its webhook.</p>}
+                    </div>
+                    <details className="raw-inspection"><summary>Full headers and MIME parts</summary><div className="inspection-columns"><div><strong>Headers</strong>{(selected.raw_headers || []).map((header, index) => <code key={`${header.key}-${index}`}>{header.key}: {header.value}</code>)}{!(selected.raw_headers || []).length && <small>No stored headers.</small>}</div><div><strong>MIME parts</strong>{(selected.mime_parts || []).map((part, index) => <code key={index}>{JSON.stringify(part)}</code>)}{!(selected.mime_parts || []).length && <small>No MIME metadata.</small>}</div></div></details>
+                  </>}
+                </div>}
                 {labels.length > 0 && (
                   <div className="detail-labels">
                     <span className="eyebrow">LABELS</span>
@@ -4603,9 +4692,15 @@ function MailboxApp({ session }: { session: Session }) {
                             <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
                               <Forward size={15} /> Forward
                             </button>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleTrustLens(); }}>
-                              <ShieldAlert size={15} /> {trustLensOpen ? "Hide trust details" : "Inspect trust details"}
-                            </button>
+                             <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleTrustLens(); }}>
+                               <ShieldAlert size={15} /> {trustLensOpen ? "Hide trust details" : "Inspect trust details"}
+                             </button>
+                             <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleDeliveryInspection(); }}>
+                               <History size={15} /> {deliveryInspectionOpen ? "Hide delivery timeline" : "Delivery timeline"}
+                             </button>
+                             <button role="menuitem" onClick={() => { setShowMoreActions(false); void openRawSource(); }}>
+                               <Download size={15} /> View raw source
+                             </button>
                             <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
                               <Eye size={15} /> Mark unread
                             </button>

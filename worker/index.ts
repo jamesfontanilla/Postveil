@@ -40,6 +40,14 @@ import {
   type TrustAuthResults,
   type TrustPolicy,
 } from "./trust.ts";
+import {
+  computeExponentialBackoff,
+  ProviderDeliveryError,
+  sendThroughProvider,
+  type DeliveryAttachment,
+  type DeliveryInput,
+  type ProviderName,
+} from "./delivery.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -58,6 +66,28 @@ interface Env {
   INTERNAL_TEST_TOKEN?: string;
   OUTLOOK_FORWARD_TO?: string;
   DEFAULT_FROM_EMAIL?: string;
+  AWS_ACCESS_KEY_ID?: string;
+  AWS_SECRET_ACCESS_KEY?: string;
+  AWS_SES_REGION?: string;
+  AWS_REGION?: string;
+  MAILGUN_API_KEY?: string;
+  MAILGUN_DOMAIN?: string;
+  MAILGUN_BASE_URL?: string;
+  POSTMARK_SERVER_TOKEN?: string;
+  POSTMARK_MESSAGE_STREAM?: string;
+  SENDGRID_API_KEY?: string;
+  SMTP_RELAY_URL?: string;
+  SMTP_USERNAME?: string;
+  SMTP_PASSWORD?: string;
+  MAX_EMAIL_BYTES?: string;
+  MAX_RECIPIENTS?: string;
+  MAX_RETRY_ATTEMPTS?: string;
+  PROVIDER_FAILOVER_ENABLED?: string;
+  MAILGUN_WEBHOOK_SIGNING_KEY?: string;
+  POSTMARK_WEBHOOK_SECRET?: string;
+  SENDGRID_WEBHOOK_SECRET?: string;
+  SES_WEBHOOK_SECRET?: string;
+  SMTP_WEBHOOK_SECRET?: string;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -70,6 +100,9 @@ type AdminAuthUser = { id: string; email?: string; created_at?: string; last_sig
 type SecurityEvent = { id: string; organization_id: string | null; actor_id: string | null; subject_user_id: string; event_type: string; event_key: string; session_id: string | null; ip_hash: string | null; user_agent: string | null; is_suspicious: boolean; details: JsonRecord; created_at: string };
 type Rule = RuleDefinition & { id: string; owner_id: string; conditions: JsonRecord; actions: JsonRecord; enabled: boolean; priority: number };
 type StoredAttachment = { object_key: string; filename: string; content_type: string; detected_content_type: string; byte_size: number; sha256: string; preview_state: "ready" | "not_available"; safety_status: "unknown" | "suspicious" | "blocked"; safety_reasons: string[]; content_id?: string; disposition?: string | null };
+type ProviderConfig = { id?: string; organization_id?: string; provider: ProviderName; enabled: boolean; priority: number; config: JsonRecord; daily_limit?: number };
+type ProviderHealth = { id?: string; organization_id?: string; provider: ProviderName; status: string; last_success_at?: string | null; last_failure_at?: string | null; last_latency_ms?: number | null; consecutive_failures?: number; circuit_open_until?: string | null; sent_24h?: number; delivered_24h?: number; bounced_24h?: number; complained_24h?: number; updated_at?: string };
+type DeliveryEvent = { provider: string; eventType: string; providerMessageId?: string; eventId?: string; recipient?: string; reason?: string; occurredAt?: string; payload: JsonRecord };
 
 const SYSTEM_FOLDERS = ["inbox", "sent", "drafts", "archive", "trash", "spam"] as const;
 const SPAM_THRESHOLD = 0.70;
@@ -108,6 +141,35 @@ function senderIdentity(parsed: { from?: { name?: string; address?: string; grou
   return { address, name: name && name.toLowerCase() !== address ? name : "" };
 }
 
+function mimePartSummary(parsed: { text?: string; html?: string; attachments?: Array<{ filename?: string | null; mimeType?: string; content?: Uint8Array | ArrayBuffer | string; contentId?: string | null; disposition?: string | null }> }): JsonRecord[] {
+  const parts: JsonRecord[] = [];
+  if (parsed.text) parts.push({ part: "text/plain", content_type: "text/plain", byte_size: new TextEncoder().encode(parsed.text).byteLength });
+  if (parsed.html) parts.push({ part: "text/html", content_type: "text/html", byte_size: new TextEncoder().encode(parsed.html).byteLength });
+  for (const attachment of parsed.attachments || []) {
+    const content = attachment.content;
+    const byteSize = content instanceof Uint8Array ? content.byteLength : content instanceof ArrayBuffer ? content.byteLength : typeof content === "string" ? content.length : 0;
+    parts.push({ part: "attachment", filename: String(attachment.filename || "attachment"), content_type: String(attachment.mimeType || "application/octet-stream"), content_id: attachment.contentId || null, disposition: attachment.disposition || null, byte_size: byteSize });
+  }
+  return parts;
+}
+
+function rawMessageSource(input: { from: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; html?: string; replyTo?: string; messageId: string }): string {
+  const safeHeader = (value: string): string => value.replace(/[\r\n]+/g, " ").slice(0, 2000);
+  const headers = [
+    `From: ${safeHeader(input.from)}`,
+    `To: ${safeHeader(input.to.join(", "))}`,
+    ...(input.cc?.length ? [`Cc: ${safeHeader(input.cc.join(", "))}`] : []),
+    ...(input.bcc?.length ? [`Bcc: ${safeHeader(input.bcc.join(", "))}`] : []),
+    `Subject: ${safeHeader(input.subject || "(no subject)")}`,
+    ...(input.replyTo ? [`Reply-To: ${safeHeader(input.replyTo)}`] : []),
+    `Message-ID: ${safeHeader(input.messageId)}`,
+    "MIME-Version: 1.0",
+    input.html ? "Content-Type: multipart/alternative; boundary=parcel-boundary" : "Content-Type: text/plain; charset=utf-8",
+  ];
+  if (!input.html) return `${headers.join("\r\n")}\r\n\r\n${input.text || ""}\r\n`;
+  return `${headers.join("\r\n")}\r\n\r\n--parcel-boundary\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${input.text || ""}\r\n--parcel-boundary\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${input.html}\r\n--parcel-boundary--\r\n`;
+}
+
 function supabaseHeaders(env: Env, token?: string): HeadersInit {
   return { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${token ?? env.SUPABASE_SERVICE_ROLE_KEY}`, "content-type": "application/json" };
 }
@@ -119,6 +181,96 @@ async function dbRequest<T = unknown>(env: Env, path: string, init: RequestInit 
   const body = await response.text();
   if (!body.trim()) return undefined as T;
   return JSON.parse(body) as T;
+}
+
+const PROVIDER_NAMES: ProviderName[] = ["brevo", "ses", "mailgun", "postmark", "sendgrid", "smtp"];
+
+function providerReady(env: Env, provider: ProviderName): boolean {
+  if (provider === "brevo") return Boolean(env.BREVO_API_KEY);
+  if (provider === "ses") return Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY);
+  if (provider === "mailgun") return Boolean(env.MAILGUN_API_KEY && env.MAILGUN_DOMAIN);
+  if (provider === "postmark") return Boolean(env.POSTMARK_SERVER_TOKEN);
+  if (provider === "sendgrid") return Boolean(env.SENDGRID_API_KEY);
+  return Boolean(env.SMTP_RELAY_URL);
+}
+
+function providerLabel(provider: ProviderName): string {
+  return provider === "ses" ? "Amazon SES" : provider === "smtp" ? "Generic SMTP relay" : provider[0].toUpperCase() + provider.slice(1);
+}
+
+async function providerConfigs(env: Env, organizationId?: string): Promise<ProviderConfig[]> {
+  const configured = organizationId
+    ? await dbRequest<ProviderConfig[]>(env, `email_provider_configs?organization_id=eq.${encodeURIComponent(organizationId)}&order=priority.asc,provider.asc`).catch(() => [])
+    : [];
+  const configuredMap = new Map(configured.map((item) => [item.provider, item]));
+  const rows = PROVIDER_NAMES.map((provider, index) => configuredMap.get(provider) || { provider, enabled: true, priority: 100 + index, config: {} });
+  const ready = rows.filter((item) => item.enabled && providerReady(env, item.provider)).sort((a, b) => a.priority - b.priority);
+  return env.PROVIDER_FAILOVER_ENABLED === "false" ? ready.slice(0, 1) : ready;
+}
+
+function providerFailure(errorValue: unknown, fallbackProvider: ProviderName): { provider: ProviderName; status: number; code: string; message: string; retryable: boolean } {
+  if (errorValue instanceof ProviderDeliveryError) return { provider: errorValue.provider, status: errorValue.responseStatus, code: errorValue.errorCode, message: errorValue.message, retryable: errorValue.retryable };
+  const message = errorValue instanceof Error ? errorValue.message : "Provider delivery failed";
+  return { provider: fallbackProvider, status: 500, code: "provider_error", message: message.slice(0, 500), retryable: true };
+}
+
+async function deliveryAttempt(env: Env, message: JsonRecord, provider: ProviderName, attemptNumber: number, status: string, details: JsonRecord = {}): Promise<void> {
+  const query = `delivery_attempts?message_id=eq.${encodeURIComponent(String(message.id))}&provider=eq.${encodeURIComponent(provider)}&attempt_number=eq.${attemptNumber}`;
+  if (status === "started") {
+    await dbRequest(env, "delivery_attempts", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: message.id, owner_id: message.owner_id, provider, attempt_number: attemptNumber, status, ...details }) }).catch(() => undefined);
+    return;
+  }
+  const updated = await dbRequest(env, query, { method: "PATCH", body: JSON.stringify({ status, ...details }) }).catch(() => undefined);
+  if (updated === undefined) await dbRequest(env, "delivery_attempts", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: message.id, owner_id: message.owner_id, provider, attempt_number: attemptNumber, status, ...details }) }).catch(() => undefined);
+}
+
+async function updateProviderHealth(env: Env, organizationId: string | undefined, provider: ProviderName, result: { success: boolean; latencyMs?: number; status?: number; error?: string }): Promise<void> {
+  if (!organizationId) return;
+  const existing = (await dbRequest<ProviderHealth[]>(env, `provider_health?organization_id=eq.${encodeURIComponent(organizationId)}&provider=eq.${provider}&limit=1`).catch(() => []))[0];
+  const failures = result.success ? 0 : Number(existing?.consecutive_failures || 0) + 1;
+  const circuitOpenUntil = !result.success && failures >= 3 ? new Date(Date.now() + 5 * 60 * 1000).toISOString() : result.success ? null : existing?.circuit_open_until || null;
+  const status = result.success ? "healthy" : circuitOpenUntil ? "circuit_open" : failures > 1 ? "degraded" : "failed";
+  const patch: JsonRecord = { status, last_latency_ms: result.latencyMs ?? existing?.last_latency_ms ?? null, consecutive_failures: failures, circuit_open_until: circuitOpenUntil, updated_at: new Date().toISOString() };
+  if (result.success) patch.last_success_at = new Date().toISOString(); else patch.last_failure_at = new Date().toISOString();
+  if (existing?.id) await dbRequest(env, `provider_health?id=eq.${encodeURIComponent(existing.id)}`, { method: "PATCH", body: JSON.stringify(patch) }).catch(() => undefined);
+  else await dbRequest(env, "provider_health", { method: "POST", body: JSON.stringify({ organization_id: organizationId, provider, ...patch }) }).catch(() => undefined);
+}
+
+async function providerIsCircuitOpen(env: Env, organizationId: string | undefined, provider: ProviderName): Promise<boolean> {
+  if (!organizationId) return false;
+  const rows = await dbRequest<ProviderHealth[]>(env, `provider_health?organization_id=eq.${encodeURIComponent(organizationId)}&provider=eq.${provider}&limit=1`).catch(() => []);
+  return Boolean(rows[0]?.circuit_open_until && Date.parse(String(rows[0].circuit_open_until)) > Date.now());
+}
+
+function domainOf(address: string): string {
+  return cleanAddress(address).split("@")[1] || "unknown";
+}
+
+async function suppressedRecipients(env: Env, organizationId: string | undefined, recipients: string[]): Promise<Set<string>> {
+  if (!organizationId || !recipients.length) return new Set();
+  const encoded = recipients.map((email) => encodeURIComponent(cleanAddress(email))).join(",");
+  const rows = await dbRequest<Array<{ email: string }>>(env, `suppression_entries?organization_id=eq.${encodeURIComponent(organizationId)}&email=in.(${encoded})&active=eq.true&select=email`).catch(() => []);
+  return new Set(rows.map((row) => cleanAddress(row.email)));
+}
+
+function messageSizeBytes(input: { subject: string; text: string; html?: string; to: string[]; cc: string[]; bcc: string[]; attachments?: Array<{ byte_size?: number; bytes?: Uint8Array }> }): number {
+  const bodyBytes = new TextEncoder().encode(`${input.subject}\r\n${input.text}\r\n${input.html || ""}\r\n${input.to.join(",")}\r\n${input.cc.join(",")}\r\n${input.bcc.join(",")}`).byteLength;
+  return bodyBytes + (input.attachments || []).reduce((total, item) => total + Number(item.byte_size || item.bytes?.byteLength || 0), 0);
+}
+
+function maxEmailBytes(env: Env): number {
+  const value = Number(env.MAX_EMAIL_BYTES || 10 * 1024 * 1024);
+  return Number.isFinite(value) ? Math.max(256 * 1024, Math.min(50 * 1024 * 1024, value)) : 10 * 1024 * 1024;
+}
+
+function maxRecipients(env: Env): number {
+  const value = Number(env.MAX_RECIPIENTS || 50);
+  return Number.isFinite(value) ? Math.max(1, Math.min(500, value)) : 50;
+}
+
+function maxRetryAttempts(env: Env): number {
+  const value = Number(env.MAX_RETRY_ATTEMPTS || 5);
+  return Number.isFinite(value) ? Math.max(1, Math.min(10, value)) : 5;
 }
 
 function jwtPayload(token: string): JsonRecord {
@@ -536,6 +688,33 @@ async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor
   if (!access) return error("Workspace administrator access is required", 403);
   const { organization, member: actorMember } = access;
   const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname === "/api/admin/delivery-ops") return json(await deliveryOperations(env, organization.id));
+  if (request.method === "GET" && url.pathname === "/api/admin/providers") {
+    const configs = await dbRequest<ProviderConfig[]>(env, `email_provider_configs?organization_id=eq.${encodeURIComponent(organization.id)}&order=priority.asc,provider.asc`).catch(() => []);
+    return json(PROVIDER_NAMES.map((provider) => ({ ...(configs.find((item) => item.provider === provider) || { enabled: true, priority: 100, config: {}, daily_limit: 0 }), provider, label: providerLabel(provider), configured: providerReady(env, provider) })));
+  }
+  const providerAdminMatch = url.pathname.match(/^\/api\/admin\/providers\/(brevo|ses|mailgun|postmark|sendgrid|smtp)$/);
+  if (providerAdminMatch && request.method === "PATCH") {
+    const provider = providerAdminMatch[1] as ProviderName;
+    const body = (await request.json()) as JsonRecord;
+    const safeConfig: JsonRecord = {};
+    for (const key of ["endpoint", "domain", "baseUrl", "relayUrl", "region", "configurationSetName", "messageStream"]) if (typeof body[key] === "string") safeConfig[key] = String(body[key]).slice(0, 500);
+    const rows = await dbRequest<ProviderConfig[]>(env, "email_provider_configs?on_conflict=organization_id,provider", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ organization_id: organization.id, provider, enabled: body.enabled !== false, priority: Math.max(0, Math.min(10000, Number(body.priority ?? 100))), config: safeConfig, daily_limit: Math.max(0, Math.min(10_000_000, Number(body.dailyLimit || 0))), updated_at: new Date().toISOString() }) });
+    return json({ ...(rows[0] || {}), provider, configured: providerReady(env, provider) });
+  }
+  const domainAdminMatch = url.pathname.match(/^\/api\/admin\/domains\/([^/]+)$/);
+  if (domainAdminMatch && (request.method === "GET" || request.method === "PATCH")) {
+    const domain = decodeURIComponent(domainAdminMatch[1]).toLowerCase().replace(/[^a-z0-9.-]/g, "").slice(0, 253);
+    if (!domain) return error("A valid domain is required");
+    if (request.method === "GET") return json(await domainReputation(env, organization.id, domain) || { organization_id: organization.id, domain, daily_limit: 0, sent_used_today: 0, status: "healthy", score: 1 });
+    const body = (await request.json()) as JsonRecord;
+    const current = await domainReputation(env, organization.id, domain);
+    const dailyLimit = Math.max(0, Math.min(10_000_000, Number(body.dailyLimit || 0)));
+    const record = { organization_id: organization.id, domain, daily_limit: dailyLimit, sent_window_started_at: current?.sent_window_started_at || new Date().toISOString().slice(0, 10), sent_used_today: Number(current?.sent_used_today || 0), updated_at: new Date().toISOString() };
+    if (current?.id) await dbRequest(env, `domain_reputation?id=eq.${encodeURIComponent(String(current.id))}`, { method: "PATCH", body: JSON.stringify(record) });
+    else await dbRequest(env, "domain_reputation?on_conflict=organization_id,domain", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(record) });
+    return json({ ...current, ...record });
+  }
   if (request.method === "GET" && url.pathname === "/api/admin/overview") {
     await enforceInactivity(env, organization, actor.id);
     const members = await listAdminUsers(env, organization);
@@ -1387,6 +1566,7 @@ async function handleRecoveryRequest(request: Request, env: Env): Promise<Respon
 }
 
 async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, envelopeTo: string, forwardInbound?: (address: string) => Promise<void>, ctx?: ExecutionContext): Promise<void> {
+  if (raw.byteLength > maxEmailBytes(env)) throw new Error(`Inbound message exceeds the ${Math.round(maxEmailBytes(env) / 1024 / 1024)} MB limit`);
   const destination = cleanAddress(envelopeTo);
   const ownerId = env.OWNER_USER_ID;
   if (!ownerId) throw new Error("OWNER_USER_ID is not configured");
@@ -1421,8 +1601,11 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   const threadId = await findOrCreateThread(env, ownerId, subject, inReplyTo || undefined, references || undefined);
   const toAddresses = splitAddresses(headerValue(parsed, "to") || destination);
   const ccAddresses = splitAddresses(headerValue(parsed, "cc") || "");
+  const rawHeaders = (parsed.headers || []).slice(0, 200).map((header) => ({ key: String(header.key || "").slice(0, 200), value: String(header.value || "").slice(0, 4000) }));
+  const mimeParts = mimePartSummary(parsed);
+  const threadFingerprint = await sha256Hex(new TextEncoder().encode(`${ownerId}\n${normalizeSubject(subject)}\n${headerFrom}\n${toAddresses.join(",")}`));
   const receivedAt = new Date().toISOString();
-  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder: "inbox", status: "queued", screening_status: "none", from_name: fromName, from_address: headerFrom, to_addresses: toAddresses, cc_addresses: ccAddresses, reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: null, has_attachment: Boolean(parsed.attachments?.length), spam_score: 0, spam_reasons: [], focused_score: 0.5, focused_category: "focused", auth_results: {}, received_at: receivedAt }) });
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder: "inbox", status: "queued", delivery_status: "received", screening_status: "none", from_name: fromName, from_address: headerFrom, to_addresses: toAddresses, cc_addresses: ccAddresses, reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: null, has_attachment: Boolean(parsed.attachments?.length), spam_score: 0, spam_reasons: [], focused_score: 0.5, focused_category: "focused", auth_results: {}, message_size_bytes: raw.byteLength, max_size_bytes: maxEmailBytes(env), raw_headers: rawHeaders, mime_parts: mimeParts, thread_fingerprint: threadFingerprint, inbound_event_id: messageIdHeader, received_at: receivedAt }) });
   if (!inserted[0]) throw new Error("Message insert returned no row");
 
   const finishInbound = async (): Promise<void> => {
@@ -1436,7 +1619,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
       const customFolderId = explicitPolicy === "folder" ? assessment.policyTargetFolderId : null;
       const folder = explicitPolicy === "screen" ? "inbox" : explicitPolicy === "archive" && assessment.score < SPAM_THRESHOLD ? "archive" : explicitPolicy === "folder" && customFolderId && assessment.score < SPAM_THRESHOLD ? "custom" : assessment.score >= SPAM_THRESHOLD || explicitPolicy === "spam" ? "spam" : "inbox";
       const screeningStatus = explicitPolicy === "screen" || (assessment.score >= 0.35 && assessment.score < SPAM_THRESHOLD) ? "review" : folder === "spam" ? "blocked" : "none";
-      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, custom_folder_id: folder === "custom" ? customFolderId : null, status: "received", screening_status: screeningStatus, screening_policy_id: assessment.policyId, raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, auth_spf: assessment.authResults.spf, auth_dkim: assessment.authResults.dkim, auth_dmarc: assessment.authResults.dmarc, auth_arc: assessment.authResults.arc, auth_tls: assessment.authResults.tls, trust_score: assessment.trustScore, trust_reasons: reasons, trust_evidence: { ...assessment.trustEvidence, blocked_attachments: attachmentResult.blocked }, received_auth_at: assessment.receivedAuthAt, sender_first_seen: assessment.senderFirstSeen, known_contact: assessment.knownContact, reply_to_mismatch: assessment.replyToMismatch, link_count: assessment.linkCount, tracking_pixel_count: assessment.trackingPixelCount, updated_at: new Date().toISOString() }) });
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, custom_folder_id: folder === "custom" ? customFolderId : null, status: "received", delivery_status: "received", screening_status: screeningStatus, screening_policy_id: assessment.policyId, raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, auth_spf: assessment.authResults.spf, auth_dkim: assessment.authResults.dkim, auth_dmarc: assessment.authResults.dmarc, auth_arc: assessment.authResults.arc, auth_tls: assessment.authResults.tls, trust_score: assessment.trustScore, trust_reasons: reasons, trust_evidence: { ...assessment.trustEvidence, blocked_attachments: attachmentResult.blocked }, received_auth_at: assessment.receivedAuthAt, sender_first_seen: assessment.senderFirstSeen, known_contact: assessment.knownContact, reply_to_mismatch: assessment.replyToMismatch, link_count: assessment.linkCount, tracking_pixel_count: assessment.trackingPixelCount, updated_at: new Date().toISOString() }) });
       await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, policy_id: assessment.policyId, decision: screeningStatus === "blocked" ? "blocked" : screeningStatus === "review" ? "screened" : "allowed", previous_folder: "inbox" }) }).catch(() => undefined);
       if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
       const mailboxSettings = await getMailboxAdminSettings(env, mailbox);
@@ -1464,7 +1647,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
       if (autoReply && (!autoReply.starts_at || now >= Date.parse(autoReply.starts_at)) && (!autoReply.ends_at || now <= Date.parse(autoReply.ends_at)) && headerFrom !== destination && !/auto-submitted|list-/i.test(headerValue(parsed, "auto-submitted") || "")) await sendViaBrevo(env, { fromAddress: destination, to: [headerFrom], subject: autoReply.subject, text: autoReply.body, replyTo: destination });
     } catch (processingError) {
       const note = processingError instanceof Error ? processingError.message.slice(0, 500) : "Inbound processing failed";
-      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", work_note: note, updated_at: new Date().toISOString() }) }).catch(() => undefined);
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", delivery_status: "failed", delivery_error_code: "inbound_processing_failed", delivery_error: note, work_note: note, updated_at: new Date().toISOString() }) }).catch(() => undefined);
       console.error("Inbound processing failed", processingError);
     }
   };
@@ -1474,11 +1657,74 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
 
 type OutboundAttachment = { filename: string; object_key: string; byte_size?: number; content_type?: string; detected_content_type?: string; sha256?: string; preview_state?: string; safety_status?: string; safety_reasons?: string[] };
 
-async function sendOutboxMessage(env: Env, message: JsonRecord): Promise<{ messageId?: string }> {
-  const attachments = await dbRequest<Array<{ filename: string; object_key: string }>>(env, `attachments?message_id=eq.${encodeURIComponent(String(message.id))}&select=filename,object_key&order=created_at.asc`);
-  const result = await sendViaBrevo(env, { fromAddress: String(message.from_address), to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [], cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [], bcc: Array.isArray(message.bcc_addresses) ? message.bcc_addresses.map(String) : [], subject: String(message.subject || "(no subject)"), text: String(message.text_body || ""), html: typeof message.html_body === "string" ? message.html_body : undefined, replyTo: String(message.reply_to || message.from_address), idempotencyKey: typeof message.send_idempotency_key === "string" ? message.send_idempotency_key : undefined, attachments });
-  await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ status: "sent", folder: "sent", sent_at: new Date().toISOString(), provider_message_id: result.messageId || null, scheduled_at: null, send_after: null, send_lease_until: null, work_note: "", updated_at: new Date().toISOString() }) });
-  return { messageId: result.messageId };
+async function domainReputation(env: Env, organizationId: string | undefined, domain: string): Promise<JsonRecord | null> {
+  if (!organizationId || !domain || domain === "unknown") return null;
+  const rows = await dbRequest<JsonRecord[]>(env, `domain_reputation?organization_id=eq.${encodeURIComponent(organizationId)}&domain=eq.${encodeURIComponent(domain)}&limit=1`).catch(() => []);
+  return rows[0] || null;
+}
+
+async function enforceDomainQuota(env: Env, organizationId: string | undefined, fromAddress: string): Promise<void> {
+  const row = await domainReputation(env, organizationId, domainOf(fromAddress));
+  if (!row) return;
+  if (String(row.status) === "suspended" && (!row.suspended_until || Date.parse(String(row.suspended_until)) > Date.now())) throw new Error("Sending is temporarily suspended for this domain because of reputation risk");
+  const today = new Date().toISOString().slice(0, 10);
+  const used = String(row.sent_window_started_at || "") === today ? Number(row.sent_used_today || 0) : 0;
+  const limit = Number(row.daily_limit || 0);
+  if (limit > 0 && used >= limit) throw new Error("This sending domain has reached its daily quota");
+}
+
+async function recordDomainOutcome(env: Env, organizationId: string | undefined, domain: string, kind: "sent" | "delivered" | "bounced" | "complaint"): Promise<void> {
+  if (!organizationId || !domain || domain === "unknown") return;
+  const current = await domainReputation(env, organizationId, domain);
+  const today = new Date().toISOString().slice(0, 10);
+  const sentCount = Number(current?.sent_count || 0) + (kind === "sent" ? 1 : 0);
+  const deliveredCount = Number(current?.delivered_count || 0) + (kind === "delivered" ? 1 : 0);
+  const bouncedCount = Number(current?.bounced_count || 0) + (kind === "bounced" ? 1 : 0);
+  const complaintCount = Number(current?.complaint_count || 0) + (kind === "complaint" ? 1 : 0);
+  const bounceRate = sentCount ? bouncedCount / sentCount : 0;
+  const complaintRate = sentCount ? complaintCount / sentCount : 0;
+  const score = Math.max(0, Math.min(1, 1 - bounceRate * 1.5 - complaintRate * 8));
+  const status = complaintRate >= 0.01 || (sentCount >= 20 && bounceRate >= 0.25) ? "suspended" : complaintRate >= 0.005 || (sentCount >= 20 && bounceRate >= 0.1) ? "restricted" : score < 0.9 ? "watch" : "healthy";
+  const suspendedUntil = status === "suspended" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : current?.suspended_until || null;
+  const patch: JsonRecord = { organization_id: organizationId, domain, sent_count: sentCount, delivered_count: deliveredCount, bounced_count: bouncedCount, complaint_count: complaintCount, score: Number(score.toFixed(4)), status, suspended_until: suspendedUntil, sent_window_started_at: today, sent_used_today: String(current?.sent_window_started_at || "") === today ? Number(current?.sent_used_today || 0) + (kind === "sent" ? 1 : 0) : kind === "sent" ? 1 : 0, updated_at: new Date().toISOString() };
+  if (current?.id) await dbRequest(env, `domain_reputation?id=eq.${encodeURIComponent(String(current.id))}`, { method: "PATCH", body: JSON.stringify(patch) }).catch(() => undefined);
+  else await dbRequest(env, "domain_reputation?on_conflict=organization_id,domain", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(patch) }).catch(() => undefined);
+  if (status === "suspended" && (!current || current.status !== "suspended")) await dbRequest(env, "abuse_actions", { method: "POST", body: JSON.stringify({ organization_id: organizationId, action: "suspended", reason: `Domain reputation crossed the automatic safety threshold (${Math.round(bounceRate * 100)}% bounce, ${Math.round(complaintRate * 100)}% complaint)`, metadata: { domain, sentCount, bounceRate, complaintRate } }) }).catch(() => undefined);
+}
+
+async function sendOutboxMessage(env: Env, message: JsonRecord): Promise<{ messageId?: string; provider?: ProviderName }> {
+  const attachmentRows = await dbRequest<Array<{ filename: string; object_key: string; content_type?: string; byte_size?: number }>>(env, `attachments?message_id=eq.${encodeURIComponent(String(message.id))}&select=filename,object_key,content_type,byte_size&order=created_at.asc`);
+  const attachments: DeliveryAttachment[] = await Promise.all(attachmentRows.map(async (attachment) => ({ filename: attachment.filename, contentType: attachment.content_type || "application/octet-stream", byteSize: Number(attachment.byte_size || 0), bytes: await readObject(env, attachment.object_key), url: await signedObjectUrl(env, attachment.object_key) })));
+  const mailboxSettings = message.mailbox_id ? (await dbRequest<MailboxAdminSettings[]>(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(String(message.mailbox_id))}&limit=1`).catch(() => []))[0] : undefined;
+  const organizationId = mailboxSettings?.organization_id;
+  const input: DeliveryInput = { fromAddress: String(message.from_address), to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [], cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [], bcc: Array.isArray(message.bcc_addresses) ? message.bcc_addresses.map(String) : [], subject: String(message.subject || "(no subject)"), text: String(message.text_body || ""), html: typeof message.html_body === "string" ? message.html_body : undefined, replyTo: String(message.reply_to || message.from_address), idempotencyKey: typeof message.send_idempotency_key === "string" ? message.send_idempotency_key : undefined, messageIdHeader: typeof message.message_id_header === "string" ? message.message_id_header : undefined, openTrackingEnabled: message.open_tracking_enabled === true, clickTrackingEnabled: message.click_tracking_enabled === true, attachments };
+  const configs = await providerConfigs(env, organizationId);
+  let lastFailure: ReturnType<typeof providerFailure> | null = null;
+  for (let index = 0; index < configs.length; index += 1) {
+    const config = configs[index];
+    if (await providerIsCircuitOpen(env, organizationId, config.provider)) continue;
+    const attemptNumber = Math.max(1, Number(message.send_attempts || 1) + index);
+    const startedAt = new Date().toISOString();
+    await deliveryAttempt(env, message, config.provider, attemptNumber, "started", { started_at: startedAt });
+    try {
+      const result = await sendThroughProvider(config.provider, env, input, config.config || {});
+      await deliveryAttempt(env, message, config.provider, attemptNumber, "accepted", { provider_message_id: result.providerMessageId || null, response_status: result.responseStatus, completed_at: new Date().toISOString(), metadata: { latency_ms: result.latencyMs } });
+      await updateProviderHealth(env, organizationId, config.provider, { success: true, latencyMs: result.latencyMs, status: result.responseStatus });
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ status: "sent", delivery_status: "accepted", folder: "sent", sent_at: new Date().toISOString(), provider: config.provider, provider_message_id: result.providerMessageId || null, delivery_error_code: null, delivery_error: null, next_delivery_at: null, scheduled_at: null, send_after: null, send_lease_until: null, work_note: "", updated_at: new Date().toISOString() }) });
+      await dbRequest(env, `delivery_queue?message_id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ status: "succeeded", last_provider: config.provider, last_error_code: null, last_error: null, locked_until: null, updated_at: new Date().toISOString() }) }).catch(() => undefined);
+      await recordDomainOutcome(env, organizationId, domainOf(input.fromAddress), "sent");
+      await updateProviderHealth(env, organizationId, config.provider, { success: true, latencyMs: result.latencyMs, status: result.responseStatus });
+      return { messageId: result.providerMessageId, provider: config.provider };
+    } catch (sendError) {
+      lastFailure = providerFailure(sendError, config.provider);
+      await deliveryAttempt(env, message, config.provider, attemptNumber, "failed", { response_status: lastFailure.status, error_code: lastFailure.code, error_message: lastFailure.message, retryable: lastFailure.retryable, completed_at: new Date().toISOString() });
+      await updateProviderHealth(env, organizationId, config.provider, { success: false, status: lastFailure.status, error: lastFailure.message });
+    }
+  }
+  const exhausted = lastFailure || { provider: "smtp" as ProviderName, status: 503, code: "no_provider", message: "No configured delivery provider is available", retryable: true };
+  const failure = new Error(`${providerLabel(exhausted.provider)}: ${exhausted.message}`) as Error & { delivery?: ReturnType<typeof providerFailure> };
+  failure.delivery = exhausted;
+  throw failure;
 }
 
 async function processOutbox(env: Env, limit = 25): Promise<void> {
@@ -1491,10 +1737,18 @@ async function processOutbox(env: Env, limit = 25): Promise<void> {
     const leaseUntil = new Date(Date.now() + 60_000).toISOString();
     const claimed = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&status=in.(queued,scheduled)&cancelled_at=is.null&or=${leaseFilter}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ send_lease_until: leaseUntil, send_attempts: Number(candidate.send_attempts || 0) + 1, updated_at: new Date().toISOString() }) }).catch(() => []);
     if (!claimed[0]) continue;
+    await dbRequest(env, `delivery_queue?message_id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: "running", locked_until: leaseUntil, attempt_count: Number(claimed[0].send_attempts || 1), updated_at: new Date().toISOString() }) }).catch(() => undefined);
     try {
       await sendOutboxMessage(env, claimed[0]);
     } catch (sendError) {
-      await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", send_lease_until: null, send_after: null, work_note: sendError instanceof Error ? sendError.message.slice(0, 500) : "Send failed", updated_at: new Date().toISOString() }) }).catch(() => undefined);
+      const delivery = sendError && typeof sendError === "object" && "delivery" in sendError ? (sendError as { delivery?: ReturnType<typeof providerFailure> }).delivery : undefined;
+      const attempt = Number(claimed[0].send_attempts || 1);
+      const retryable = delivery?.retryable !== false;
+      const retryAt = new Date(Date.now() + computeExponentialBackoff(attempt)).toISOString();
+      const shouldRetry = retryable && attempt < maxRetryAttempts(env);
+      const messagePatch: JsonRecord = { status: shouldRetry ? "queued" : "failed", delivery_status: shouldRetry ? "delayed" : "failed", send_lease_until: null, send_after: shouldRetry ? retryAt : null, next_delivery_at: shouldRetry ? retryAt : null, delayed_at: shouldRetry ? new Date().toISOString() : null, delivery_error_code: delivery?.code || "delivery_failed", delivery_error: delivery?.message || (sendError instanceof Error ? sendError.message : "Send failed"), work_note: delivery?.message || (sendError instanceof Error ? sendError.message.slice(0, 500) : "Send failed"), updated_at: new Date().toISOString() };
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(messagePatch) }).catch(() => undefined);
+      await dbRequest(env, `delivery_queue?message_id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: shouldRetry ? "retrying" : "dead", available_at: shouldRetry ? retryAt : new Date().toISOString(), locked_until: null, attempt_count: attempt, last_provider: delivery?.provider || null, last_error_code: delivery?.code || "delivery_failed", last_error: delivery?.message || "Send failed", updated_at: new Date().toISOString() }) }).catch(() => undefined);
     }
   }
 }
@@ -1520,6 +1774,8 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   const cc = mailboxAdminSettings ? await expandGroupRecipients(env, mailboxAdminSettings.organization_id, ccInput) : ccInput;
   const bcc = mailboxAdminSettings ? await expandGroupRecipients(env, mailboxAdminSettings.organization_id, bccInput) : bccInput;
   if (!fromAddress || !to.length) return error("A sender and at least one recipient are required");
+  const recipientCount = to.length + cc.length + bcc.length;
+  if (recipientCount > maxRecipients(env)) return error(`This message has too many recipients (maximum ${maxRecipients(env)})`, 413);
   if (ownerId && !mailbox?.can_send) return error("This sender address is not enabled for sending", 403);
   if (ownerId && mailboxAdminSettings && mailboxAdminSettings.status !== "active") return error("This mailbox is currently suspended", 403);
   if (ownerId && mailboxAdminSettings && mailboxAdminSettings.sending_limit_daily > 0) {
@@ -1531,7 +1787,14 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   const text = String(body.text || "");
   const html = typeof body.html === "string" ? body.html : undefined;
   const replyTo = cleanAddress(String(body.replyTo || fromAddress));
+  await enforceDomainQuota(env, mailboxAdminSettings?.organization_id, fromAddress);
   const attachments: OutboundAttachment[] = Array.isArray(body.attachments) ? body.attachments.filter((item): item is OutboundAttachment => Boolean(item && typeof item.filename === "string" && typeof item.object_key === "string")).map((item) => ({ filename: item.filename.slice(0, 180), object_key: item.object_key, byte_size: Number(item.byte_size || 0), content_type: item.content_type, detected_content_type: item.detected_content_type, sha256: item.sha256, preview_state: item.preview_state, safety_status: item.safety_status, safety_reasons: item.safety_reasons })) : [];
+  const suppressed = await suppressedRecipients(env, mailboxAdminSettings?.organization_id, [...to, ...cc, ...bcc]);
+  if (suppressed.size) return error(`Delivery blocked for suppressed recipient${suppressed.size === 1 ? "" : "s"}: ${[...suppressed].join(", ")}`, 422);
+  const messageBytes = messageSizeBytes({ subject, text, html, to, cc, bcc, attachments });
+  if (messageBytes > maxEmailBytes(env)) return error(`This message exceeds the ${Math.round(maxEmailBytes(env) / 1024 / 1024)} MB limit`, 413);
+  const openTrackingEnabled = body.openTrackingEnabled === true;
+  const clickTrackingEnabled = body.clickTrackingEnabled === true;
   const warnings = ownerId ? buildSendWarnings({ fromAddress, mailboxAddress: mailbox?.address, mailboxCanSend: mailbox?.can_send, to, cc, bcc, replyTo, subject, text, attachmentCount: attachments.length }) : [];
   const acknowledged = new Set(Array.isArray(body.warningsAcknowledged) ? body.warningsAcknowledged.map(String) : []);
   const unacknowledgedWarnings = warnings.filter((warning) => !acknowledged.has(warning.code));
@@ -1559,9 +1822,12 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   const configuredUndo = normalizeUndoSeconds(objectValue(mailbox?.settings).send_undo_seconds, 0);
   const undoSeconds = scheduledDate ? 0 : normalizeUndoSeconds(body.undoSendSeconds, configuredUndo);
   const sendAfter = scheduledDate ? scheduledDate.toISOString() : new Date(Date.now() + undoSeconds * 1000).toISOString();
-  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: mailboxOwnerId, sent_by: ownerId, send_mode: sendMode, thread_id: threadId, mailbox_id: mailbox?.id, direction: "outbound", folder: scheduledDate ? "drafts" : "sent", status: scheduledDate ? "scheduled" : "queued", from_name: mailbox?.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledDate?.toISOString() || null, send_after: sendAfter, send_idempotency_key: idempotencyKey, send_warning_acknowledged: Object.fromEntries(warnings.map((warning) => [warning.code, true])), sent_at: null }) });
+  const threadFingerprint = await sha256Hex(new TextEncoder().encode(`${mailboxOwnerId}\n${normalizeSubject(subject)}\n${fromAddress}\n${to.join(",")}`));
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: mailboxOwnerId, sent_by: ownerId, send_mode: sendMode, thread_id: threadId, mailbox_id: mailbox?.id, direction: "outbound", folder: scheduledDate ? "drafts" : "sent", status: scheduledDate ? "scheduled" : "queued", delivery_status: "queued", from_name: mailbox?.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, message_size_bytes: messageBytes, max_size_bytes: maxEmailBytes(env), open_tracking_enabled: openTrackingEnabled, click_tracking_enabled: clickTrackingEnabled, thread_fingerprint: threadFingerprint, scheduled_at: scheduledDate?.toISOString() || null, send_after: sendAfter, next_delivery_at: sendAfter, send_idempotency_key: idempotencyKey, send_warning_acknowledged: Object.fromEntries(warnings.map((warning) => [warning.code, true])), sent_at: null }) });
   const messageId = inserted[0]?.id;
   if (!messageId) return error("The message could not be queued", 502);
+  await dbRequest(env, "delivery_queue", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, owner_id: mailboxOwnerId, status: "queued", available_at: sendAfter, attempt_count: 0 }) });
+  await putObject(env, `raw/${mailboxOwnerId}/${messageId}.eml`, rawMessageSource({ from: fromAddress, to, cc, bcc, subject, text, html, replyTo, messageId: messageIdHeader }), "message/rfc822").then(() => dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ raw_object_key: `raw/${mailboxOwnerId}/${messageId}.eml`, updated_at: new Date().toISOString() }) })).catch(() => undefined);
   if (mailboxAdminSettings && mailbox) {
     const today = new Date().toISOString().slice(0, 10);
     const usedToday = mailboxAdminSettings.sending_window_started_at === today ? mailboxAdminSettings.sending_used_today : 0;
@@ -1594,6 +1860,7 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
 async function processScheduled(env: Env): Promise<void> {
   await enforceAllOrganizationInactivity(env);
   await processOutbox(env);
+  await detectDelayedMessages(env);
   const now = new Date().toISOString();
   const snoozed = await dbRequest<JsonRecord[]>(env, `messages?snoozed_until=lte.${encodeURIComponent(now)}&limit=50`);
   for (const message of snoozed) await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ folder: message.previous_folder || "inbox", previous_folder: null, snoozed_until: null }) }).catch(() => undefined);
@@ -1805,7 +2072,7 @@ async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptio
   const parsed = query ? parseSearchQuery(query) : undefined;
   const page = Math.max(1, Math.min(100, Number(options.page || 1)));
   const pageSize = Math.max(10, Math.min(100, Number(options.pageSize || 80)));
-  const parts = [messageScopeFilter(ownerId, options.mailboxIds || []), "select=id,thread_id,mailbox_id,owner_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,spam_reasons,trust_score,trust_reasons,screening_status,focused_score,focused_category,scheduled_at,snoozed_until,work_state,follow_up_at,work_note,received_at,sent_at,created_at"];
+  const parts = [messageScopeFilter(ownerId, options.mailboxIds || []), "select=id,thread_id,mailbox_id,owner_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,spam_reasons,trust_score,trust_reasons,screening_status,focused_score,focused_category,delivery_status,delivery_error_code,delivery_error,provider,provider_message_id,open_tracking_enabled,click_tracking_enabled,message_size_bytes,scheduled_at,next_delivery_at,snoozed_until,work_state,follow_up_at,work_note,received_at,sent_at,created_at"];
   const explicitFolders = parsed?.filters.filter((filter): filter is Extract<SearchFilter, { kind: "folder" }> => filter.kind === "folder") || [];
   if (!parsed) {
     if (options.folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(options.folder.slice(7))}`); }
@@ -1941,6 +2208,119 @@ async function applyBulkMessageAction(env: Env, ownerId: string, message: JsonRe
   return { changed: true };
 }
 
+async function detectDelayedMessages(env: Env): Promise<void> {
+  const threshold = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  const accepted = await dbRequest<JsonRecord[]>(env, `messages?direction=eq.outbound&delivery_status=eq.accepted&sent_at=lt.${encodeURIComponent(threshold)}&delivered_at=is.null&bounced_at=is.null&complained_at=is.null&limit=100&select=id,delayed_count`).catch(() => []);
+  for (const message of accepted) await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}&delivery_status=eq.accepted`, { method: "PATCH", body: JSON.stringify({ status: "delayed", delivery_status: "delayed", delayed_at: new Date().toISOString(), delayed_count: Number(message.delayed_count || 0) + 1, delivery_error_code: "delivery_confirmation_delayed", delivery_error: "The provider accepted this message, but no delivery confirmation arrived within 15 minutes", updated_at: new Date().toISOString() }) }).catch(() => undefined);
+}
+
+function providerWebhookSecret(env: Env, provider: ProviderName): string | undefined {
+  if (provider === "brevo") return env.BREVO_WEBHOOK_SECRET;
+  if (provider === "ses") return env.SES_WEBHOOK_SECRET;
+  if (provider === "mailgun") return env.MAILGUN_WEBHOOK_SIGNING_KEY;
+  if (provider === "postmark") return env.POSTMARK_WEBHOOK_SECRET;
+  if (provider === "sendgrid") return env.SENDGRID_WEBHOOK_SECRET;
+  return env.SMTP_WEBHOOK_SECRET;
+}
+
+function webhookEventId(provider: ProviderName, event: JsonRecord): string {
+  return String(event.eventId || event.event_id || event.sg_event_id || event.id || event.MessageID || event.messageId || event["message-id"] || `${provider}:${event.eventType || event.event || event.Type || "event"}:${event.timestamp || event.occurredAt || ""}`);
+}
+
+function normalizeDeliveryEvents(provider: ProviderName, input: unknown): DeliveryEvent[] {
+  let payload = input as JsonRecord;
+  if (provider === "ses" && typeof payload.Message === "string") {
+    try { payload = JSON.parse(payload.Message) as JsonRecord; } catch { /* keep the envelope for the failure explanation */ }
+  }
+  const values = Array.isArray(input) ? input : Array.isArray(payload?.events) ? payload.events : [payload];
+  return values.filter((value): value is JsonRecord => Boolean(value && typeof value === "object")).map((raw) => {
+    const nested = objectValue(raw["event-data"] || raw.eventData || raw.mail || raw);
+    const eventType = String(raw.event || raw.eventType || raw.Type || nested.event || nested.eventType || raw.RecordType || "unknown").toLowerCase();
+    const providerMessageId = String(raw["message-id"] || raw.messageId || raw.sg_message_id || raw.MessageID || nested.id || nested.messageId || raw.id || "");
+    const recipient = cleanAddress(String(raw.email || raw.recipient || nested.recipient || nested.destination || ""));
+    const reason = String(raw.reason || raw.description || raw.error || nested.message || nested.reason || nested.description || "").slice(0, 500);
+    const timestamp = Number(raw.timestamp || nested.timestamp || 0);
+    return { provider, eventType, providerMessageId: providerMessageId || undefined, eventId: webhookEventId(provider, raw), recipient: recipient || undefined, reason: reason || undefined, occurredAt: timestamp ? new Date(timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp).toISOString() : typeof raw.occurredAt === "string" ? raw.occurredAt : undefined, payload: raw };
+  });
+}
+
+function deliveryState(eventType: string): { status: string; deliveryStatus: string; attemptStatus: string } | null {
+  const value = eventType.toLowerCase().replace(/[ -]/g, "_");
+  if (["delivered", "delivery", "delivery_success"].includes(value)) return { status: "delivered", deliveryStatus: "delivered", attemptStatus: "delivered" };
+  if (["open", "opened"].includes(value)) return { status: "sent", deliveryStatus: "accepted", attemptStatus: "accepted" };
+  if (["click", "clicked", "clicks"].includes(value)) return { status: "sent", deliveryStatus: "accepted", attemptStatus: "accepted" };
+  if (["deferred", "delayed", "soft_bounce", "temporary_failure"].includes(value)) return { status: "delayed", deliveryStatus: "delayed", attemptStatus: "deferred" };
+  if (["hard_bounce", "bounce", "bounced", "invalid", "rejected"].includes(value)) return { status: "bounced", deliveryStatus: "bounced", attemptStatus: "bounced" };
+  if (["complaint", "spamcomplaint", "spam_complaint"].includes(value)) return { status: "complained", deliveryStatus: "complained", attemptStatus: "complained" };
+  if (["blocked", "error", "failed", "failure"].includes(value)) return { status: "failed", deliveryStatus: "failed", attemptStatus: "failed" };
+  if (["sent", "accepted", "queued", "processed"].includes(value)) return { status: "sent", deliveryStatus: "accepted", attemptStatus: "accepted" };
+  return null;
+}
+
+async function claimWebhookEvent(env: Env, provider: ProviderName, event: DeliveryEvent): Promise<{ accepted: boolean; hash: string }> {
+  const serialized = JSON.stringify(event.payload).slice(0, 100_000);
+  const hash = await sha256Hex(new TextEncoder().encode(`${provider}:${event.eventId}:${serialized}`));
+  const nonce = `${event.eventId || hash}`.slice(0, 240);
+  const existing = await dbRequest<JsonRecord[]>(env, `inbound_webhook_nonces?provider=eq.${encodeURIComponent(provider)}&nonce=eq.${encodeURIComponent(nonce)}&limit=1`).catch(() => []);
+  if (existing[0]) return { accepted: false, hash };
+  try {
+    await dbRequest(env, "inbound_webhook_nonces", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ provider, nonce, payload_hash: hash, expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() }) });
+    return { accepted: true, hash };
+  } catch {
+    const duplicate = await dbRequest<JsonRecord[]>(env, `inbound_webhook_nonces?provider=eq.${encodeURIComponent(provider)}&nonce=eq.${encodeURIComponent(nonce)}&limit=1`).catch(() => []);
+    return { accepted: !duplicate[0], hash };
+  }
+}
+
+async function processDeliveryEvent(env: Env, event: DeliveryEvent): Promise<{ matched: boolean; replayed: boolean }> {
+  const claim = await claimWebhookEvent(env, event.provider as ProviderName, event);
+  if (!claim.accepted) return { matched: false, replayed: true };
+  const provider = event.provider as ProviderName;
+  const query = event.providerMessageId ? `provider=eq.${encodeURIComponent(provider)}&provider_message_id=eq.${encodeURIComponent(event.providerMessageId)}&limit=1` : "limit=0";
+  const rows = await dbRequest<JsonRecord[]>(env, `messages?${query}`).catch(() => []);
+  const message = rows[0];
+  if (!message) return { matched: false, replayed: false };
+  const state = deliveryState(event.eventType);
+  const now = event.occurredAt || new Date().toISOString();
+  const patch: JsonRecord = { provider_event_id: event.eventId || null, delivery_error: event.reason || null, updated_at: new Date().toISOString() };
+  if (state) {
+    const engagement = event.eventType.toLowerCase().includes("open") || event.eventType.toLowerCase().includes("click");
+    if (!engagement) {
+      patch.status = state.status;
+      patch.delivery_status = state.deliveryStatus;
+      if (state.deliveryStatus === "delivered") patch.delivered_at = now;
+      if (state.deliveryStatus === "delayed") { patch.delayed_at = now; patch.delayed_count = Number(message.delayed_count || 0) + 1; patch.next_delivery_at = null; }
+      if (state.deliveryStatus === "bounced") patch.bounced_at = now;
+      if (state.deliveryStatus === "complained") patch.complained_at = now;
+      if (["bounced", "complained", "failed"].includes(state.deliveryStatus)) patch.delivery_error_code = event.eventType.slice(0, 80);
+    }
+    if (event.eventType.toLowerCase().includes("open")) patch.opened_at = now;
+    if (event.eventType.toLowerCase().includes("click")) patch.clicked_at = now;
+  }
+  await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify(patch) });
+  await dbRequest(env, "mail_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: message.owner_id, message_id: message.id, provider, event_type: event.eventType, raw_event_type: event.eventType, provider_message_id: event.providerMessageId || null, event_id: event.eventId || null, event_hash: claim.hash, occurred_at: now, payload: event.payload }) }).catch(() => undefined);
+  const organizationId = message.mailbox_id ? (await dbRequest<MailboxAdminSettings[]>(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(String(message.mailbox_id))}&limit=1`).catch(() => []))[0]?.organization_id : undefined;
+  if (state?.deliveryStatus === "delivered") await recordDomainOutcome(env, organizationId, domainOf(String(message.from_address || "")), "delivered");
+  if (state?.deliveryStatus === "bounced" || state?.deliveryStatus === "complained") {
+    const recipient = event.recipient || (Array.isArray(message.to_addresses) ? String(message.to_addresses[0] || "") : "");
+    if (organizationId && recipient) await dbRequest(env, "suppression_entries?on_conflict=organization_id,email,kind", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ organization_id: organizationId, email: cleanAddress(recipient), kind: state.deliveryStatus === "complained" ? "complaint" : "bounce", reason: event.reason || `Provider reported ${event.eventType}`, provider, source_event_id: event.eventId || null, active: true }) }).catch(() => undefined);
+    await recordDomainOutcome(env, organizationId, domainOf(String(message.from_address || "")), state.deliveryStatus === "complained" ? "complaint" : "bounced");
+  }
+  return { matched: true, replayed: false };
+}
+
+async function deliveryOperations(env: Env, organizationId: string): Promise<JsonRecord> {
+  const members = await dbRequest<Array<{ user_id: string }>>(env, `organization_members?organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.active&select=user_id`).catch(() => []);
+  const ownerFilter = members.length ? `owner_id=in.(${members.map((member) => member.user_id).join(",")})` : "limit=0";
+  const [health, domains, attempts, queue] = await Promise.all([
+    dbRequest<ProviderHealth[]>(env, `provider_health?organization_id=eq.${encodeURIComponent(organizationId)}&order=provider.asc`).catch(() => []),
+    dbRequest<JsonRecord[]>(env, `domain_reputation?organization_id=eq.${encodeURIComponent(organizationId)}&order=updated_at.desc`).catch(() => []),
+    dbRequest<JsonRecord[]>(env, `delivery_attempts?${ownerFilter}&order=started_at.desc&limit=40`).catch(() => []),
+    dbRequest<JsonRecord[]>(env, `delivery_queue?${ownerFilter}&status=in.(queued,retrying,running,dead)&order=available_at.asc&limit=1000`).catch(() => []),
+  ]);
+  return { providers: PROVIDER_NAMES.map((provider) => ({ provider, label: providerLabel(provider), configured: providerReady(env, provider), circuit: health.find((item) => item.provider === provider) || null })), domains, recentAttempts: attempts, queue: { queued: queue.filter((item) => item.status === "queued").length, retrying: queue.filter((item) => item.status === "retrying").length, running: queue.filter((item) => item.status === "running").length, dead: queue.filter((item) => item.status === "dead").length } };
+}
+
 function protectedHeaders(response: Response, noStore = false): Response {
   const headers = new Headers(response.headers);
   headers.set("X-Content-Type-Options", "nosniff");
@@ -1960,16 +2340,43 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (request.method !== "GET" && request.method !== "HEAD") return error("Method not allowed", 405);
     return json({ ok: true, service: "email-service", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
   }
-  if (url.pathname === "/api/webhooks/brevo") {
+  const deliveryWebhookMatch = url.pathname.match(/^\/api\/webhooks\/(brevo|ses|mailgun|postmark|sendgrid|smtp)$/);
+  if (deliveryWebhookMatch) {
     if (request.method !== "POST") return error("Method not allowed", 405);
-    const secret = url.searchParams.get("token") || request.headers.get("x-webhook-secret");
-    if (env.BREVO_WEBHOOK_SECRET && secret !== env.BREVO_WEBHOOK_SECRET) return error("Unauthorized", 401);
-    const event = (await request.json()) as JsonRecord;
-    const providerMessageId = typeof event["message-id"] === "string" ? event["message-id"] : String(event.messageId || "");
-    const rows = providerMessageId ? await dbRequest<Array<{ id: string; owner_id: string }>>(env, `messages?provider_message_id=eq.${encodeURIComponent(providerMessageId)}&limit=1`) : [];
-    const statusMap: Record<string, string> = { delivered: "delivered", hard_bounce: "bounced", soft_bounce: "bounced", blocked: "failed", error: "failed" };
-    if (rows[0]) { const status = statusMap[String(event.event || "").toLowerCase()]; if (status) await dbRequest(env, `messages?id=eq.${encodeURIComponent(rows[0].id)}`, { method: "PATCH", body: JSON.stringify({ status }) }); await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: rows[0].owner_id, message_id: rows[0].id, provider: "brevo", event_type: String(event.event || "unknown"), provider_message_id: providerMessageId, payload: event }) }); }
-    return json({ ok: true });
+    const provider = deliveryWebhookMatch[1] as ProviderName;
+    const expectedSecret = providerWebhookSecret(env, provider);
+    const suppliedSecret = url.searchParams.get("token") || request.headers.get("x-webhook-secret") || request.headers.get("x-webhook-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    if (!expectedSecret) return error("This provider webhook is not configured", 503);
+    if (suppliedSecret !== expectedSecret) return error("Unauthorized", 401);
+    const payload = (await request.json()) as unknown;
+    const events = normalizeDeliveryEvents(provider, payload);
+    const results = [];
+    for (const event of events) results.push(await processDeliveryEvent(env, event));
+    return json({ ok: true, received: events.length, matched: results.filter((result) => result.matched).length, replayed: results.filter((result) => result.replayed).length });
+  }
+  const inboundWebhookMatch = url.pathname.match(/^\/api\/webhooks\/inbound\/(brevo|ses|mailgun|postmark|sendgrid|smtp)$/);
+  if (inboundWebhookMatch) {
+    if (request.method !== "POST") return error("Method not allowed", 405);
+    const provider = inboundWebhookMatch[1] as ProviderName;
+    const expectedSecret = providerWebhookSecret(env, provider);
+    const suppliedSecret = url.searchParams.get("token") || request.headers.get("x-webhook-secret") || request.headers.get("x-webhook-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    if (!expectedSecret) return error("This inbound webhook is not configured", 503);
+    if (suppliedSecret !== expectedSecret) return error("Unauthorized", 401);
+    const payload = (await request.json()) as JsonRecord;
+    const inboundEvent: DeliveryEvent = { provider, eventType: "inbound", eventId: webhookEventId(provider, payload), payload };
+    const claim = await claimWebhookEvent(env, provider, inboundEvent);
+    if (!claim.accepted) return json({ ok: true, replayed: true });
+    const rawText = typeof payload.raw === "string" ? payload.raw : typeof payload.raw_message === "string" ? payload.raw_message : typeof payload["body-mime"] === "string" ? String(payload["body-mime"]) : rawMessageSource({ from: String(payload.from || payload.sender || "unknown@example.invalid"), to: splitAddresses(payload.to || payload.recipient || env.DEFAULT_FROM_EMAIL || `james@${env.APP_DOMAIN}`), cc: splitAddresses(payload.cc), bcc: [], subject: String(payload.subject || "(no subject)"), text: String(payload.text || payload.text_body || payload.body || ""), html: typeof payload.html === "string" ? payload.html : undefined, replyTo: typeof payload.reply_to === "string" ? payload.reply_to : undefined, messageId: String(payload.message_id || `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`) });
+    const destination = splitAddresses(payload.to || payload.recipient || env.DEFAULT_FROM_EMAIL || `james@${env.APP_DOMAIN}`)[0];
+    const rawBytes = new TextEncoder().encode(rawText);
+    const rawBuffer = rawBytes.buffer.slice(rawBytes.byteOffset, rawBytes.byteOffset + rawBytes.byteLength) as ArrayBuffer;
+    try {
+      await ingestRawEmail(env, rawBuffer, String(payload.from || payload.sender || ""), destination, undefined, ctx);
+    } catch (inboundError) {
+      await dbRequest(env, `inbound_webhook_nonces?provider=eq.${encodeURIComponent(provider)}&nonce=eq.${encodeURIComponent(inboundEvent.eventId || claim.hash)}`, { method: "DELETE" }).catch(() => undefined);
+      throw inboundError;
+    }
+    return json({ ok: true, replayed: false, received: true });
   }
   if (request.method === "POST" && url.pathname === "/api/auth/recovery-request") return handleRecoveryRequest(request, env);
   if (request.method === "POST" && url.pathname === "/api/auth/mfa-recovery") return handleMfaRecoveryRequest(request, env);
@@ -1989,6 +2396,10 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     // regular mailbox remains available while it is being applied.
   }
   if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env, ctx, user);
+  if (request.method === "GET" && url.pathname === "/api/delivery/overview") {
+    if (!organization) return error("Workspace delivery data is unavailable", 503);
+    return json(await deliveryOperations(env, organization.id));
+  }
 
   if (request.method === "GET" && url.pathname === "/api/recovery-codes/status") {
     const rows = await dbRequest<Array<{ id: string }>>(env, `account_mfa_recovery_codes?owner_id=eq.${encodeURIComponent(user.id)}&used_at=is.null&select=id`);
@@ -2315,6 +2726,33 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const events = await dbRequest<JsonRecord[]>(env, `screening_events?owner_id=eq.${encodeURIComponent(user.id)}&message_id=eq.${encodeURIComponent(id)}&order=created_at.desc&limit=20`).catch(() => []);
     return json({ ...rows[0], screening_history: events });
   }
+  const inspectionMatch = url.pathname.match(/^\/api\/mail\/([^/]+)\/inspection$/);
+  if (request.method === "GET" && inspectionMatch) {
+    const id = inspectionMatch[1];
+    const scope = messageScopeFilter(user.id, await delegatedMailboxIds(env, user.id, "read"));
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&${scope}&limit=1`);
+    if (!rows[0]) return error("Message not found", 404);
+    const [attempts, events] = await Promise.all([
+      dbRequest<JsonRecord[]>(env, `delivery_attempts?message_id=eq.${encodeURIComponent(id)}&order=attempt_number.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `mail_events?message_id=eq.${encodeURIComponent(id)}&order=occurred_at.asc.nullslast,created_at.asc`).catch(() => []),
+    ]);
+    return json({ message: rows[0], attempts, events });
+  }
+  const sourceMatch = url.pathname.match(/^\/api\/mail\/([^/]+)\/source$/);
+  if (request.method === "GET" && sourceMatch) {
+    const id = sourceMatch[1];
+    const scope = messageScopeFilter(user.id, await delegatedMailboxIds(env, user.id, "read"));
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&${scope}&limit=1`);
+    const message = rows[0];
+    if (!message) return error("Message not found", 404);
+    let source = "";
+    if (typeof message.raw_object_key === "string" && message.raw_object_key) {
+      source = new TextDecoder().decode(await readObject(env, message.raw_object_key));
+    } else {
+      source = rawMessageSource({ from: String(message.from_address || ""), to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [], cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [], bcc: Array.isArray(message.bcc_addresses) ? message.bcc_addresses.map(String) : [], subject: String(message.subject || "(no subject)"), text: String(message.text_body || ""), html: typeof message.html_body === "string" ? message.html_body : undefined, replyTo: typeof message.reply_to === "string" ? message.reply_to : undefined, messageId: String(message.message_id_header || `<${id}@${env.APP_DOMAIN}>`) });
+    }
+    return new Response(source, { headers: { "content-type": "message/rfc822; charset=utf-8", "content-disposition": `inline; filename="${id}.eml"`, "cache-control": "no-store" } });
+  }
   const feedbackMatch = url.pathname.match(/^\/api\/mail\/([^/]+)\/feedback$/);
   if (request.method === "POST" && feedbackMatch) {
     const id = feedbackMatch[1];
@@ -2335,7 +2773,8 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const existing = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
     if (!existing[0]) return error("Message not found", 404);
     if (!canManageOutbox(existing[0], user.id)) return error("This send is already being processed or can no longer be cancelled", 409);
-    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&status=in.(queued,scheduled)&cancelled_at=is.null`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ status: "draft", folder: "drafts", cancelled_at: new Date().toISOString(), send_after: null, send_lease_until: null, scheduled_at: null, work_note: "Send cancelled", updated_at: new Date().toISOString() }) });
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&status=in.(queued,scheduled)&cancelled_at=is.null`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ status: "draft", folder: "drafts", cancelled_at: new Date().toISOString(), send_after: null, next_delivery_at: null, send_lease_until: null, scheduled_at: null, work_note: "Send cancelled", updated_at: new Date().toISOString() }) });
+    await dbRequest(env, `delivery_queue?message_id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: "suppressed", locked_until: null, updated_at: new Date().toISOString() }) }).catch(() => undefined);
     return json({ ok: true, message: rows[0] || null });
   }
   const outboxEditMatch = url.pathname.match(/^\/api\/outbox\/([^/]+)$/);
