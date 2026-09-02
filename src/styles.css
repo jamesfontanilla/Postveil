@@ -701,6 +701,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 }
 
 .auth-link { margin-top: -4px; }
+.auth-card > .text-button { display: block; width: fit-content; max-width: 100%; margin-top: 8px; text-align: left; }
 .security-settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .security-email { overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink-soft); padding: 10px 11px; font-size: 12px; }
 .security-status { border-radius: 999px; background: var(--surface); color: var(--muted); padding: 4px 8px; font: 500 10px "DM Mono", monospace; }
@@ -945,4 +946,73 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .compose-tracking-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--muted); font-size: 10px; }
 @media (max-width: 720px) {
   .delivery-ops-grid, .delivery-summary-grid, .inspection-columns { grid-template-columns: 1fr; }
+}
+
+/* Mobile interaction pass: keep one clear surface visible, protect the safe area,
+   and make the dense mail controls comfortable to tap. */
+html, body, #root { max-width: 100%; overflow-x: hidden; }
+button, a, input, select, textarea { touch-action: manipulation; }
+.mobile-nav-backdrop { display: none; }
+.mobile-detail-back { display: none; }
+
+@media (max-width: 720px) {
+  body { min-width: 0; background: var(--canvas, #f8f9f6); }
+  .auth-shell { display: block; width: 100vw; max-width: 100vw; min-height: 100vh; min-height: 100dvh; padding: calc(28px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); }
+  .auth-card { width: 100%; max-width: 100%; min-width: 0; margin: 0 auto; overflow: hidden; padding: 28px 22px; border-radius: 20px; }
+  .auth-card > *, .auth-copy, .auth-form { max-width: 100%; min-width: 0; }
+  .auth-card h1 { max-width: none; font-size: clamp(34px, 11vw, 48px); overflow-wrap: anywhere; }
+  .auth-card .text-button { white-space: normal; }
+  .auth-aside { width: 100%; max-width: 100%; min-width: 0; margin: 22px auto 0; padding: 0 4px; overflow: hidden; }
+  .aside-note { margin-bottom: 16px; }
+  .aside-quote { font-size: 22px; }
+  .aside-meta { margin-top: 14px; font-size: 12px; }
+  .app-shell { min-height: 100vh; min-height: 100dvh; overflow-x: hidden; }
+  .mobile-topbar { padding-top: env(safe-area-inset-top); height: calc(55px + env(safe-area-inset-top)); }
+  .mobile-topbar .icon-button,
+  .mobile-close,
+  .detail-head .icon-button { min-width: 44px; min-height: 44px; }
+  .sidebar { padding-top: max(22px, env(safe-area-inset-top)); padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .mobile-nav-backdrop { position: fixed; z-index: 14; inset: 0; display: block; border: 0; background: rgba(23, 33, 31, .34); padding: 0; }
+  .sidebar { z-index: 15; }
+  .folder-link, .compose-button { min-height: 44px; }
+  .column-head { align-items: flex-start; gap: 12px; }
+  .column-head h1 { font-size: 20px; }
+  .head-actions { flex: 0 0 auto; }
+  .search-box { align-items: center; gap: 7px; }
+  .search-box input { flex: 1 1 100%; min-width: 0; width: auto; }
+  .search-box select { flex: 1 1 0; min-width: 0; width: auto; }
+  .message-list { overflow-x: hidden; }
+  .message-row { min-height: 68px; }
+  .reading-pane { display: none; }
+  .app-shell.mobile-message-open .message-column { display: none; }
+  .app-shell.mobile-message-open .reading-pane { display: block; min-height: calc(100dvh - 55px); overflow-y: auto; }
+  .mobile-detail-back { display: inline-flex; align-items: center; gap: 5px; margin: 0 0 14px; border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 11px; font-weight: 800; }
+  .mobile-detail-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .message-detail { padding-top: 18px; }
+  .detail-head .head-actions { margin-top: 10px; }
+  .detail-actions { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .settings-tabs { scrollbar-width: none; scroll-snap-type: x proximity; }
+  .settings-tabs::-webkit-scrollbar { display: none; }
+  .settings-tabs button { min-height: 44px; white-space: nowrap; scroll-snap-align: start; }
+  .modal-backdrop { align-items: stretch; padding: 0; }
+  .settings-panel { width: 100%; max-height: none; min-height: 100dvh; border: 0; border-radius: 0; padding: calc(16px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom)); }
+  .panel-title { position: sticky; z-index: 2; top: calc(-1 * (16px + env(safe-area-inset-top))); margin: calc(-1 * (16px + env(safe-area-inset-top))) -16px 0; background: var(--surface); padding: calc(16px + env(safe-area-inset-top)) 16px 4px; }
+  .choice-row button, .settings-select-row select, .attachment-download-all, .attachment-mini-action { min-height: 44px; }
+  .image-preference-row { align-items: flex-start; }
+  .compose-overlay { min-height: 100dvh; padding-bottom: env(safe-area-inset-bottom); }
+  .compose-card, .compose-card-expanded { min-height: 100dvh; padding-bottom: env(safe-area-inset-bottom); }
+  .compose-head-actions .icon-button { min-width: 44px; min-height: 44px; }
+  .file-button { min-height: 44px; }
+  .attachment-remove { width: 44px; height: 44px; }
+}
+
+@media (max-width: 380px) {
+  .auth-shell { padding-left: 10px; padding-right: 10px; }
+  .auth-card { padding-left: 18px; padding-right: 18px; }
+  .column-head { padding-left: 13px; padding-right: 13px; }
+  .search-box { margin-left: 10px; margin-right: 10px; }
+  .message-row { gap: 8px; padding-left: 10px; padding-right: 10px; }
+  .row-top strong { max-width: 20ch; }
+  .message-detail { padding-left: 13px; padding-right: 13px; }
+  .detail-actions { margin-left: -13px; margin-right: -13px; padding-left: 13px; padding-right: 13px; }
 }

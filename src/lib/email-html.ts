@@ -72,6 +72,8 @@ function preserveEmailDimension(element: HTMLElement, attribute: "width" | "heig
 
 export type EmailHtmlOptions = {
   inlineImageUrls?: Record<string, string>;
+  /** Remote images are rendered by default; callers can disable them for privacy. */
+  loadExternalImages?: boolean;
 };
 
 /**
@@ -83,6 +85,7 @@ export type EmailHtmlOptions = {
  */
 export function sanitizeEmailHtml(value: string | null | undefined, options: EmailHtmlOptions = {}): string {
   if (!value?.trim()) return "";
+  const loadExternalImages = options.loadExternalImages !== false;
   const sanitized = DOMPurify.sanitize(value, {
     ALLOWED_ATTR: allowedAttributes,
     ALLOWED_TAGS: allowedTags,
@@ -128,8 +131,8 @@ export function sanitizeEmailHtml(value: string | null | undefined, options: Ema
     if (inlineUrl) image.setAttribute("src", inlineUrl);
     preserveEmailDimension(image, "width");
     const src = image.getAttribute("src");
-    if (!src || !isSafeUrl(src, "src")) image.removeAttribute("src");
-    image.setAttribute("loading", "lazy");
+    if (!src || !isSafeUrl(src, "src") || (!loadExternalImages && !inlineUrl)) image.removeAttribute("src");
+    image.setAttribute("loading", loadExternalImages || inlineUrl ? "eager" : "lazy");
     image.setAttribute("referrerpolicy", "no-referrer");
     image.setAttribute("decoding", "async");
   });

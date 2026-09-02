@@ -11,6 +11,7 @@ import {
 import {
   Archive,
   AlertTriangle,
+  ArrowLeft,
   ArrowDown,
   ArrowUp,
   Bell,
@@ -384,11 +385,20 @@ function avatarGradient(email: string) {
   const hue = Math.abs(hash) % 360;
   return { background: `linear-gradient(135deg, hsl(${hue} 68% 58%), hsl(${(hue + 42) % 360} 72% 42%))` };
 }
+function storedBooleanPreference(key: string, fallback: boolean): boolean {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const value = window.localStorage.getItem(key);
+    return value === null ? fallback : value === "true";
+  } catch {
+    return fallback;
+  }
+}
 function SenderAvatar({ name, email, avatarUrl, large = false }: { name: string; email: string; avatarUrl?: string | null; large?: boolean }) {
   const [imageFailed, setImageFailed] = useState(false);
   return (
     <div className={`avatar ${large ? "large-avatar" : "row-avatar"} ${avatarUrl && !imageFailed ? "avatar-image" : ""}`} style={avatarUrl && !imageFailed ? undefined : avatarGradient(email)} aria-label={`${name} profile picture`}>
-      {avatarUrl && !imageFailed ? <img src={avatarUrl} alt="" onError={() => setImageFailed(true)} /> : initials(name || email)}
+      {avatarUrl && !imageFailed ? <img src={avatarUrl} alt="" width={large ? 37 : 29} height={large ? 37 : 29} onError={() => setImageFailed(true)} /> : initials(name || email)}
     </div>
   );
 }
@@ -949,7 +959,7 @@ function Compose({
     );
   }
   return (
-    <div className="compose-overlay" role="presentation">
+    <div className="compose-overlay" role="dialog" aria-modal="true" aria-labelledby="compose-title">
       <form
         className={`compose-card${isExpanded ? " compose-card-expanded" : ""}`}
         onSubmit={send}
@@ -959,7 +969,7 @@ function Compose({
             <p className="eyebrow">
               {seed?.to ? "REPLY / FORWARD" : "NEW MESSAGE"}
             </p>
-            <h2>{seed?.to ? "Continue the thread" : "New message"}</h2>
+            <h2 id="compose-title">{seed?.to ? "Continue the thread" : "New message"}</h2>
             <span className="compose-subtitle">
               {seed?.to ? "Your reply stays connected to this conversation." : "A private message from your mailbox."}
             </span>
@@ -1531,6 +1541,8 @@ function SettingsPanel({
   onClose,
   onChanged,
   onOpenMessage,
+  loadRemoteImages,
+  onLoadRemoteImagesChange,
 }: {
   session: Session;
   settings: AppSettings;
@@ -1542,6 +1554,8 @@ function SettingsPanel({
   onClose: () => void;
   onChanged: () => void;
   onOpenMessage: (message: Message) => void;
+  loadRemoteImages: boolean;
+  onLoadRemoteImagesChange: (value: boolean) => void;
 }) {
   const [tab, setTab] = useState<
     | "appearance"
@@ -2230,13 +2244,25 @@ function SettingsPanel({
     if (tab === "security") void loadSecurity();
     if (tab === "spam") void loadScreeningQueue();
   }, [tab]);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
   return (
-    <div className="modal-backdrop">
-      <section className="settings-panel">
+    <div className="modal-backdrop" role="presentation">
+      <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div className="panel-title">
           <div>
             <p className="eyebrow">MAILBOX SETTINGS</p>
-            <h2>Settings & organization</h2>
+            <h2 id="settings-title">Settings & organization</h2>
           </div>
           <button
             className="icon-button"
@@ -2391,6 +2417,15 @@ function SettingsPanel({
                 </select>
               </label>
               <small className="setting-note">New messages wait this long before the sending queue releases them.</small>
+              <label className="toggle-row image-preference-row">
+                <input
+                  type="checkbox"
+                  checked={loadRemoteImages}
+                  onChange={(event) => onLoadRemoteImagesChange(event.target.checked)}
+                />
+                Display images in messages
+              </label>
+              <small className="setting-note">Images are shown by default. Turn this off to prevent remote senders from learning when you open a message.</small>
             </div>
             <div className="setting-card">
               <h3>Attention</h3>
@@ -3235,6 +3270,7 @@ function Workspace({
 }
 
 function MailboxApp({ session }: { session: Session }) {
+  const imagePreferenceKey = `parcel.load_remote_images:${session.user.id}`;
   const [view, setView] = useState<"mail" | "calendar" | "tasks">("mail");
   const [folder, setFolder] = useState<ViewKey>("inbox");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -3265,6 +3301,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [composeSeed, setComposeSeed] = useState<ComposeSeed | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [loadRemoteImages, setLoadRemoteImages] = useState(() => storedBooleanPreference(imagePreferenceKey, true));
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("newest");
@@ -3402,6 +3439,27 @@ function MailboxApp({ session }: { session: Session }) {
     setDetailLoading(false);
     clearListSelection();
     setMobileNav(false);
+  }
+  function closeSelectedMessage() {
+    detailRequestRef.current += 1;
+    setSelected(null);
+    setSelectedId(null);
+    setThreadMessages([]);
+    setInlineImageUrls({});
+    setDetailLoading(false);
+    setTrustLensOpen(false);
+    setTrustData(null);
+    setDeliveryInspectionOpen(false);
+    setDeliveryInspection(null);
+    setShowMoreActions(false);
+  }
+  function updateRemoteImagePreference(value: boolean) {
+    setLoadRemoteImages(value);
+    try {
+      window.localStorage.setItem(imagePreferenceKey, String(value));
+    } catch {
+      // The preference still applies for this session when storage is unavailable.
+    }
   }
   function toggleMessageSelection(id: string) {
     if (selectAllResults) {
@@ -3625,6 +3683,7 @@ function MailboxApp({ session }: { session: Session }) {
     const requestId = detailRequestRef.current + 1;
     detailRequestRef.current = requestId;
     setView("mail");
+    setMobileNav(false);
     if (["inbox", "sent", "drafts", "archive", "trash", "spam"].includes(message.folder)) setFolder(message.folder as ViewKey);
     setSelectedId(message.id);
     setSelected(message);
@@ -3940,16 +3999,18 @@ function MailboxApp({ session }: { session: Session }) {
   const detailIdentity = selected
     ? detailIdentityForMessage(selected, contacts, mailboxes)
     : null;
-  const selectedHtml = selected ? sanitizeEmailHtml(selected.html_body, { inlineImageUrls }) : "";
+  const selectedHtml = selected ? sanitizeEmailHtml(selected.html_body, { inlineImageUrls, loadExternalImages: loadRemoteImages }) : "";
   return (
     <main
-      className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
+      className={`app-shell${selected ? " mobile-message-open" : ""} theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
     >
       <header className="mobile-topbar">
         <button
           className="icon-button"
           onClick={() => setMobileNav(!mobileNav)}
           aria-label="Open navigation"
+          aria-expanded={mobileNav}
+          aria-controls="mailbox-navigation"
         >
           <Menu size={19} />
         </button>
@@ -3964,7 +4025,8 @@ function MailboxApp({ session }: { session: Session }) {
           <RefreshCcw size={17} />
         </button>
       </header>
-      <aside className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}>
+      {mobileNav && <button className="mobile-nav-backdrop" type="button" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
+      <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}>
         <div className="sidebar-top">
           <div className="brand-lockup">
             <div className="brand-mark small">P</div>
@@ -4395,6 +4457,9 @@ function MailboxApp({ session }: { session: Session }) {
               <article key={selected.id} className={`message-detail ${detailLoading ? "is-detail-loading" : ""}`} aria-busy={detailLoading}>
                 <div className="detail-head">
                   <div>
+                    <button className="mobile-detail-back" type="button" onClick={closeSelectedMessage}>
+                      <ArrowLeft size={15} aria-hidden="true" /> Back to messages
+                    </button>
                     <p className="eyebrow">{selected.direction === "inbound" ? "RECEIVED" : "SENT"}</p>
                     <h2>{selected.subject || "(no subject)"}</h2>
                     <div className="detail-meta">
@@ -4790,6 +4855,8 @@ function MailboxApp({ session }: { session: Session }) {
           senderPolicies={senderPolicies}
           onClose={() => setSettingsOpen(false)}
           onOpenMessage={(message) => void openMessage(message)}
+          loadRemoteImages={loadRemoteImages}
+          onLoadRemoteImagesChange={updateRemoteImagePreference}
           onChanged={() => {
             void loadMeta();
           }}
