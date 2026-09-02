@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify
+    name: CI
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
