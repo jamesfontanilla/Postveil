@@ -1536,3 +1536,98 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .email-html-surface table, .email-html-surface tbody, .email-html-surface thead, .email-html-surface tfoot, .email-html-surface tr { display: block; width: 100% !important; }
   .email-html-surface td, .email-html-surface th { display: block; width: auto !important; }
 }
+
+/* Mobile mail flow: keep the list and reader as separate views instead of stacking both. */
+.mobile-topbar-leading {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mobile-back {
+  display: none;
+}
+
+.mobile-nav-backdrop {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  html, body {
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .mobile-topbar {
+    min-height: calc(55px + env(safe-area-inset-top));
+    height: calc(55px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .mobile-topbar .icon-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .mobile-back {
+    display: inline-grid;
+  }
+
+  .mini-brand {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
+  }
+
+  .mini-brand-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-backdrop {
+    position: fixed;
+    z-index: 14;
+    inset: 0;
+    display: block;
+    width: 100%;
+    border: 0;
+    background: rgba(23, 33, 31, .22);
+    padding: 0;
+  }
+
+  .app-shell:not(.mobile-detail-open) .reading-pane {
+    display: none;
+  }
+
+  .app-shell.mobile-detail-open .message-column {
+    display: none;
+  }
+
+  .app-shell.mobile-detail-open .reading-pane {
+    display: block;
+    min-height: calc(100dvh - 55px - env(safe-area-inset-top));
+    height: auto;
+    border-top: 0;
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+
+  .app-shell.mobile-detail-open .message-detail {
+    min-height: calc(100dvh - 55px - env(safe-area-inset-top));
+  }
+
+  .app-shell:not(.mobile-detail-open) .message-column {
+    min-height: calc(100dvh - 55px - env(safe-area-inset-top));
+  }
+
+  .sidebar {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .column-head {
+    top: calc(55px + env(safe-area-inset-top));
+  }
+}

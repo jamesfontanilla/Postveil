@@ -12,6 +12,7 @@ import {
   Archive,
   AlertTriangle,
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   Bell,
   Bookmark,
@@ -3290,6 +3291,10 @@ function MailboxApp({ session }: { session: Session }) {
     setTrustData(null);
     setShowMoreActions(false);
   }
+  function closeMobileMessage() {
+    clearMessageSelection();
+    if (window.matchMedia("(max-width: 720px)").matches) window.scrollTo(0, 0);
+  }
   async function restoreSelected() {
     if (!selected || selected.folder !== "trash") return;
     setTrashBusy(true);
@@ -3432,6 +3437,7 @@ function MailboxApp({ session }: { session: Session }) {
       ? Mail
       : folderIcons[folder as SystemFolder];
   const unread = messages.filter((message) => !message.is_read).length;
+  const mobileDetailOpen = view === "mail" && Boolean(selected);
   const selectedReplySeed = selected
     ? {
         to:
@@ -3470,18 +3476,25 @@ function MailboxApp({ session }: { session: Session }) {
     : undefined;
   return (
     <main
-      className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
+      className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"} ${mobileDetailOpen ? "mobile-detail-open" : ""}`}
     >
       <header className="mobile-topbar">
-        <button
-          className="icon-button"
-          onClick={() => setMobileNav(!mobileNav)}
-          aria-label="Open navigation"
-        >
-          <Menu size={19} />
-        </button>
+        <div className="mobile-topbar-leading">
+          <button
+            className="icon-button"
+            onClick={() => setMobileNav(!mobileNav)}
+            aria-label="Open navigation"
+          >
+            <Menu size={19} />
+          </button>
+          {mobileDetailOpen && (
+            <button className="icon-button mobile-back" onClick={closeMobileMessage} aria-label="Back to messages">
+              <ArrowLeft size={19} />
+            </button>
+          )}
+        </div>
         <div className="mini-brand">
-          <span>P</span> Parcel
+          <span>P</span> <span className="mini-brand-label">{mobileDetailOpen ? "Message" : "Parcel"}</span>
         </div>
         <button
           className="icon-button"
@@ -3651,6 +3664,7 @@ function MailboxApp({ session }: { session: Session }) {
           </button>
         </div>
       </aside>
+      {mobileNav && <button className="mobile-nav-backdrop" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
       {view === "mail" ? (
         <>
           <section className="message-column">
