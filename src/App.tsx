@@ -3494,7 +3494,7 @@ function MailboxApp({ session }: { session: Session }) {
           )}
         </div>
         <div className="mini-brand">
-          <span>P</span> <span className="mini-brand-label">{mobileDetailOpen ? "Message" : "Parcel"}</span>
+          <span>P</span> <strong className="mini-brand-label">{mobileDetailOpen ? "Message" : "Parcel"}</strong>
         </div>
         <button
           className="icon-button"
