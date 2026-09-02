@@ -26,6 +26,7 @@ import {
   Flag,
   FolderPlus,
   Forward,
+  HelpCircle,
   History,
   Inbox,
   ListTodo,
@@ -189,6 +190,19 @@ type SavedSearch = {
   color: string;
   sort_order: number;
   result_count?: number | null;
+};
+type SearchHistoryItem = {
+  id: string;
+  query: string;
+  normalized_query: string;
+  usage_count: number;
+  last_used_at: string;
+};
+type SearchSuggestion = {
+  kind: "recent" | "saved" | "label" | "contact" | "syntax";
+  value: string;
+  label: string;
+  detail?: string;
 };
 type MailPage = {
   items: Message[];
@@ -3425,13 +3439,19 @@ function MailboxApp({ session }: { session: Session }) {
   const [savedSearchName, setSavedSearchName] = useState("");
   const [savedSearchBusy, setSavedSearchBusy] = useState(false);
   const [activeSavedSearchId, setActiveSavedSearchId] = useState<string | null>(null);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([]);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
+  const [searchHelpOpen, setSearchHelpOpen] = useState(false);
+  const [normalizedQuery, setNormalizedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [resultTotal, setResultTotal] = useState<number | null>(null);
   const previousMessageIds = useRef<Set<string>>(new Set());
+  const recordedSearchRef = useRef("");
   const loadMeta = useCallback(async () => {
     try {
-      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, policyRows, preference, savedRows] =
+      const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, policyRows, preference, savedRows, historyRows] =
         await Promise.all([
           apiFetch<Mailbox[]>("/api/mailboxes"),
           apiFetch<Contact[]>("/api/contacts"),
@@ -3442,6 +3462,7 @@ function MailboxApp({ session }: { session: Session }) {
           apiFetch<SenderPolicy[]>("/api/sender-policies").catch(() => []),
           apiFetch<AppSettings>("/api/settings"),
           apiFetch<SavedSearch[]>("/api/saved-searches?counts=true").catch(() => []),
+          apiFetch<SearchHistoryItem[]>("/api/search/history").catch(() => []),
         ]);
       setMailboxes(addresses);
       setContacts(contactRows);
@@ -3452,6 +3473,7 @@ function MailboxApp({ session }: { session: Session }) {
       setSenderPolicies(policyRows);
       setSettings(preference);
       setSavedSearches(savedRows);
+      setSearchHistory(historyRows);
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -3475,11 +3497,18 @@ function MailboxApp({ session }: { session: Session }) {
         if (query.trim()) params.set("q", query.trim());
         params.set("meta", "true");
         const payload = await apiFetch<MailPage | Message[]>(`/api/mail?${params.toString()}`);
-        const nextPage = Array.isArray(payload) ? { items: payload, total: null, page: pageNumber, hasMore: payload.length >= 80 } : payload;
+        const nextPage = Array.isArray(payload) ? { items: payload, total: null, page: pageNumber, hasMore: payload.length >= 80, normalizedQuery: "" } : payload;
         setMessages((current) => (append ? [...current, ...nextPage.items] : nextPage.items));
         setPage(nextPage.page);
         setHasMore(nextPage.hasMore);
         setResultTotal(nextPage.total);
+        setNormalizedQuery(nextPage.normalizedQuery || "");
+        if (pageNumber === 1 && !append && nextPage.normalizedQuery && recordedSearchRef.current !== nextPage.normalizedQuery) {
+          recordedSearchRef.current = nextPage.normalizedQuery;
+          void apiFetch<SearchHistoryItem>("/api/search/history", { method: "POST", body: JSON.stringify({ query: query.trim() }) })
+            .then((item) => setSearchHistory((current) => [item, ...current.filter((entry) => entry.normalized_query !== item.normalized_query)].slice(0, 20)))
+            .catch(() => undefined);
+        }
         if (pageNumber === 1 && !append) void apiFetch<SavedSearch[]>("/api/saved-searches?counts=true").then(setSavedSearches).catch(() => undefined);
       } catch (loadError) {
         setError(
@@ -3632,6 +3661,41 @@ function MailboxApp({ session }: { session: Session }) {
     setQuery(saved.query);
     setActiveSavedSearchId(saved.id);
   }
+  function applySearchSuggestion(suggestion: SearchSuggestion) {
+    setQuery(suggestion.value);
+    setActiveSavedSearchId(null);
+    clearListSelection();
+    setSearchFocused(false);
+  }
+  async function clearSearchHistory() {
+    try {
+      await apiFetch("/api/search/history", { method: "DELETE" });
+      setSearchHistory([]);
+      setSearchSuggestions([]);
+    } catch (historyError) {
+      setError(historyError instanceof Error ? historyError.message : "Search history could not be cleared");
+    }
+  }
+  async function downloadSearchResults(format: "csv" | "json" = "csv") {
+    try {
+      const currentSession = (await requireSupabase().auth.getSession()).data.session;
+      const params = new URLSearchParams({ folder, filter, sort, format });
+      if (query.trim()) params.set("q", query.trim());
+      const response = await fetch(`/api/mail/export?${params.toString()}`, { headers: currentSession?.access_token ? { authorization: `Bearer ${currentSession.access_token}` } : {} });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(String(payload.error || `Export failed (${response.status})`));
+      }
+      const blob = await response.blob();
+      const download = document.createElement("a");
+      download.href = URL.createObjectURL(blob);
+      download.download = `postveil-search-${new Date().toISOString().slice(0, 10)}.${format}`;
+      download.click();
+      URL.revokeObjectURL(download.href);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Search results could not be exported");
+    }
+  }
   async function undoBulkAction() {
     if (!bulkUndo) return;
     const requestId = bulkUndo.requestId;
@@ -3780,6 +3844,15 @@ function MailboxApp({ session }: { session: Session }) {
     }, 300);
     return () => window.clearTimeout(timer);
   }, [query, filter, sort, folder, view, loadMessages]);
+  useEffect(() => {
+    if (!searchFocused) return;
+    const timer = window.setTimeout(() => {
+      void apiFetch<SearchSuggestion[]>(`/api/search/suggestions?q=${encodeURIComponent(query)}`)
+        .then(setSearchSuggestions)
+        .catch(() => setSearchSuggestions([]));
+    }, 160);
+    return () => window.clearTimeout(timer);
+  }, [query, searchFocused]);
   async function openMessage(message: Message) {
     const requestId = detailRequestRef.current + 1;
     detailRequestRef.current = requestId;
@@ -4426,41 +4499,73 @@ function MailboxApp({ session }: { session: Session }) {
                 </button>
               </div>
             </div>
-            <div className="search-box">
-              <Search size={16} />
-              <input
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setActiveSavedSearchId(null);
-                  clearListSelection();
-                }}
-                placeholder="Search messages, people, or files"
-              />
-              <select
-                value={filter}
-                 onChange={(event) => {
-                   clearListSelection();
-                   setFilter(event.target.value);
-                 }}
-                aria-label="Filter messages"
-              >
-                <option value="all">All mail</option>
-                <option value="unread">Unread</option>
-                <option value="starred">Starred</option>
-                <option value="attachments">Attachments</option>
-              </select>
-              <select
-                value={sort}
-                 onChange={(event) => {
-                   clearListSelection();
-                   setSort(event.target.value);
-                 }}
-                aria-label="Sort messages"
-              >
-                <option value="newest">Newest</option>
-                <option value="oldest">Oldest</option>
-              </select>
+            <div className="search-workbench">
+              <div className="search-box">
+                <Search size={16} />
+                <input
+                  value={query}
+                  onFocus={() => setSearchFocused(true)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      setSearchFocused(false);
+                      setSearchHelpOpen(false);
+                    }
+                    if (event.key === "Enter") setSearchFocused(false);
+                  }}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setActiveSavedSearchId(null);
+                    clearListSelection();
+                  }}
+                  placeholder="Search messages, people, or files"
+                  aria-label="Search messages"
+                />
+                <button className={`search-tool-button ${searchHelpOpen ? "active" : ""}`} onClick={() => setSearchHelpOpen((current) => !current)} aria-label="Search syntax help" title="Search syntax help"><HelpCircle size={16} /></button>
+                <select
+                  value={sort}
+                  onChange={(event) => {
+                    clearListSelection();
+                    setSort(event.target.value);
+                  }}
+                  aria-label="Sort messages"
+                >
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                </select>
+                <button className="search-tool-button" onClick={() => void downloadSearchResults("csv")} aria-label="Export search results" title="Export search results"><Download size={16} /></button>
+              </div>
+              {searchFocused && searchSuggestions.length > 0 && (
+                <div className="search-suggestions" role="listbox" aria-label="Search suggestions">
+                  <div className="search-suggestion-head"><span>Suggestions</span>{searchHistory.length > 0 && <button className="text-button" onClick={() => void clearSearchHistory()}>Clear history</button>}</div>
+                  {searchSuggestions.map((suggestion, index) => (
+                    <button className="search-suggestion" key={`${suggestion.kind}-${suggestion.value}-${index}`} onClick={() => applySearchSuggestion(suggestion)} role="option">
+                      <span className={`search-suggestion-kind kind-${suggestion.kind}`}>{suggestion.kind === "recent" ? <History size={13} /> : suggestion.kind === "saved" ? <Bookmark size={13} /> : suggestion.kind === "label" ? <Tag size={13} /> : <Search size={13} />}</span>
+                      <span className="search-suggestion-copy"><strong>{suggestion.label}</strong>{suggestion.detail && <small>{suggestion.detail}</small>}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {searchHelpOpen && (
+                <div className="search-help" aria-label="Search syntax documentation">
+                  <div className="search-help-head"><div><p className="eyebrow">SEARCH SYNTAX</p><strong>Find exactly what you need</strong></div><button className="icon-button" onClick={() => setSearchHelpOpen(false)} aria-label="Close search help"><X size={15} /></button></div>
+                  <div className="search-help-grid">
+                    <code>from:alex@example.com</code><span>Sender</span><code>to:team@example.com</code><span>Recipient</span>
+                    <code>subject:"launch plan"</code><span>Subject phrase</span><code>filename:invoice</code><span>Attachment name</span>
+                    <code>type:pdf</code><span>File type</span><code>label:Projects</code><span>Label</span>
+                    <code>in:sent domain:example.com</code><span>Folder or domain</span><code>auth:pass</code><span>Authentication</span>
+                    <code>is:unread has:attachment</code><span>State and attachments</span><code>has:calendar has:work</code><span>Events and follow-ups</span>
+                    <code>spam:&gt;70% links:&gt;0</code><span>Risk and links</span><code>after:7d larger:5MB</code><span>Date and size</span>
+                    <code>work:reply_later project:launch</code><span>Work and project</span><code>without attachments this week</code><span>Natural language</span>
+                  </div>
+                  <small>Prefix any filter with <code>-</code> to exclude it. Use quotes for phrases. Export includes up to 5,000 matching results.</small>
+                </div>
+              )}
+              <div className="search-filter-row" aria-label="Quick search filters">
+                {[{ value: "all", label: "All mail" }, { value: "unread", label: "Unread" }, { value: "starred", label: "Starred" }, { value: "attachments", label: "Attachments" }].map((item) => (
+                  <button key={item.value} className={`search-chip ${filter === item.value ? "active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }}>{item.label}</button>
+                ))}
+                {query.trim() && normalizedQuery && <span className="search-status-copy">Query active · {resultTotal ?? 0} result{(resultTotal ?? 0) === 1 ? "" : "s"}</span>}
+              </div>
             </div>
             <div className={`sync-status sync-${liveState}`} role="status" aria-live="polite">
               <span className="sync-dot" />

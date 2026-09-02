@@ -31,24 +31,25 @@ The Vite app can start without configuration and will display a configuration me
 
 ## Supabase setup
 
-Run `supabase/migrations/202608250001_initial.sql`, followed by
-`supabase/migrations/202608250002_outlook_features.sql` and
-`supabase/migrations/20260825133332_capability_foundation.sql` and
-`supabase/migrations/20260825140219_sender_identity.sql` and
-`supabase/migrations/202609020001_mailbox_administration.sql` in the Supabase
-SQL Editor. The second migration adds custom folders, labels, contacts, rules,
-signatures, automatic replies, calendar events, tasks, mailbox membership,
-integrations, spam feedback, full-text search, threading metadata, scheduled
-send, snooze, message flags, and owner-based RLS policies. The capability
-foundation adds durable audit records, rule-run metadata, outbox/idempotency
-fields, trust and attachment evidence, sender policies, saved searches,
-address profiles, collaboration records, push devices, domain checks, and
-explicit RLS boundaries for the next application updates. The sender identity
-migration preserves display names from incoming `From` headers and adds
-optional HTTPS contact avatars.
-The mailbox administration migration adds organizations, roles, account
-lifecycle state, quotas, usage tracking, sending limits, delegation, group
-addresses, recovery-code hashes, security activity, and send-as metadata.
+Run every file in `supabase/migrations/` in filename order in the Supabase SQL
+Editor. The migrations add the mail model, custom folders, labels, contacts,
+rules, signatures, automatic replies, calendar events, tasks, mailbox
+membership, integrations, spam feedback, full-text search, threading metadata,
+scheduled send, snooze, message flags, owner-based RLS policies, durable audit
+records, trust and attachment evidence, sender policies, saved searches,
+address profiles, collaboration records, push devices, domain checks,
+account-security controls, mailbox administration, delivery operations, inbox
+management, and powerful search.
+
+Powerful search uses the `search_vector` GIN index for full-text queries and
+owner-scoped indexes for dates, size, spam score, links, authentication
+results, attachments, calendar events, and work items. Search history is
+stored per user in `search_history` and protected by RLS. The search UI
+supports field syntax such as `from:`, `to:`, `subject:`, `filename:`,
+`type:`, `label:`, `in:`, `domain:`, `auth:`, `is:`, `has:`, `spam:`,
+`links:`, `after:`, `before:`, `larger:`, `work:`, and `project:`. Prefix a
+filter with `-` to exclude it, and use quotes for phrases. Natural-language
+shortcuts such as `unread from alex@example.com this week` are also accepted.
 
 The migrations create the mail, organization, screening, recovery, and collaboration data model, including owner-based RLS policies and explicit API grants where client access is required.
 
@@ -116,6 +117,10 @@ Do not deploy the example domain or example credentials. Do not reuse another de
 - `/api/health` — generic liveness check
 - `/api/mailboxes` — mailbox list and settings for the signed-in owner
 - `/api/mail` and `/api/mail/:id` — search, folders, filters, message detail, flags, snooze, spam feedback, and soft-delete state
+- `/api/mail/export` — export the current tenant-scoped search as CSV or JSON, capped at 5,000 results
+- `/api/search/parse` — validate and normalize search syntax without returning message data
+- `/api/search/history` — owner-scoped search history with clear-history support
+- `/api/search/suggestions` — owner-scoped recent, saved-search, label, contact, and syntax suggestions
 - `/api/threads/:id` — conversation view
 - `/api/folders`, `/api/labels`, `/api/labels/assign` — custom folders and labels
 - `/api/contacts` — contacts and autocomplete data
