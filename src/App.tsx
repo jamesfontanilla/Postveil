@@ -11,6 +11,7 @@ import {
 import {
   Archive,
   AlertTriangle,
+  ArrowLeft,
   ArrowDown,
   ArrowUp,
   Bell,
@@ -60,8 +61,8 @@ import { requireSupabase, supabase } from "./lib/supabase";
 import { sanitizeEmailHtml } from "./lib/email-html";
 import { qrImageSource } from "./lib/qr";
 
-type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam";
-type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
+type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam" | "quarantine";
+type ViewKey = SystemFolder | "focused" | "other" | "important" | "snoozed" | "muted" | `custom:${string}`;
   type Message = {
   id: string;
   thread_id: string;
@@ -88,6 +89,9 @@ type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
   is_starred: boolean;
   is_pinned?: boolean;
   is_flagged?: boolean;
+  is_important?: boolean;
+  is_muted?: boolean;
+  is_ignored?: boolean;
   priority?: number;
   has_attachment?: boolean;
   spam_score?: number;
@@ -117,6 +121,11 @@ type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
   work_state?: "none" | "reply_later" | "waiting_on" | "i_owe" | string | null;
   follow_up_at?: string | null;
   work_note?: string | null;
+  reminder_at?: string | null;
+  reminder_note?: string | null;
+  unsubscribe_url?: string | null;
+  retention_expires_at?: string | null;
+  legal_hold?: boolean;
   received_at?: string;
   sent_at?: string;
   provider?: string | null;
@@ -171,8 +180,8 @@ type Mailbox = {
   can_send_as?: boolean;
   can_send_on_behalf?: boolean;
 };
-type CustomFolder = { id: string; name: string; color: string; slug: string };
-type Label = { id: string; name: string; color: string };
+type CustomFolder = { id: string; name: string; color: string; slug: string; parent_id?: string | null };
+type Label = { id: string; name: string; color: string; parent_id?: string | null; sort_order?: number };
 type SavedSearch = {
   id: string;
   name: string;
@@ -196,6 +205,13 @@ type SenderPolicy = {
   match_value: string;
   action: "inbox" | "spam" | "screen" | "archive" | "folder";
   target_folder_id?: string | null;
+  enabled: boolean;
+};
+type RetentionPolicy = {
+  id: string;
+  name: string;
+  scope: "all" | "inbox" | "sent" | "trash" | "spam" | "quarantine" | string;
+  retention_days: number;
   enabled: boolean;
 };
 type ScreeningEvent = { id: string; decision: string; previous_folder?: string | null; created_at: string; restored_at?: string | null };
@@ -361,6 +377,7 @@ const folderNames: Record<SystemFolder, string> = {
   archive: "Archive",
   trash: "Trash",
   spam: "Spam",
+  quarantine: "Quarantine",
 };
 const folderIcons: Record<SystemFolder, typeof Inbox> = {
   inbox: Inbox,
@@ -369,6 +386,7 @@ const folderIcons: Record<SystemFolder, typeof Inbox> = {
   archive: Archive,
   trash: Trash2,
   spam: ShieldAlert,
+  quarantine: ShieldAlert,
 };
 
 function displayName(address: string) {
@@ -384,11 +402,20 @@ function avatarGradient(email: string) {
   const hue = Math.abs(hash) % 360;
   return { background: `linear-gradient(135deg, hsl(${hue} 68% 58%), hsl(${(hue + 42) % 360} 72% 42%))` };
 }
+function storedBooleanPreference(key: string, fallback: boolean): boolean {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const value = window.localStorage.getItem(key);
+    return value === null ? fallback : value === "true";
+  } catch {
+    return fallback;
+  }
+}
 function SenderAvatar({ name, email, avatarUrl, large = false }: { name: string; email: string; avatarUrl?: string | null; large?: boolean }) {
   const [imageFailed, setImageFailed] = useState(false);
   return (
     <div className={`avatar ${large ? "large-avatar" : "row-avatar"} ${avatarUrl && !imageFailed ? "avatar-image" : ""}`} style={avatarUrl && !imageFailed ? undefined : avatarGradient(email)} aria-label={`${name} profile picture`}>
-      {avatarUrl && !imageFailed ? <img src={avatarUrl} alt="" onError={() => setImageFailed(true)} /> : initials(name || email)}
+      {avatarUrl && !imageFailed ? <img src={avatarUrl} alt="" width={large ? 37 : 29} height={large ? 37 : 29} onError={() => setImageFailed(true)} /> : initials(name || email)}
     </div>
   );
 }
@@ -949,7 +976,7 @@ function Compose({
     );
   }
   return (
-    <div className="compose-overlay" role="presentation">
+    <div className="compose-overlay" role="dialog" aria-modal="true" aria-labelledby="compose-title">
       <form
         className={`compose-card${isExpanded ? " compose-card-expanded" : ""}`}
         onSubmit={send}
@@ -959,7 +986,7 @@ function Compose({
             <p className="eyebrow">
               {seed?.to ? "REPLY / FORWARD" : "NEW MESSAGE"}
             </p>
-            <h2>{seed?.to ? "Continue the thread" : "New message"}</h2>
+            <h2 id="compose-title">{seed?.to ? "Continue the thread" : "New message"}</h2>
             <span className="compose-subtitle">
               {seed?.to ? "Your reply stays connected to this conversation." : "A private message from your mailbox."}
             </span>
@@ -1531,6 +1558,8 @@ function SettingsPanel({
   onClose,
   onChanged,
   onOpenMessage,
+  loadRemoteImages,
+  onLoadRemoteImagesChange,
 }: {
   session: Session;
   settings: AppSettings;
@@ -1542,6 +1571,8 @@ function SettingsPanel({
   onClose: () => void;
   onChanged: () => void;
   onOpenMessage: (message: Message) => void;
+  loadRemoteImages: boolean;
+  onLoadRemoteImagesChange: (value: boolean) => void;
 }) {
   const [tab, setTab] = useState<
     | "appearance"
@@ -1555,7 +1586,11 @@ function SettingsPanel({
     | "administration"
   >("appearance");
   const [folderName, setFolderName] = useState("");
+  const [folderColor, setFolderColor] = useState("#6f7d91");
+  const [folderParentId, setFolderParentId] = useState("");
   const [labelName, setLabelName] = useState("");
+  const [labelColor, setLabelColor] = useState("#2d5bff");
+  const [labelParentId, setLabelParentId] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactAvatarUrl, setContactAvatarUrl] = useState("");
@@ -1611,6 +1646,10 @@ function SettingsPanel({
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [recoveryCodeCount, setRecoveryCodeCount] = useState(0);
   const [generatedRecoveryCodes, setGeneratedRecoveryCodes] = useState<string[]>([]);
+  const [retentionPolicies, setRetentionPolicies] = useState<RetentionPolicy[]>([]);
+  const [retentionName, setRetentionName] = useState("");
+  const [retentionScope, setRetentionScope] = useState<RetentionPolicy["scope"]>("all");
+  const [retentionDays, setRetentionDays] = useState("365");
   const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
   const [ruleLabBusy, setRuleLabBusy] = useState(false);
   const ruleImportRef = useRef<HTMLInputElement>(null);
@@ -1625,7 +1664,7 @@ function SettingsPanel({
     if (!folderName.trim()) return;
     await apiFetch("/api/folders", {
       method: "POST",
-      body: JSON.stringify({ name: folderName }),
+      body: JSON.stringify({ name: folderName, color: folderColor, parentId: folderParentId || null }),
     });
     setFolderName("");
     setNotice("Folder created");
@@ -1635,11 +1674,37 @@ function SettingsPanel({
     if (!labelName.trim()) return;
     await apiFetch("/api/labels", {
       method: "POST",
-      body: JSON.stringify({ name: labelName }),
+      body: JSON.stringify({ name: labelName, color: labelColor, parentId: labelParentId || null }),
     });
     setLabelName("");
     setNotice("Label created");
     onChanged();
+  }
+  async function loadRetentionPolicies() {
+    try {
+      setRetentionPolicies(await apiFetch<RetentionPolicy[]>("/api/retention-policies"));
+    } catch (loadError) {
+      setNotice(loadError instanceof Error ? loadError.message : "Retention policies unavailable");
+    }
+  }
+  async function createRetentionPolicy() {
+    if (!retentionName.trim()) return;
+    try {
+      await apiFetch("/api/retention-policies", { method: "POST", body: JSON.stringify({ name: retentionName.trim(), scope: retentionScope, retentionDays: Number(retentionDays) }) });
+      setRetentionName("");
+      setNotice("Retention policy saved");
+      await loadRetentionPolicies();
+    } catch (policyError) {
+      setNotice(policyError instanceof Error ? policyError.message : "Could not save retention policy");
+    }
+  }
+  async function toggleRetentionPolicy(policy: RetentionPolicy) {
+    try {
+      await apiFetch(`/api/retention-policies/${policy.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !policy.enabled }) });
+      await loadRetentionPolicies();
+    } catch (policyError) {
+      setNotice(policyError instanceof Error ? policyError.message : "Could not update retention policy");
+    }
   }
   async function createContact() {
     if (!contactEmail.trim()) return;
@@ -2229,14 +2294,27 @@ function SettingsPanel({
   useEffect(() => {
     if (tab === "security") void loadSecurity();
     if (tab === "spam") void loadScreeningQueue();
+    if (tab === "organize") void loadRetentionPolicies();
   }, [tab]);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
   return (
-    <div className="modal-backdrop">
-      <section className="settings-panel">
+    <div className="modal-backdrop" role="presentation">
+      <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div className="panel-title">
           <div>
             <p className="eyebrow">MAILBOX SETTINGS</p>
-            <h2>Settings & organization</h2>
+            <h2 id="settings-title">Settings & organization</h2>
           </div>
           <button
             className="icon-button"
@@ -2377,6 +2455,12 @@ function SettingsPanel({
                 >
                   Compact
                 </button>
+                <button
+                  className={settings.density === "spacious" ? "selected" : ""}
+                  onClick={() => void updateSettings({ density: "spacious" })}
+                >
+                  Spacious
+                </button>
               </div>
               <label className="settings-select-row">
                 <span>Undo Send</span>
@@ -2391,6 +2475,15 @@ function SettingsPanel({
                 </select>
               </label>
               <small className="setting-note">New messages wait this long before the sending queue releases them.</small>
+              <label className="toggle-row image-preference-row">
+                <input
+                  type="checkbox"
+                  checked={loadRemoteImages}
+                  onChange={(event) => onLoadRemoteImagesChange(event.target.checked)}
+                />
+                Display images in messages
+              </label>
+              <small className="setting-note">Images are shown by default. Turn this off to prevent remote senders from learning when you open a message.</small>
             </div>
             <div className="setting-card">
               <h3>Attention</h3>
@@ -2432,6 +2525,11 @@ function SettingsPanel({
                   onChange={(event) => setFolderName(event.target.value)}
                   placeholder="Folder name"
                 />
+                <input className="color-input" type="color" value={folderColor} onChange={(event) => setFolderColor(event.target.value)} aria-label="Folder color" />
+                <select value={folderParentId} onChange={(event) => setFolderParentId(event.target.value)} aria-label="Parent folder">
+                  <option value="">Top level</option>
+                  {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                </select>
                 <button
                   className="secondary-button"
                   onClick={() => void createFolder()}
@@ -2457,6 +2555,11 @@ function SettingsPanel({
                   onChange={(event) => setLabelName(event.target.value)}
                   placeholder="Label name"
                 />
+                <input className="color-input" type="color" value={labelColor} onChange={(event) => setLabelColor(event.target.value)} aria-label="Label color" />
+                <select value={labelParentId} onChange={(event) => setLabelParentId(event.target.value)} aria-label="Parent label">
+                  <option value="">Top level</option>
+                  {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
+                </select>
                 <button
                   className="secondary-button"
                   onClick={() => void createLabel()}
@@ -2473,6 +2576,31 @@ function SettingsPanel({
                   {label.name}
                 </div>
               ))}
+            </div>
+            <div className="setting-card retention-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Retention and legal holds</h3>
+                  <p>Automatically remove old mail by scope. Messages on legal hold are always skipped.</p>
+                </div>
+                <ShieldAlert size={18} aria-hidden="true" />
+              </div>
+              <div className="inline-form retention-form">
+                <input value={retentionName} onChange={(event) => setRetentionName(event.target.value)} placeholder="Policy name" aria-label="Retention policy name" />
+                <select value={retentionScope} onChange={(event) => setRetentionScope(event.target.value)} aria-label="Retention scope">
+                  <option value="all">All mail</option><option value="inbox">Inbox</option><option value="sent">Sent</option><option value="trash">Trash</option><option value="spam">Spam</option><option value="quarantine">Quarantine</option>
+                </select>
+                <input type="number" min="1" max="36500" value={retentionDays} onChange={(event) => setRetentionDays(event.target.value)} aria-label="Retention days" />
+                <button className="secondary-button" onClick={() => void createRetentionPolicy()}><Plus size={15} /> Add</button>
+              </div>
+              <small className="field-help">Days are counted from message creation. The scheduled Worker enforces enabled policies.</small>
+              {retentionPolicies.map((policy) => (
+                <div className="settings-item retention-policy-row" key={policy.id}>
+                  <div><strong>{policy.name}</strong><small>{policy.scope} · {policy.retention_days} days</small></div>
+                  <button className={`security-status ${policy.enabled ? "enabled" : ""}`} onClick={() => void toggleRetentionPolicy(policy)}>{policy.enabled ? "On" : "Off"}</button>
+                </div>
+              ))}
+              {retentionPolicies.length === 0 && <div className="rule-empty">No automatic retention policies yet.</div>}
             </div>
           </div>
         )}
@@ -3235,6 +3363,7 @@ function Workspace({
 }
 
 function MailboxApp({ session }: { session: Session }) {
+  const imagePreferenceKey = `postveil.load_remote_images:${session.user.id}`;
   const [view, setView] = useState<"mail" | "calendar" | "tasks">("mail");
   const [folder, setFolder] = useState<ViewKey>("inbox");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -3265,6 +3394,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [composeSeed, setComposeSeed] = useState<ComposeSeed | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
+  const [loadRemoteImages, setLoadRemoteImages] = useState(() => storedBooleanPreference(imagePreferenceKey, true));
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("newest");
@@ -3290,6 +3420,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkNotice, setBulkNotice] = useState("");
   const [bulkUndo, setBulkUndo] = useState<{ requestId: string; label: string } | null>(null);
+  const [draggedMessageId, setDraggedMessageId] = useState<string | null>(null);
   const [savedSearchFormOpen, setSavedSearchFormOpen] = useState(false);
   const [savedSearchName, setSavedSearchName] = useState("");
   const [savedSearchBusy, setSavedSearchBusy] = useState(false);
@@ -3403,6 +3534,27 @@ function MailboxApp({ session }: { session: Session }) {
     clearListSelection();
     setMobileNav(false);
   }
+  function closeSelectedMessage() {
+    detailRequestRef.current += 1;
+    setSelected(null);
+    setSelectedId(null);
+    setThreadMessages([]);
+    setInlineImageUrls({});
+    setDetailLoading(false);
+    setTrustLensOpen(false);
+    setTrustData(null);
+    setDeliveryInspectionOpen(false);
+    setDeliveryInspection(null);
+    setShowMoreActions(false);
+  }
+  function updateRemoteImagePreference(value: boolean) {
+    setLoadRemoteImages(value);
+    try {
+      window.localStorage.setItem(imagePreferenceKey, String(value));
+    } catch {
+      // The preference still applies for this session when storage is unavailable.
+    }
+  }
   function toggleMessageSelection(id: string) {
     if (selectAllResults) {
       setSelectedIds(new Set(messages.map((message) => message.id).filter((messageId) => messageId !== id)));
@@ -3515,6 +3667,13 @@ function MailboxApp({ session }: { session: Session }) {
       action.labelId = bulkLabelId;
     }
     if (bulkAction === "priority") action.priority = Number(bulkPriority);
+    if (bulkAction === "reminder") {
+      const reminder = new Date();
+      reminder.setDate(reminder.getDate() + 1);
+      reminder.setHours(9, 0, 0, 0);
+      action.reminderAt = reminder.toISOString();
+      action.reminderNote = "Follow up on this message";
+    }
     const idempotencyKey = crypto.randomUUID();
     try {
       const payload = await apiFetch<{ requestId: string; changedIds: string[]; exported?: JsonSettings[]; failures: Array<{ id: string; error: string }>; undoable: boolean; truncated?: boolean }>("/api/mail/bulk", {
@@ -3625,7 +3784,8 @@ function MailboxApp({ session }: { session: Session }) {
     const requestId = detailRequestRef.current + 1;
     detailRequestRef.current = requestId;
     setView("mail");
-    if (["inbox", "sent", "drafts", "archive", "trash", "spam"].includes(message.folder)) setFolder(message.folder as ViewKey);
+    setMobileNav(false);
+    if (["inbox", "sent", "drafts", "archive", "trash", "spam", "quarantine"].includes(message.folder)) setFolder(message.folder as ViewKey);
     setSelectedId(message.id);
     setSelected(message);
     setInlineImageUrls({});
@@ -3877,6 +4037,63 @@ function MailboxApp({ session }: { session: Session }) {
       setError(cancelError instanceof Error ? cancelError.message : "Send could not be cancelled");
     }
   }
+  async function mutateThread(patch: JsonSettings) {
+    if (!selected?.thread_id) return;
+    try {
+      await apiFetch(`/api/threads/${selected.thread_id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      await loadMessages(folder, false);
+      const detail = await apiFetch<Message>(`/api/mail/${selected.id}`);
+      setSelected(detail);
+    } catch (threadError) {
+      setError(threadError instanceof Error ? threadError.message : "Conversation action failed");
+    }
+  }
+  async function reportSelectedMessage(reportType: "spam" | "phishing") {
+    if (!selected) return;
+    try {
+      await apiFetch("/api/mail/report", { method: "POST", body: JSON.stringify({ messageId: selected.id, reportType }) });
+      setBulkNotice(reportType === "phishing" ? "Reported as phishing and moved to Quarantine" : "Reported as spam");
+      clearMessageSelection();
+      await loadMessages(folder, false);
+    } catch (reportError) {
+      setError(reportError instanceof Error ? reportError.message : "Report could not be submitted");
+    }
+  }
+  async function blockSelectedSender(matchType: "address" | "domain") {
+    if (!selected) return;
+    const value = matchType === "domain" ? selected.from_address.split("@")[1] : selected.from_address;
+    if (!value) return;
+    try {
+      await apiFetch("/api/sender-blocks", { method: "POST", body: JSON.stringify({ matchType, matchValue: value }) });
+      await reportSelectedMessage("spam");
+    } catch (blockError) {
+      setError(blockError instanceof Error ? blockError.message : "Sender could not be blocked");
+    }
+  }
+  async function toggleLegalHold() {
+    if (!selected) return;
+    const held = !selected.legal_hold;
+    try {
+      await apiFetch("/api/mail/legal-hold", { method: "POST", body: JSON.stringify({ messageId: selected.id, held }) });
+      setSelected({ ...selected, legal_hold: held });
+      setBulkNotice(held ? "Legal hold enabled" : "Legal hold removed");
+    } catch (holdError) {
+      setError(holdError instanceof Error ? holdError.message : "Legal hold could not be changed");
+    }
+  }
+  async function moveDraggedMessage(target: ViewKey, messageId: string) {
+    if (["focused", "other", "important", "snoozed", "muted"].includes(target)) return;
+    try {
+      const body = target.startsWith("custom:") ? { folder: "custom", customFolderId: target.slice(7) } : { folder: target };
+      await apiFetch(`/api/mail/${messageId}`, { method: "POST", body: JSON.stringify(body) });
+      setBulkNotice("Message moved");
+      await loadMessages(folder, false);
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Message could not be moved");
+    } finally {
+      setDraggedMessageId(null);
+    }
+  }
   function openCompose(seed?: ComposeSeed) {
     setComposeSeed(seed);
     setComposeOpen(true);
@@ -3888,13 +4105,19 @@ function MailboxApp({ session }: { session: Session }) {
       ? "Focused"
       : folder === "other"
         ? "Other"
+        : folder === "important"
+          ? "Important"
+          : folder === "snoozed"
+            ? "Snoozed"
+            : folder === "muted"
+              ? "Muted conversations"
         : folder.startsWith("custom:")
           ? folders.find((item) => item.id === folder.slice(7))?.name ||
             "Folder"
           : folderNames[folder as SystemFolder];
   const CurrentIcon = activeSavedSearch
     ? Bookmark
-    : folder === "focused" || folder === "other" || folder.startsWith("custom:")
+    : folder === "focused" || folder === "other" || folder === "important" || folder === "snoozed" || folder === "muted" || folder.startsWith("custom:")
       ? Mail
       : folderIcons[folder as SystemFolder];
   const unread = messages.filter((message) => !message.is_read).length;
@@ -3940,16 +4163,40 @@ function MailboxApp({ session }: { session: Session }) {
   const detailIdentity = selected
     ? detailIdentityForMessage(selected, contacts, mailboxes)
     : null;
-  const selectedHtml = selected ? sanitizeEmailHtml(selected.html_body, { inlineImageUrls }) : "";
+  const selectedContact = detailIdentity ? contactFor(detailIdentity.email, contacts) : undefined;
+  const selectedHtml = selected ? sanitizeEmailHtml(selected.html_body, { inlineImageUrls, loadExternalImages: loadRemoteImages }) : "";
+  const customFolderDepth = (folderId: string): number => {
+    let depth = 0;
+    let parentId = folders.find((item) => item.id === folderId)?.parent_id || null;
+    const visited = new Set<string>();
+    while (parentId && !visited.has(parentId) && depth < 8) {
+      visited.add(parentId);
+      depth += 1;
+      parentId = folders.find((item) => item.id === parentId)?.parent_id || null;
+    }
+    return depth;
+  };
+  function folderDropProps(target: ViewKey) {
+    return {
+      onDragOver: (event: DragEvent<HTMLButtonElement>) => event.preventDefault(),
+      onDrop: (event: DragEvent<HTMLButtonElement>) => {
+        event.preventDefault();
+        const messageId = event.dataTransfer.getData("text/postveil-message");
+        if (messageId) void moveDraggedMessage(target, messageId);
+      },
+    };
+  }
   return (
     <main
-      className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
+      className={`app-shell${selected ? " mobile-message-open" : ""} theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
     >
       <header className="mobile-topbar">
         <button
           className="icon-button"
           onClick={() => setMobileNav(!mobileNav)}
           aria-label="Open navigation"
+          aria-expanded={mobileNav}
+          aria-controls="mailbox-navigation"
         >
           <Menu size={19} />
         </button>
@@ -3964,7 +4211,8 @@ function MailboxApp({ session }: { session: Session }) {
           <RefreshCcw size={17} />
         </button>
       </header>
-      <aside className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}>
+      {mobileNav && <button className="mobile-nav-backdrop" type="button" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
+      <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}>
         <div className="sidebar-top">
           <div className="brand-lockup">
             <div className="brand-mark small">P</div>
@@ -3993,6 +4241,7 @@ function MailboxApp({ session }: { session: Session }) {
         <nav className="folder-nav" aria-label="Mailbox folders">
           <button
             className={`folder-link ${view === "mail" && folder === "inbox" ? "active" : ""}`}
+            {...folderDropProps("inbox")}
             onClick={() => openMailFolder("inbox")}
           >
             <Inbox size={17} />
@@ -4001,6 +4250,7 @@ function MailboxApp({ session }: { session: Session }) {
           </button>
           <button
             className={`folder-link ${view === "mail" && folder === "focused" ? "active" : ""}`}
+            {...folderDropProps("focused")}
             onClick={() => openMailFolder("focused")}
           >
             <Eye size={17} />
@@ -4008,19 +4258,21 @@ function MailboxApp({ session }: { session: Session }) {
           </button>
           <button
             className={`folder-link ${view === "mail" && folder === "other" ? "active" : ""}`}
+            {...folderDropProps("other")}
             onClick={() => openMailFolder("other")}
           >
             <Mail size={17} />
             <span>Other</span>
           </button>
           {(
-            ["sent", "drafts", "archive", "trash", "spam"] as SystemFolder[]
+            ["sent", "drafts", "archive", "trash", "spam", "quarantine"] as SystemFolder[]
           ).map((item) => {
             const Icon = folderIcons[item];
             return (
               <button
                 key={item}
                 className={`folder-link ${view === "mail" && folder === item ? "active" : ""}`}
+                {...folderDropProps(item)}
                 onClick={() => openMailFolder(item)}
               >
                 <Icon size={17} />
@@ -4032,10 +4284,23 @@ function MailboxApp({ session }: { session: Session }) {
             <button
               key={customFolder.id}
               className={`folder-link ${view === "mail" && folder === `custom:${customFolder.id}` ? "active" : ""}`}
+              style={{ paddingLeft: `${16 + customFolderDepth(customFolder.id) * 18}px` }}
+              {...folderDropProps(`custom:${customFolder.id}`)}
               onClick={() => openMailFolder(`custom:${customFolder.id}`)}
             >
               <Tag size={17} color={customFolder.color} />
               <span>{customFolder.name}</span>
+            </button>
+          ))}
+          {(["important", "snoozed", "muted"] as const).map((item) => (
+            <button
+              key={item}
+              className={`folder-link ${view === "mail" && folder === item ? "active" : ""}`}
+              {...folderDropProps(item)}
+              onClick={() => openMailFolder(item)}
+            >
+              {item === "important" ? <Flag size={17} /> : item === "snoozed" ? <Clock3 size={17} /> : <Bell size={17} />}
+              <span>{item === "important" ? "Important" : item === "snoozed" ? "Snoozed" : "Muted"}</span>
             </button>
           ))}
         </nav>
@@ -4233,9 +4498,16 @@ function MailboxApp({ session }: { session: Session }) {
                   <option value="unstar">Unstar</option>
                   <option value="flag">Flag</option>
                   <option value="unflag">Unflag</option>
+                  <option value="important">Mark important</option>
+                  <option value="not_important">Remove importance</option>
+                  <option value="mute">Mute conversations</option>
+                  <option value="unmute">Unmute conversations</option>
+                  <option value="ignore">Ignore threads</option>
+                  <option value="unignore">Stop ignoring threads</option>
                   <option value="priority">Set priority</option>
                   {labels.length > 0 && <option value="label">Add label…</option>}
                   <option value="snooze">Snooze 1 hour</option>
+                  <option value="reminder">Remind me tomorrow</option>
                   <option value="reply_later">Reply later</option>
                   <option value="waiting_on">Waiting on</option>
                   <option value="i_owe">I owe</option>
@@ -4247,7 +4519,7 @@ function MailboxApp({ session }: { session: Session }) {
                 </select>
                  {bulkAction === "move" && (
                    <select value={bulkFolder} onChange={(event) => setBulkFolder(event.target.value)} aria-label="Bulk destination folder">
-                     {(["inbox", "sent", "drafts", "archive", "trash", "spam"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}
+                     {(["inbox", "sent", "drafts", "archive", "trash", "spam", "quarantine"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}
                      {folders.map((item) => <option key={item.id} value={`custom:${item.id}`}>{item.name}</option>)}
                    </select>
                  )}
@@ -4304,7 +4576,14 @@ function MailboxApp({ session }: { session: Session }) {
                 messages.map((message) => (
                   <div
                     key={message.id}
-                    className={`message-row ${selectedId === message.id ? "selected" : ""} ${selectedIds.has(message.id) ? "bulk-selected" : ""} ${message.is_read ? "read" : "unread"}`}
+                    className={`message-row ${selectedId === message.id ? "selected" : ""} ${selectedIds.has(message.id) ? "bulk-selected" : ""} ${message.is_read ? "read" : "unread"} ${draggedMessageId === message.id ? "dragging" : ""}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/postveil-message", message.id);
+                      setDraggedMessageId(message.id);
+                    }}
+                    onDragEnd={() => setDraggedMessageId(null)}
                     onClick={() => void openMessage(message)}
                     onKeyDown={(event) => {
                       if (event.target !== event.currentTarget) return;
@@ -4357,6 +4636,9 @@ function MailboxApp({ session }: { session: Session }) {
                         {message.is_pinned && (
                           <Pin size={13} fill="currentColor" />
                         )}
+                        {message.is_important && <Flag size={13} fill="currentColor" />}
+                        {message.is_muted && <span className="message-state-pill">Muted</span>}
+                        {message.reminder_at && <Bell size={13} />}
                       </div>
                       <p>{message.snippet || "No preview available."}</p>
                     </div>
@@ -4395,6 +4677,9 @@ function MailboxApp({ session }: { session: Session }) {
               <article key={selected.id} className={`message-detail ${detailLoading ? "is-detail-loading" : ""}`} aria-busy={detailLoading}>
                 <div className="detail-head">
                   <div>
+                    <button className="mobile-detail-back" type="button" onClick={closeSelectedMessage}>
+                      <ArrowLeft size={15} aria-hidden="true" /> Back to messages
+                    </button>
                     <p className="eyebrow">{selected.direction === "inbound" ? "RECEIVED" : "SENT"}</p>
                     <h2>{selected.subject || "(no subject)"}</h2>
                     <div className="detail-meta">
@@ -4407,6 +4692,9 @@ function MailboxApp({ session }: { session: Session }) {
                       {selected.focused_category && (
                         <span>{selected.focused_category === "focused" ? "Focused" : "Other"}</span>
                       )}
+                      {selected.is_important && <span className="detail-status-accent">Important</span>}
+                      {selected.is_muted && <span>Muted</span>}
+                      {selected.legal_hold && <span className="detail-status-accent">Legal hold</span>}
                     </div>
                   </div>
                   <div className="head-actions">
@@ -4435,6 +4723,14 @@ function MailboxApp({ session }: { session: Session }) {
                         size={17}
                         fill={selected.is_pinned ? "currentColor" : "none"}
                       />
+                    </button>
+                    <button
+                      className={`icon-button ${selected.is_important ? "is-active" : ""}`}
+                      title={selected.is_important ? "Remove importance" : "Mark important"}
+                      onClick={() => void mutateMessage({ isImportant: !selected.is_important })}
+                      aria-label={selected.is_important ? "Remove importance" : "Mark important"}
+                    >
+                      <Flag size={17} fill={selected.is_important ? "currentColor" : "none"} />
                     </button>
                     {selected.folder === "trash" ? (
                       <>
@@ -4503,6 +4799,9 @@ function MailboxApp({ session }: { session: Session }) {
                     <strong>{detailIdentity?.name}</strong>
                     <small>{detailIdentity?.email}</small>
                     <span>to {selected.to_addresses?.join(", ") || "your mailbox"}</span>
+                    {selected.unsubscribe_url && /^(https?:\/\/|mailto:)/i.test(selected.unsubscribe_url) && (
+                      <a className="unsubscribe-link" href={selected.unsubscribe_url} target="_blank" rel="noreferrer noopener">Unsubscribe</a>
+                    )}
                     {showMessageDetails && (
                       <dl className="sender-details">
                         <div><dt>From</dt><dd>{detailIdentity?.email || "Not available"}</dd></div>
@@ -4524,6 +4823,13 @@ function MailboxApp({ session }: { session: Session }) {
                     <ChevronDown size={14} className={showMessageDetails ? "rotated" : ""} />
                   </button>
                 </div>
+                <details className="sender-profile-card">
+                  <summary><Users size={14} /> Sender profile and contact history</summary>
+                  <div className="sender-profile-grid">
+                    <div><span className="eyebrow">CONTACT</span><strong>{selectedContact?.display_name || detailIdentity?.name || "Unknown sender"}</strong><small>{detailIdentity?.email}</small></div>
+                    <div><span className="eyebrow">HISTORY</span><strong>{messages.filter((item) => item.from_address.toLowerCase() === detailIdentity?.email.toLowerCase()).length} visible messages</strong><small>{selectedContact ? "Saved contact" : "Not saved as a contact"}</small></div>
+                  </div>
+                </details>
                 {selected.spam_reasons && selected.spam_reasons.length > 0 && (
                   <div className="signal-box">
                     <ShieldAlert size={15} />
@@ -4723,11 +5029,35 @@ function MailboxApp({ session }: { session: Session }) {
                             <button role="menuitem" onClick={() => void submitSpamFeedback(selected.folder === "spam" ? "not_spam" : "spam")}>
                               <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}
                             </button>
+                            {selected.folder !== "spam" && <button role="menuitem" onClick={() => { setShowMoreActions(false); void reportSelectedMessage("spam"); }}>
+                              <ShieldAlert size={15} /> Report spam and move
+                            </button>}
                             <button role="menuitem" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}>
                               <Clock3 size={15} /> Snooze 1h
                             </button>
                             <button role="menuitem" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}>
                               <Flag size={15} /> {selected.is_flagged ? "Unflag" : "Flag"}
+                            </button>
+                            <button role="menuitem" onClick={() => void mutateMessage({ isImportant: !selected.is_important })}>
+                              <Flag size={15} /> {selected.is_important ? "Remove importance" : "Mark important"}
+                            </button>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateThread({ isMuted: !selected.is_muted }); }}>
+                              <Bell size={15} /> {selected.is_muted ? "Unmute conversation" : "Mute conversation"}
+                            </button>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateThread({ isIgnored: !selected.is_ignored }); }}>
+                              <Eye size={15} /> {selected.is_ignored ? "Stop ignoring thread" : "Ignore thread"}
+                            </button>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void blockSelectedSender("address"); }}>
+                              <ShieldAlert size={15} /> Block sender
+                            </button>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void blockSelectedSender("domain"); }}>
+                              <ShieldAlert size={15} /> Block domain
+                            </button>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void reportSelectedMessage("phishing"); }}>
+                              <AlertTriangle size={15} /> Report phishing
+                            </button>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleLegalHold(); }}>
+                              <ShieldAlert size={15} /> {selected.legal_hold ? "Remove legal hold" : "Place on legal hold"}
                             </button>
                             <button role="menuitem" onClick={() => void mutateMessage({ workState: "reply_later" })}>
                               <Clock3 size={15} /> Reply later
@@ -4790,6 +5120,8 @@ function MailboxApp({ session }: { session: Session }) {
           senderPolicies={senderPolicies}
           onClose={() => setSettingsOpen(false)}
           onOpenMessage={(message) => void openMessage(message)}
+          loadRemoteImages={loadRemoteImages}
+          onLoadRemoteImagesChange={updateRemoteImagePreference}
           onChanged={() => {
             void loadMeta();
           }}
