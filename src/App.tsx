@@ -146,6 +146,7 @@ type ViewKey = SystemFolder | "focused" | "other" | `custom:${string}`;
     filename: string;
     content_type: string;
     byte_size: number;
+    content_id?: string | null;
     detected_content_type?: string | null;
     preview_state?: "ready" | "not_available" | "pending" | "failed";
     safety_status?: "unknown" | "clean_static" | "suspicious" | "blocked" | "infected";
@@ -3256,6 +3257,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [workSummary, setWorkSummary] = useState<WorkSummary>({ reply_later: 0, waiting_on: 0, i_owe: 0, overdue: 0, total: 0 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Message | null>(null);
+  const [inlineImageUrls, setInlineImageUrls] = useState<Record<string, string>>({});
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const detailRequestRef = useRef(0);
@@ -3626,6 +3628,7 @@ function MailboxApp({ session }: { session: Session }) {
     if (["inbox", "sent", "drafts", "archive", "trash", "spam"].includes(message.folder)) setFolder(message.folder as ViewKey);
     setSelectedId(message.id);
     setSelected(message);
+    setInlineImageUrls({});
     setDetailLoading(true);
     setError("");
     setShowAllThreadMessages(false);
@@ -3640,6 +3643,19 @@ function MailboxApp({ session }: { session: Session }) {
       const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
       if (detailRequestRef.current !== requestId) return;
       setSelected(detail);
+      const inlineAttachments = (detail.attachments || []).filter((attachment) => attachment.content_id);
+      if (inlineAttachments.length) {
+        const inlineResults = await Promise.all(inlineAttachments.map(async (attachment) => {
+          try {
+            const result = await apiFetch<{ url: string }>(`/api/attachments/${attachment.id}?json=true`);
+            return [String(attachment.content_id).trim().replace(/^<|>$/g, "").toLowerCase(), result.url] as const;
+          } catch {
+            return null;
+          }
+        }));
+        if (detailRequestRef.current !== requestId) return;
+        setInlineImageUrls(Object.fromEntries(inlineResults.filter((item): item is readonly [string, string] => Boolean(item && item[0] && item[1]))));
+      }
       void apiFetch<DeliveryInspection>(`/api/mail/${message.id}/inspection`).then(setDeliveryInspection).catch(() => undefined);
       const thread = await apiFetch<Message[]>(`/api/threads/${message.thread_id}`);
       if (detailRequestRef.current !== requestId) return;
@@ -3924,7 +3940,7 @@ function MailboxApp({ session }: { session: Session }) {
   const detailIdentity = selected
     ? detailIdentityForMessage(selected, contacts, mailboxes)
     : null;
-  const selectedHtml = selected ? sanitizeEmailHtml(selected.html_body) : "";
+  const selectedHtml = selected ? sanitizeEmailHtml(selected.html_body, { inlineImageUrls }) : "";
   return (
     <main
       className={`app-shell theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
@@ -4581,7 +4597,7 @@ function MailboxApp({ session }: { session: Session }) {
                     ))}
                   </div>
                 )}
-                <div className="body-copy">
+                <div className={`body-copy ${selectedHtml ? "body-copy-rich" : ""}`}>
                   {selectedHtml ? <div className="email-html" dangerouslySetInnerHTML={{ __html: selectedHtml }} /> : selectedBody.body || "No message body."}
                 </div>
                 {selectedBody.quote && (

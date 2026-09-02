@@ -49,6 +49,31 @@ function sanitizeStyle(value: string): string {
     .join("; ");
 }
 
+function normalizeContentId(value: string): string {
+  return value.trim().replace(/^<|>$/g, "").toLowerCase();
+}
+
+function normalizeDimension(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed === "auto") return "auto";
+  const match = trimmed.match(/^(\d+(?:\.\d+)?)(px|%|em|rem|vw|vh)?$/);
+  return match ? `${match[1]}${match[2] || "px"}` : null;
+}
+
+function preserveEmailDimension(element: HTMLElement, attribute: "width" | "height"): void {
+  const normalized = normalizeDimension(element.getAttribute(attribute));
+  if (!normalized) {
+    if (element.hasAttribute(attribute)) element.removeAttribute(attribute);
+    return;
+  }
+  if (!element.style.getPropertyValue(attribute)) element.style.setProperty(attribute, normalized);
+}
+
+export type EmailHtmlOptions = {
+  inlineImageUrls?: Record<string, string>;
+};
+
 /**
  * Render email HTML as content, never as application markup.
  * Email HTML is treated as hostile: scripts, forms, styles, event handlers,
@@ -56,7 +81,7 @@ function sanitizeStyle(value: string): string {
  * receives it. Safe email presentation styles are preserved because table-based
  * email layouts depend on them.
  */
-export function sanitizeEmailHtml(value: string | null | undefined): string {
+export function sanitizeEmailHtml(value: string | null | undefined, options: EmailHtmlOptions = {}): string {
   if (!value?.trim()) return "";
   const sanitized = DOMPurify.sanitize(value, {
     ALLOWED_ATTR: allowedAttributes,
@@ -76,6 +101,10 @@ export function sanitizeEmailHtml(value: string | null | undefined): string {
       if (style) element.setAttribute("style", style);
       else element.removeAttribute("style");
     }
+    if (element instanceof HTMLElement && (element.tagName === "TABLE" || element.tagName === "TD" || element.tagName === "TH")) {
+      preserveEmailDimension(element, "width");
+      preserveEmailDimension(element, "height");
+    }
   });
   document.querySelectorAll("a").forEach((link) => {
     const href = link.getAttribute("href");
@@ -91,10 +120,18 @@ export function sanitizeEmailHtml(value: string | null | undefined): string {
     }
   });
   document.querySelectorAll("img").forEach((image) => {
+    const originalSrc = image.getAttribute("src") || "";
+    const inlineKey = originalSrc.toLowerCase().startsWith("cid:")
+      ? normalizeContentId(originalSrc.slice(4))
+      : "";
+    const inlineUrl = inlineKey ? options.inlineImageUrls?.[inlineKey] : undefined;
+    if (inlineUrl) image.setAttribute("src", inlineUrl);
+    preserveEmailDimension(image, "width");
     const src = image.getAttribute("src");
     if (!src || !isSafeUrl(src, "src")) image.removeAttribute("src");
     image.setAttribute("loading", "lazy");
     image.setAttribute("referrerpolicy", "no-referrer");
+    image.setAttribute("decoding", "async");
   });
   return document.body.innerHTML;
 }
