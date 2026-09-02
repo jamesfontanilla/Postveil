@@ -139,11 +139,15 @@ type Contact = {
 };
 type Mailbox = {
   id: string;
+  owner_id?: string;
   address: string;
   display_name: string;
   is_default: boolean;
   can_send: boolean;
   can_receive?: boolean;
+  is_shared?: boolean;
+  can_send_as?: boolean;
+  can_send_on_behalf?: boolean;
 };
 type CustomFolder = { id: string; name: string; color: string; slug: string };
 type Label = { id: string; name: string; color: string };
@@ -236,6 +240,53 @@ type AppSettings = {
   focused_inbox_enabled?: boolean;
   desktop_notifications?: boolean;
   send_undo_seconds?: 0 | 10 | 20 | 30;
+};
+type AdminMailbox = Mailbox & {
+  owner_id: string;
+  status: "active" | "suspended" | "archived" | string;
+  quota_bytes: number;
+  storage_used_bytes: number;
+  sending_limit_daily: number;
+  sending_used_today: number;
+  inactivity_days: number;
+};
+type AdminMember = {
+  user_id: string;
+  email: string;
+  display_name: string;
+  role: "owner" | "admin" | "member" | string;
+  status: "active" | "suspended" | string;
+  require_mfa: boolean;
+  last_seen_at?: string | null;
+  last_sign_in_at?: string | null;
+  created_at?: string | null;
+  banned_until?: string | null;
+  storage_used_bytes: number;
+  mailboxes: AdminMailbox[];
+};
+type AdminOrganization = {
+  id: string;
+  name: string;
+  slug: string;
+  settings: Record<string, unknown>;
+};
+type AdminActivity = {
+  id: string;
+  email?: string;
+  subject_user_id: string;
+  event_type: string;
+  is_suspicious: boolean;
+  created_at: string;
+  user_agent?: string | null;
+};
+type AdminGroupMember = { id: string; member_email: string; member_user_id?: string | null; created_at?: string };
+type AdminGroup = { id: string; name: string; address: string; description: string; delivery_mode: "distribution" | "group" | string; enabled: boolean; members: AdminGroupMember[] };
+type AdminOverview = {
+  organization: AdminOrganization;
+  members: AdminMember[];
+  activity: AdminActivity[];
+  groups: AdminGroup[];
+  stats: { users: number; active_users: number; suspended_users: number; mailboxes: number; storage_used_bytes: number };
 };
 type Task = {
   id: string;
@@ -410,10 +461,11 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
-async function apiUpload<T>(path: string, file: File): Promise<T> {
+async function apiUpload<T>(path: string, file: File, fields: Record<string, string> = {}): Promise<T> {
   const session = (await requireSupabase().auth.getSession()).data.session;
   const form = new FormData();
   form.append("file", file);
+  Object.entries(fields).forEach(([key, value]) => form.append(key, value));
   const response = await fetch(path, {
     method: "POST",
     body: form,
@@ -438,9 +490,10 @@ async function publicApiFetch<T>(path: string, init: RequestInit = {}): Promise<
 }
 
 function AuthScreen() {
-  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot" | "recovery">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -460,6 +513,9 @@ function AuthScreen() {
           body: JSON.stringify({ email }),
         }).catch(() => undefined);
         setNotice("If that address is registered, a reset link will arrive shortly. Check your inbox and spam folder.");
+      } else if (mode === "recovery") {
+        await publicApiFetch("/api/auth/mfa-recovery", { method: "POST", body: JSON.stringify({ email, code: recoveryCode }) });
+        setNotice("If the details are valid, a recovery link will arrive shortly. Check your inbox.");
       } else {
         const result = mode === "signin"
           ? await client.auth.signInWithPassword({ email, password })
@@ -483,10 +539,12 @@ function AuthScreen() {
       <section className="auth-card">
         <div className="brand-mark">P</div>
         <p className="eyebrow">PRIVATE MAIL / {new Date().getFullYear()}</p>
-        <h1>{mode === "forgot" ? "Get back in safely." : "Keep your address close."}</h1>
+        <h1>{mode === "forgot" || mode === "recovery" ? "Get back in safely." : "Keep your address close."}</h1>
         <p className="auth-copy">
           {mode === "forgot"
             ? "We’ll send a one-time reset link to your sign-in address or a verified recovery email."
+            : mode === "recovery"
+              ? "Use one unused recovery code to request a one-time password reset link."
             : "A focused mailbox for your custom domain. Sign in to open messages across desktop and mobile."}
         </p>
         <form onSubmit={submit} className="auth-form">
@@ -501,7 +559,7 @@ function AuthScreen() {
               autoComplete="email"
             />
           </label>
-          {mode !== "forgot" && <label>
+          {mode !== "forgot" && mode !== "recovery" && <label>
               Password
               <input
                 type="password"
@@ -513,17 +571,22 @@ function AuthScreen() {
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
               />
             </label>}
+          {mode === "recovery" && <label>
+            Recovery code
+            <input value={recoveryCode} onChange={(event) => setRecoveryCode(event.target.value.toUpperCase().replace(/[^A-Z2-9-]/g, "").slice(0, 14))} placeholder="ABCD-EFGH-JKLM" autoComplete="one-time-code" />
+          </label>}
           {error && <div className="form-error">{error}</div>}
           {notice && <div className="form-notice">{notice}</div>}
           <button className="primary-button" disabled={busy}>
-            {busy ? "Working…" : mode === "forgot" ? "Send reset link" : mode === "signin" ? "Open mailbox" : "Create account"}
+            {busy ? "Working…" : mode === "forgot" ? "Send reset link" : mode === "recovery" ? "Request recovery link" : mode === "signin" ? "Open mailbox" : "Create account"}
           </button>
         </form>
         {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("forgot"); setError(""); setNotice(""); }}>Forgot your password?</button>}
-        <button className="text-button" onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setNotice(""); }}>
+        {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("recovery"); setError(""); setNotice(""); }}>Use a recovery code</button>}
+        {mode !== "forgot" && mode !== "recovery" && <button className="text-button" onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setNotice(""); }}>
           {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
-        </button>
-        {mode === "forgot" && <button className="text-button" onClick={() => { setMode("signin"); setError(""); setNotice(""); }}>Back to sign in</button>}
+        </button>}
+        {(mode === "forgot" || mode === "recovery") && <button className="text-button" onClick={() => { setMode("signin"); setError(""); setNotice(""); setRecoveryCode(""); }}>Back to sign in</button>}
       </section>
       <aside className="auth-aside">
         <div className="aside-note">
@@ -595,6 +658,7 @@ function PasswordResetScreen({ onComplete }: { onComplete: () => void }) {
 
 type MfaFactor = { id: string; friendly_name?: string; factor_type: "totp" | "phone"; status: "verified" | "unverified" | string };
 type RecoveryMethod = { id: string; email_masked: string; verified_at: string | null; pending: boolean; last_sent_at?: string | null };
+type Passkey = { id: string; friendly_name?: string; created_at: string; last_used_at?: string | null };
 
 function MfaChallengeScreen({ onVerified }: { onVerified: () => void }) {
   const [factors, setFactors] = useState<MfaFactor[]>([]);
@@ -652,6 +716,7 @@ function Compose({
   const defaultMailbox =
     mailboxes.find((mailbox) => mailbox.is_default) || mailboxes[0];
   const [fromAddress, setFromAddress] = useState(defaultMailbox?.address || "");
+  const [sendMode, setSendMode] = useState<"send_as" | "send_on_behalf">("send_as");
   const [to, setTo] = useState(seed?.to || "");
   const [cc, setCc] = useState(seed?.cc || "");
   const [bcc, setBcc] = useState("");
@@ -681,6 +746,13 @@ function Compose({
   const [warnings, setWarnings] = useState<Array<{ code: string; title: string; detail: string }>>([]);
   const idempotencyKeyRef = useRef(crypto.randomUUID());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectedMailbox = mailboxes.find((mailbox) => mailbox.address === fromAddress);
+  useEffect(() => {
+    if (!selectedMailbox?.is_shared) { setSendMode("send_as"); return; }
+    if (sendMode === "send_as" && selectedMailbox.can_send_as) return;
+    if (sendMode === "send_on_behalf" && selectedMailbox.can_send_on_behalf) return;
+    setSendMode(selectedMailbox.can_send_as ? "send_as" : "send_on_behalf");
+  }, [selectedMailbox?.id, selectedMailbox?.is_shared, selectedMailbox?.can_send_as, selectedMailbox?.can_send_on_behalf, sendMode]);
   const saveDraft = useCallback(async () => {
     if (!fromAddress || (!to.trim() && !subject.trim() && !text.trim())) return;
     setSaving(true);
@@ -732,7 +804,7 @@ function Compose({
           object_key: string;
           byte_size: number;
           content_type?: string;
-        }>("/api/attachments", file);
+        }>("/api/attachments", file, { fromAddress });
         setAttachments((current) => [...current, item]);
       } catch (uploadError) {
         setError(
@@ -784,6 +856,7 @@ function Compose({
         method: "POST",
         body: JSON.stringify({
           fromAddress,
+          sendMode,
           to,
           cc,
           bcc,
@@ -906,6 +979,15 @@ function Compose({
                   ))}
               </select>
             </label>
+            {selectedMailbox?.is_shared && (
+              <label className="compose-field-inline">
+                Send mode
+                <select value={sendMode} onChange={(event) => setSendMode(event.target.value as "send_as" | "send_on_behalf")}>
+                  {selectedMailbox.can_send_as && <option value="send_as">Send as</option>}
+                  {selectedMailbox.can_send_on_behalf && <option value="send_on_behalf">Send on behalf</option>}
+                </select>
+              </label>
+            )}
             <button
               type="button"
               className="compose-recipient-toggle"
@@ -1117,6 +1199,285 @@ function actionMode(actions: Record<string, unknown>, key: string): "ignore" | "
   return typeof actions[key] === "boolean" ? (actions[key] ? "true" : "false") : "ignore";
 }
 
+function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
+  const [orgName, setOrgName] = useState("");
+  const [inactivityDays, setInactivityDays] = useState("90");
+  const [inactivityAction, setInactivityAction] = useState("notify");
+  const [requireMfa, setRequireMfa] = useState(false);
+  const [defaultQuotaGb, setDefaultQuotaGb] = useState("5");
+  const [defaultSendingLimit, setDefaultSendingLimit] = useState("100");
+  const [newEmail, setNewEmail] = useState("");
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [newMailboxAddress, setNewMailboxAddress] = useState("");
+  const [newRole, setNewRole] = useState<"member" | "admin">("member");
+  const [newRequireMfa, setNewRequireMfa] = useState(false);
+  const [editMemberId, setEditMemberId] = useState("");
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editMailboxId, setEditMailboxId] = useState("");
+  const [editMailboxName, setEditMailboxName] = useState("");
+  const [editMailboxQuotaGb, setEditMailboxQuotaGb] = useState("5");
+  const [editMailboxSendingLimit, setEditMailboxSendingLimit] = useState("100");
+  const [editMailboxCanSend, setEditMailboxCanSend] = useState(true);
+  const [editMailboxCanReceive, setEditMailboxCanReceive] = useState(true);
+  const [selectedMailboxId, setSelectedMailboxId] = useState("");
+  const [selectedDelegateId, setSelectedDelegateId] = useState("");
+  const [canRead, setCanRead] = useState(true);
+  const [canSendAs, setCanSendAs] = useState(false);
+  const [canSendOnBehalf, setCanSendOnBehalf] = useState(false);
+  const [canManage, setCanManage] = useState(false);
+  const [delegates, setDelegates] = useState<Array<{ member_id: string; email: string; display_name: string; can_read: boolean; can_send_as: boolean; can_send_on_behalf: boolean; can_manage: boolean }>>([]);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupAddress, setNewGroupAddress] = useState("");
+  const [newGroupDescription, setNewGroupDescription] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [newGroupMember, setNewGroupMember] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await apiFetch<AdminOverview>("/api/admin/overview");
+      setOverview(data);
+      setOrgName(data.organization.name);
+      const settings = data.organization.settings || {};
+      setInactivityDays(String(settings.inactivity_days ?? 90));
+      setInactivityAction(String(settings.inactivity_action ?? "notify"));
+      setRequireMfa(settings.require_mfa === true);
+      setDefaultQuotaGb(String(Number(settings.default_quota_bytes || 5 * 1024 * 1024 * 1024) / 1024 / 1024 / 1024));
+      setDefaultSendingLimit(String(settings.default_sending_limit_daily ?? 100));
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Administration is unavailable");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const allMailboxes = overview?.members.flatMap((member) => member.mailboxes.map((mailbox) => ({ ...mailbox, owner: member }))) || [];
+  const filteredMembers = overview?.members.filter((member) => `${member.email} ${member.display_name} ${member.role} ${member.status}`.toLowerCase().includes(search.trim().toLowerCase())) || [];
+  const activeMailbox = allMailboxes.find((item) => item.id === selectedMailboxId);
+
+  async function saveOrganization() {
+    setBusy(true); setError("");
+    try {
+      await apiFetch("/api/admin/organization", { method: "PATCH", body: JSON.stringify({ name: orgName, inactivity_days: Number(inactivityDays), inactivity_action: inactivityAction, require_mfa: requireMfa, default_quota_bytes: Math.max(0, Number(defaultQuotaGb) * 1024 * 1024 * 1024), default_sending_limit_daily: Math.max(0, Number(defaultSendingLimit)) }) });
+      setNotice("Workspace settings saved");
+      await load();
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Workspace settings could not be saved"); }
+    finally { setBusy(false); }
+  }
+
+  async function createUser(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError("");
+    try {
+      await apiFetch("/api/admin/users", { method: "POST", body: JSON.stringify({ email: newEmail, displayName: newDisplayName, mailboxAddress: newMailboxAddress || newEmail, role: newRole, requireMfa: newRequireMfa, quotaBytes: Number(defaultQuotaGb) * 1024 * 1024 * 1024, sendingLimitDaily: Number(defaultSendingLimit) }) });
+      setNewEmail(""); setNewDisplayName(""); setNewMailboxAddress(""); setNewRole("member"); setNewRequireMfa(false);
+      setNotice("Account created and invitation sent");
+      await load(); onChanged();
+    } catch (createError) { setError(createError instanceof Error ? createError.message : "Account could not be created"); }
+    finally { setBusy(false); }
+  }
+
+  function selectMemberForEdit(memberId: string) {
+    setEditMemberId(memberId);
+    setEditDisplayName(overview?.members.find((member) => member.user_id === memberId)?.display_name || "");
+  }
+
+  async function saveMemberProfile(event: FormEvent) {
+    event.preventDefault();
+    const member = overview?.members.find((candidate) => candidate.user_id === editMemberId);
+    if (!member || !editDisplayName.trim()) return;
+    await updateMember(member, { displayName: editDisplayName.trim() }, "Account profile updated");
+  }
+
+  function selectMailboxForEdit(mailboxId: string) {
+    const selected = allMailboxes.find((mailbox) => mailbox.id === mailboxId);
+    setEditMailboxId(mailboxId);
+    setEditMailboxName(selected?.display_name || "");
+    setEditMailboxQuotaGb(String(Number(selected?.quota_bytes || 0) / 1024 / 1024 / 1024 || 0));
+    setEditMailboxSendingLimit(String(selected?.sending_limit_daily ?? 0));
+    setEditMailboxCanSend(selected?.can_send !== false);
+    setEditMailboxCanReceive(selected?.can_receive !== false);
+  }
+
+  async function saveMailboxProfile(event: FormEvent) {
+    event.preventDefault();
+    const mailbox = allMailboxes.find((candidate) => candidate.id === editMailboxId);
+    if (!mailbox) return;
+    await updateMailbox(mailbox, { displayName: editMailboxName.trim() || mailbox.display_name, quotaBytes: Math.max(0, Number(editMailboxQuotaGb) * 1024 * 1024 * 1024), sendingLimitDaily: Math.max(0, Number(editMailboxSendingLimit)), canSend: editMailboxCanSend, canReceive: editMailboxCanReceive }, "Mailbox updated");
+  }
+
+  async function updateMember(member: AdminMember, patch: Record<string, unknown>, message: string) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/users/${member.user_id}`, { method: "PATCH", body: JSON.stringify(patch) }); setNotice(message); await load(); onChanged(); }
+    catch (updateError) { setError(updateError instanceof Error ? updateError.message : "Account could not be updated"); }
+    finally { setBusy(false); }
+  }
+
+  async function resetPassword(member: AdminMember) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/users/${member.user_id}/reset-password`, { method: "POST" }); setNotice(`Password reset sent to ${member.email}`); }
+    catch (resetError) { setError(resetError instanceof Error ? resetError.message : "Password reset could not be sent"); }
+    finally { setBusy(false); }
+  }
+
+  async function revokeSessions(member: AdminMember) {
+    if (!window.confirm(`Sign ${member.email} out on every device?`)) return;
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/users/${member.user_id}/revoke-sessions`, { method: "POST" }); setNotice(`All sessions revoked for ${member.email}`); }
+    catch (revokeError) { setError(revokeError instanceof Error ? revokeError.message : "Sessions could not be revoked"); }
+    finally { setBusy(false); }
+  }
+
+  async function deleteMember(member: AdminMember) {
+    if (!window.confirm(`Permanently delete ${member.email} and all of this account’s mailbox data? This cannot be undone.`)) return;
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/users/${member.user_id}`, { method: "DELETE" }); setNotice(`${member.email} was permanently deleted`); await load(); onChanged(); }
+    catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Account could not be deleted"); }
+    finally { setBusy(false); }
+  }
+
+  async function updateMailbox(mailbox: AdminMailbox, patch: Record<string, unknown>, message: string) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/mailboxes/${mailbox.id}`, { method: "PATCH", body: JSON.stringify(patch) }); setNotice(message); await load(); onChanged(); }
+    catch (updateError) { setError(updateError instanceof Error ? updateError.message : "Mailbox could not be updated"); }
+    finally { setBusy(false); }
+  }
+
+  async function deleteMailbox(mailbox: AdminMailbox) {
+    if (!window.confirm(`Permanently delete ${mailbox.address} and all messages stored in it? This cannot be undone.`)) return;
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/mailboxes/${mailbox.id}`, { method: "DELETE" }); setNotice(`${mailbox.address} was deleted`); await load(); onChanged(); }
+    catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Mailbox could not be deleted"); }
+    finally { setBusy(false); }
+  }
+
+  async function loadDelegates(mailboxId: string) {
+    setSelectedMailboxId(mailboxId); setSelectedDelegateId("");
+    if (!mailboxId) { setDelegates([]); return; }
+    try { setDelegates(await apiFetch<typeof delegates>(`/api/admin/mailboxes/${mailboxId}/delegates`)); }
+    catch (delegateError) { setError(delegateError instanceof Error ? delegateError.message : "Mailbox access could not be loaded"); }
+  }
+
+  async function saveDelegate(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedMailboxId || !selectedDelegateId) return;
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/mailboxes/${selectedMailboxId}/delegates/${selectedDelegateId}`, { method: "POST", body: JSON.stringify({ canRead, canSendAs, canSendOnBehalf, canManage }) }); setNotice("Mailbox permissions saved"); await loadDelegates(selectedMailboxId); }
+    catch (delegateError) { setError(delegateError instanceof Error ? delegateError.message : "Mailbox permissions could not be saved"); }
+    finally { setBusy(false); }
+  }
+
+  async function removeDelegate(delegateId: string) {
+    if (!selectedMailboxId) return;
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/mailboxes/${selectedMailboxId}/delegates/${delegateId}`, { method: "DELETE" }); setNotice("Mailbox access removed"); await loadDelegates(selectedMailboxId); }
+    catch (delegateError) { setError(delegateError instanceof Error ? delegateError.message : "Mailbox access could not be removed"); }
+    finally { setBusy(false); }
+  }
+
+  async function exportUsers() {
+    const authSession = (await requireSupabase().auth.getSession()).data.session;
+    const response = await fetch("/api/admin/users/export", { headers: authSession?.access_token ? { authorization: `Bearer ${authSession.access_token}` } : {} });
+    if (!response.ok) throw new Error(`Export failed (${response.status})`);
+    const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "parcel-users.csv"; link.click(); URL.revokeObjectURL(url); setNotice("User list exported");
+  }
+
+  async function importUsers(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
+    const lines = file.text ? csvLines(await file.text()) : [];
+    if (!lines.length) return;
+    const [header, ...rows] = lines;
+    const keys = header.map((value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "_"));
+    const users = rows.map((row) => Object.fromEntries(keys.map((key, index) => [key, row[index] || ""]))).filter((row) => row.email);
+    setBusy(true); setError("");
+    try { const result = await apiFetch<{ created: number; failed: number }>("/api/admin/users/import", { method: "POST", body: JSON.stringify({ users }) }); setNotice(`${result.created} account${result.created === 1 ? "" : "s"} imported${result.failed ? ` · ${result.failed} failed` : ""}`); await load(); onChanged(); }
+    catch (importError) { setError(importError instanceof Error ? importError.message : "Users could not be imported"); }
+    finally { setBusy(false); }
+  }
+
+  async function createGroup(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true); setError("");
+    try {
+      await apiFetch("/api/admin/groups", { method: "POST", body: JSON.stringify({ name: newGroupName, address: newGroupAddress, description: newGroupDescription }) });
+      setNewGroupName(""); setNewGroupAddress(""); setNewGroupDescription(""); setNotice("Group address created"); await load();
+    } catch (groupError) { setError(groupError instanceof Error ? groupError.message : "Group address could not be created"); }
+    finally { setBusy(false); }
+  }
+
+  async function updateGroup(group: AdminGroup, patch: Record<string, unknown>, message: string) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/groups/${group.id}`, { method: "PATCH", body: JSON.stringify(patch) }); setNotice(message); await load(); }
+    catch (groupError) { setError(groupError instanceof Error ? groupError.message : "Group address could not be updated"); }
+    finally { setBusy(false); }
+  }
+
+  async function deleteGroup(group: AdminGroup) {
+    if (!window.confirm(`Delete ${group.address} and its recipient list?`)) return;
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/groups/${group.id}`, { method: "DELETE" }); setNotice(`${group.address} was deleted`); setSelectedGroupId(""); await load(); }
+    catch (groupError) { setError(groupError instanceof Error ? groupError.message : "Group address could not be deleted"); }
+    finally { setBusy(false); }
+  }
+
+  async function addGroupMember(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedGroupId || !newGroupMember.trim()) return;
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/groups/${selectedGroupId}/members`, { method: "POST", body: JSON.stringify({ email: newGroupMember }) }); setNewGroupMember(""); setNotice("Group recipient added"); await load(); }
+    catch (groupError) { setError(groupError instanceof Error ? groupError.message : "Recipient could not be added"); }
+    finally { setBusy(false); }
+  }
+
+  async function removeGroupMember(groupId: string, memberId: string) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/admin/groups/${groupId}/members/${memberId}`, { method: "DELETE" }); setNotice("Group recipient removed"); await load(); }
+    catch (groupError) { setError(groupError instanceof Error ? groupError.message : "Recipient could not be removed"); }
+    finally { setBusy(false); }
+  }
+
+  if (loading) return <div className="admin-loading" role="status">Loading workspace administration…</div>;
+  if (!overview) return <div className="settings-alert settings-error" role="alert">{error || "Workspace administration is unavailable"}</div>;
+  return (
+    <div className="admin-console">
+      <div className="admin-toolbar">
+        <div><p className="eyebrow">WORKSPACE ADMINISTRATION</p><h3>Accounts, mailboxes, and access</h3><p>Manage people without exposing passwords or provider keys to the browser.</p></div>
+        <div className="admin-toolbar-actions"><button className="secondary-button" onClick={() => void load()} disabled={busy}><RefreshCcw size={14} /> Refresh</button><label className="secondary-button admin-file-button"><Upload size={14} /> Import CSV<input type="file" accept=".csv,text/csv" onChange={(event) => void importUsers(event)} /></label><button className="secondary-button" onClick={() => void exportUsers()} disabled={busy}><Download size={14} /> Export CSV</button></div>
+      </div>
+      {error && <div className="settings-alert settings-error" role="alert">{error}</div>}
+      {notice && <div className="form-notice" role="status">{notice}</div>}
+      <div className="admin-stats"><div><strong>{overview.stats.users}</strong><span>Accounts</span></div><div><strong>{overview.stats.active_users}</strong><span>Active</span></div><div><strong>{overview.stats.mailboxes}</strong><span>Mailboxes</span></div><div><strong>{formatBytes(overview.stats.storage_used_bytes)}</strong><span>Storage used</span></div></div>
+      <div className="admin-grid">
+        <div className="setting-card"><div className="setting-card-head"><div><h3>{overview.organization.name}</h3><p>Organization defaults apply to new mailbox accounts.</p></div><Users size={18} aria-hidden="true" /></div><label>Workspace name<input value={orgName} onChange={(event) => setOrgName(event.target.value)} /></label><div className="admin-form-row"><label>Inactivity days<input type="number" min="0" max="3650" value={inactivityDays} onChange={(event) => setInactivityDays(event.target.value)} /></label><label>Inactive account action<select value={inactivityAction} onChange={(event) => setInactivityAction(event.target.value)}><option value="notify">Notify only</option><option value="suspend">Suspend automatically</option></select></label></div><div className="admin-form-row"><label>Default quota (GB)<input type="number" min="0" step="0.5" value={defaultQuotaGb} onChange={(event) => setDefaultQuotaGb(event.target.value)} /></label><label>Daily sending limit<input type="number" min="0" value={defaultSendingLimit} onChange={(event) => setDefaultSendingLimit(event.target.value)} /></label></div><label className="toggle-row"><input type="checkbox" checked={requireMfa} onChange={(event) => setRequireMfa(event.target.checked)} /> Require two-step verification for this workspace</label><button className="primary-button" onClick={() => void saveOrganization()} disabled={busy}>Save workspace settings</button></div>
+        <form className="setting-card" onSubmit={(event) => void createUser(event)}><div className="setting-card-head"><div><h3>Create mailbox account</h3><p>Invite a person, create their mailbox, and apply limits immediately.</p></div><Plus size={18} aria-hidden="true" /></div><label>Login email<input type="email" required value={newEmail} onChange={(event) => setNewEmail(event.target.value)} placeholder="person@example.com" /></label><label>Display name<input value={newDisplayName} onChange={(event) => setNewDisplayName(event.target.value)} placeholder="Person name" /></label><label>Mailbox address<input type="email" value={newMailboxAddress} onChange={(event) => setNewMailboxAddress(event.target.value)} placeholder="person@your-domain.com" /></label><div className="admin-form-row"><label>Workspace role<select value={newRole} onChange={(event) => setNewRole(event.target.value as "member" | "admin")}><option value="member">Member</option><option value="admin">Administrator</option></select></label><label className="toggle-row"><input type="checkbox" checked={newRequireMfa} onChange={(event) => setNewRequireMfa(event.target.checked)} /> Require 2FA</label></div><button className="primary-button" disabled={busy}><Plus size={15} /> Create and invite</button></form>
+        <form className="setting-card" onSubmit={(event) => void saveMemberProfile(event)}><div className="setting-card-head"><div><h3>Edit account profile</h3><p>Change a member’s display name without changing their sign-in address.</p></div><Pencil size={18} aria-hidden="true" /></div><label>Account<select value={editMemberId} onChange={(event) => selectMemberForEdit(event.target.value)}><option value="">Choose an account</option>{overview?.members.map((member) => <option key={member.user_id} value={member.user_id}>{member.display_name} · {member.email}</option>)}</select></label><label>Display name<input required value={editDisplayName} onChange={(event) => setEditDisplayName(event.target.value)} placeholder="Display name" /></label><button className="secondary-button" disabled={busy || !editMemberId}>Save profile</button></form>
+        <form className="setting-card" onSubmit={(event) => void saveMailboxProfile(event)}><div className="setting-card-head"><div><h3>Edit mailbox settings</h3><p>Adjust a mailbox name, delivery switches, quota, and daily sending limit.</p></div><SlidersHorizontal size={18} aria-hidden="true" /></div><label>Mailbox<select value={editMailboxId} onChange={(event) => selectMailboxForEdit(event.target.value)}><option value="">Choose a mailbox</option>{allMailboxes.map((item) => <option key={item.id} value={item.id}>{item.address} · {item.owner.email}</option>)}</select></label><label>Display name<input required value={editMailboxName} onChange={(event) => setEditMailboxName(event.target.value)} placeholder="Mailbox name" /></label><div className="admin-form-row"><label>Quota (GB)<input type="number" min="0" step="0.5" value={editMailboxQuotaGb} onChange={(event) => setEditMailboxQuotaGb(event.target.value)} /></label><label>Daily send limit<input type="number" min="0" value={editMailboxSendingLimit} onChange={(event) => setEditMailboxSendingLimit(event.target.value)} /></label></div><div className="admin-form-row"><label className="toggle-row"><input type="checkbox" checked={editMailboxCanSend} onChange={(event) => setEditMailboxCanSend(event.target.checked)} /> Can send</label><label className="toggle-row"><input type="checkbox" checked={editMailboxCanReceive} onChange={(event) => setEditMailboxCanReceive(event.target.checked)} /> Can receive</label></div><button className="secondary-button" disabled={busy || !editMailboxId}>Save mailbox</button></form>
+      </div>
+      <div className="setting-card admin-groups-card"><div className="setting-card-head"><div><h3>Group addresses and distribution lists</h3><p>Route messages sent to a group address to its current recipients. Recipients may be workspace users or external addresses.</p></div><Users size={18} aria-hidden="true" /></div><form className="admin-form-row admin-group-create" onSubmit={(event) => void createGroup(event)}><label>Group name<input required value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Support team" /></label><label>Group address<input required type="email" value={newGroupAddress} onChange={(event) => setNewGroupAddress(event.target.value)} placeholder="support@your-domain.com" /></label><label>Description<input value={newGroupDescription} onChange={(event) => setNewGroupDescription(event.target.value)} placeholder="Who receives this address" /></label><button className="primary-button" disabled={busy}><Plus size={15} /> Add group</button></form>{overview.groups.map((group) => <article className={`admin-group${selectedGroupId === group.id ? " selected" : ""}`} key={group.id}><div className="admin-member-head"><div><strong>{group.name}</strong><small>{group.address} · {group.members.length} recipient{group.members.length === 1 ? "" : "s"}</small></div><div className="admin-badges"><span className={`admin-badge ${group.enabled ? "active" : "suspended"}`}>{group.enabled ? "active" : "disabled"}</span><span className="admin-badge member">{group.delivery_mode}</span></div></div><div className="admin-member-actions"><button className="text-button" onClick={() => setSelectedGroupId(selectedGroupId === group.id ? "" : group.id)}>{selectedGroupId === group.id ? "Hide recipients" : "Manage recipients"}</button><button className="text-button" onClick={() => void updateGroup(group, { enabled: !group.enabled }, group.enabled ? "Group address disabled" : "Group address enabled")} disabled={busy}>{group.enabled ? "Disable" : "Enable"}</button><button className="text-button danger-text-button" onClick={() => void deleteGroup(group)} disabled={busy}>Delete</button></div>{selectedGroupId === group.id && <div className="admin-group-members"><form className="admin-form-row" onSubmit={(event) => void addGroupMember(event)}><label>Recipient email<input required type="email" value={newGroupMember} onChange={(event) => setNewGroupMember(event.target.value)} placeholder="person@example.com" /></label><button className="secondary-button" disabled={busy}><Plus size={14} /> Add recipient</button></form>{group.members.map((member) => <div className="settings-item" key={member.id}><div><strong>{member.member_email}</strong><small>{member.member_user_id ? "Workspace member" : "External recipient"}</small></div><button className="text-button danger-text-button" onClick={() => void removeGroupMember(group.id, member.id)} disabled={busy}>Remove</button></div>)}{!group.members.length && <div className="rule-empty">No recipients yet. Messages to this address will not be delivered.</div>}</div>}</article>)}{!overview.groups.length && <div className="rule-empty">No group addresses configured.</div>}</div>
+      <div className="setting-card admin-users-card"><div className="admin-list-head"><div><h3>People and mailbox accounts</h3><p>Suspension blocks authentication and mailbox sending without deleting stored mail.</p></div><input className="admin-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search people" aria-label="Search people" /></div>{filteredMembers.map((member) => <article className="admin-member" key={member.user_id}><div className="admin-member-head"><div><strong>{member.display_name}</strong><small>{member.email} · joined {member.created_at ? new Date(member.created_at).toLocaleDateString() : "unknown"}</small></div><div className="admin-badges"><span className={`admin-badge ${member.role}`}>{member.role}</span><span className={`admin-badge ${member.status}`}>{member.status}</span>{member.require_mfa && <span className="admin-badge security">2FA required</span>}</div></div><div className="admin-member-meta"><span>{formatBytes(member.storage_used_bytes)} used</span><span>{member.last_seen_at ? `Last seen ${new Date(member.last_seen_at).toLocaleString()}` : "Not seen yet"}</span>{member.last_sign_in_at && <span>Last sign-in {new Date(member.last_sign_in_at).toLocaleString()}</span>}</div>{member.mailboxes.map((mailbox) => <div className="admin-mailbox-row" key={mailbox.id}><div><strong>{mailbox.address}</strong><small>{mailbox.display_name}{mailbox.is_default ? " · default" : ""} · {mailbox.status} · {formatBytes(mailbox.storage_used_bytes)} / {mailbox.quota_bytes ? formatBytes(mailbox.quota_bytes) : "unlimited"}</small></div><div className="admin-mailbox-actions"><button className="text-button" onClick={() => void updateMailbox(mailbox, { status: mailbox.status === "active" ? "suspended" : "active" }, mailbox.status === "active" ? "Mailbox suspended" : "Mailbox reactivated")} disabled={busy}>{mailbox.status === "active" ? "Suspend" : "Reactivate"}</button><button className="text-button" onClick={() => { const value = window.prompt("Daily sending limit", String(mailbox.sending_limit_daily)); if (value !== null) void updateMailbox(mailbox, { sendingLimitDaily: Number(value) }, "Sending limit updated"); }} disabled={busy}>Limit</button>{!mailbox.is_default && <button className="text-button danger-text-button" onClick={() => void deleteMailbox(mailbox)} disabled={busy}>Delete</button>}</div></div>)}<div className="admin-member-actions"><button className="text-button" onClick={() => void updateMember(member, { status: member.status === "active" ? "suspended" : "active" }, member.status === "active" ? "Account suspended" : "Account reactivated")} disabled={busy || member.role === "owner"}>{member.status === "active" ? "Suspend account" : "Reactivate account"}</button>{member.role !== "owner" && <button className="text-button" onClick={() => void updateMember(member, { role: member.role === "admin" ? "member" : "admin" }, "Role updated")} disabled={busy}>{member.role === "admin" ? "Make member" : "Make admin"}</button>}<button className="text-button" onClick={() => void updateMember(member, { requireMfa: !member.require_mfa }, member.require_mfa ? "2FA requirement removed" : "2FA requirement enabled")} disabled={busy}> {member.require_mfa ? "Allow password-only" : "Require 2FA"}</button><button className="text-button" onClick={() => void resetPassword(member)} disabled={busy}>Reset password</button><button className="text-button" onClick={() => void revokeSessions(member)} disabled={busy}>Revoke sessions</button>{member.role !== "owner" && <button className="text-button danger-text-button" onClick={() => void deleteMember(member)} disabled={busy}>Delete account</button>}</div></article>)}{!filteredMembers.length && <div className="rule-empty">No matching accounts.</div>}</div>
+      <div className="setting-card admin-access-card"><div><h3>Shared mailbox access</h3><p>Grant precise read, send-as, send-on-behalf, or management permissions.</p></div><div className="admin-form-row"><label>Mailbox<select value={selectedMailboxId} onChange={(event) => void loadDelegates(event.target.value)}><option value="">Choose a mailbox</option>{allMailboxes.map((item) => <option key={item.id} value={item.id}>{item.address} · {item.owner.email}</option>)}</select></label><label>Person<select value={selectedDelegateId} onChange={(event) => setSelectedDelegateId(event.target.value)}><option value="">Choose a person</option>{overview.members.filter((member) => member.user_id !== activeMailbox?.owner_id).map((member) => <option key={member.user_id} value={member.user_id}>{member.display_name} · {member.email}</option>)}</select></label></div><form className="admin-permission-form" onSubmit={(event) => void saveDelegate(event)}><label className="toggle-row"><input type="checkbox" checked={canRead} onChange={(event) => setCanRead(event.target.checked)} /> Read messages</label><label className="toggle-row"><input type="checkbox" checked={canSendAs} onChange={(event) => setCanSendAs(event.target.checked)} /> Send as mailbox</label><label className="toggle-row"><input type="checkbox" checked={canSendOnBehalf} onChange={(event) => setCanSendOnBehalf(event.target.checked)} /> Send on behalf</label><label className="toggle-row"><input type="checkbox" checked={canManage} onChange={(event) => setCanManage(event.target.checked)} /> Manage members</label><button className="primary-button" disabled={busy || !selectedMailboxId || !selectedDelegateId}>Save access</button></form>{selectedMailboxId && <div className="admin-delegates">{delegates.map((delegate) => <div className="settings-item" key={delegate.member_id}><div><strong>{delegate.display_name || delegate.email}</strong><small>{delegate.email} · {delegate.can_read ? "read" : "no read"}{delegate.can_send_as ? " · send as" : ""}{delegate.can_send_on_behalf ? " · on behalf" : ""}{delegate.can_manage ? " · manage" : ""}</small></div><button className="text-button danger-text-button" onClick={() => void removeDelegate(delegate.member_id)} disabled={busy}>Remove</button></div>)}{!delegates.length && <div className="rule-empty">No delegated access yet.</div>}</div>}</div>
+      <div className="setting-card admin-activity-card"><div className="setting-card-head"><div><h3>Security and activity history</h3><p>Sign-ins, suspicious access, resets, and session revocations are retained here.</p></div><History size={18} aria-hidden="true" /></div>{overview.activity.slice(0, 20).map((event) => <div className="settings-item" key={event.id}><div><strong>{event.email || event.subject_user_id}</strong><small>{event.event_type.replace(/_/g, " ")} · {new Date(event.created_at).toLocaleString()}</small></div>{event.is_suspicious && <span className="admin-badge security"><ShieldAlert size={12} /> Review</span>}</div>)}{!overview.activity.length && <div className="rule-empty">No account activity recorded yet.</div>}</div>
+    </div>
+  );
+}
+
+function csvLines(value: string): string[][] {
+  return value.split(/\r?\n/).filter((line) => line.trim()).map((line) => {
+    const cells: string[] = []; let cell = ""; let quoted = false;
+    for (let index = 0; index < line.length; index += 1) { const character = line[index]; if (character === '"' && line[index + 1] === '"') { cell += '"'; index += 1; } else if (character === '"') quoted = !quoted; else if (character === "," && !quoted) { cells.push(cell.trim()); cell = ""; } else cell += character; }
+    cells.push(cell.trim()); return cells;
+  });
+}
+
 function SettingsPanel({
   session,
   settings,
@@ -1149,6 +1510,7 @@ function SettingsPanel({
     | "automation"
     | "mailboxes"
     | "integrations"
+    | "administration"
   >("appearance");
   const [folderName, setFolderName] = useState("");
   const [labelName, setLabelName] = useState("");
@@ -1203,6 +1565,10 @@ function SettingsPanel({
   const [mfaSetup, setMfaSetup] = useState<{ id: string; qrCode: string; secret: string; uri: string } | null>(null);
   const [mfaQrFailed, setMfaQrFailed] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
+  const [passkeys, setPasskeys] = useState<Passkey[]>([]);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [recoveryCodeCount, setRecoveryCodeCount] = useState(0);
+  const [generatedRecoveryCodes, setGeneratedRecoveryCodes] = useState<string[]>([]);
   const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
   const [ruleLabBusy, setRuleLabBusy] = useState(false);
   const ruleImportRef = useRef<HTMLInputElement>(null);
@@ -1590,9 +1956,52 @@ function SettingsPanel({
       const factors = [...(factorsResult.data?.totp || []), ...(factorsResult.data?.phone || [])] as MfaFactor[];
       setMfaFactors(factors.filter((factor) => factor.status === "verified"));
       setMfaPendingFactor(factors.find((factor) => factor.factor_type === "totp" && factor.status === "unverified") || null);
+      const passkeyResult = await requireSupabase().auth.passkey.list();
+      if (passkeyResult.error) throw passkeyResult.error;
+      setPasskeys((passkeyResult.data || []) as Passkey[]);
+      const recoveryCodeStatus = await apiFetch<{ remaining: number }>("/api/recovery-codes/status");
+      setRecoveryCodeCount(recoveryCodeStatus.remaining);
     } catch (loadError) {
       setSecurityError(loadError instanceof Error ? loadError.message : "Security settings unavailable");
     }
+  }
+  async function registerPasskey() {
+    setPasskeyBusy(true); setSecurityError("");
+    try {
+      const result = await requireSupabase().auth.registerPasskey();
+      if (result.error) throw result.error;
+      setNotice("Passkey added to this account");
+      await loadSecurity();
+    } catch (passkeyError) { setSecurityError(passkeyError instanceof Error ? passkeyError.message : "Could not add that passkey"); }
+    finally { setPasskeyBusy(false); }
+  }
+  async function renamePasskey(passkey: Passkey) {
+    const friendlyName = window.prompt("Name this passkey", passkey.friendly_name || "Passkey")?.trim();
+    if (!friendlyName || friendlyName === passkey.friendly_name) return;
+    setPasskeyBusy(true); setSecurityError("");
+    try { const result = await requireSupabase().auth.passkey.update({ passkeyId: passkey.id, friendlyName }); if (result.error) throw result.error; setNotice("Passkey renamed"); await loadSecurity(); }
+    catch (passkeyError) { setSecurityError(passkeyError instanceof Error ? passkeyError.message : "Could not rename that passkey"); }
+    finally { setPasskeyBusy(false); }
+  }
+  async function removePasskey(passkey: Passkey) {
+    if (!window.confirm(`Remove ${passkey.friendly_name || "this passkey"}?`)) return;
+    setPasskeyBusy(true); setSecurityError("");
+    try { const result = await requireSupabase().auth.passkey.delete({ passkeyId: passkey.id }); if (result.error) throw result.error; setNotice("Passkey removed"); await loadSecurity(); }
+    catch (passkeyError) { setSecurityError(passkeyError instanceof Error ? passkeyError.message : "Could not remove that passkey"); }
+    finally { setPasskeyBusy(false); }
+  }
+  async function revokeOtherSessions() {
+    setSecurityBusy(true); setSecurityError("");
+    try { const result = await requireSupabase().auth.signOut({ scope: "others" }); if (result.error) throw result.error; setNotice("Other sessions revoked"); }
+    catch (sessionError) { setSecurityError(sessionError instanceof Error ? sessionError.message : "Other sessions could not be revoked"); }
+    finally { setSecurityBusy(false); }
+  }
+  async function generateRecoveryCodes() {
+    if (!window.confirm("Generate a new set of recovery codes? Any previous unused codes will stop working.")) return;
+    setSecurityBusy(true); setSecurityError("");
+    try { const result = await apiFetch<{ codes: string[]; remaining: number }>("/api/recovery-codes", { method: "POST" }); setGeneratedRecoveryCodes(result.codes); setRecoveryCodeCount(result.remaining); setNotice("New recovery codes generated. Save them somewhere private."); }
+    catch (codeError) { setSecurityError(codeError instanceof Error ? codeError.message : "Recovery codes could not be generated"); }
+    finally { setSecurityBusy(false); }
   }
   async function sendPrimaryReset() {
     setSecurityBusy(true);
@@ -1805,6 +2214,7 @@ function SettingsPanel({
               ["spam", "Spam & trust"],
               ["automation", "Rules & signatures"],
               ["mailboxes", "Mailboxes"],
+              ["administration", "Administration"],
               ["integrations", "Integrations"],
             ] as const
           ).map(([key, label]) => (
@@ -1850,6 +2260,24 @@ function SettingsPanel({
                 <input inputMode="numeric" autoComplete="one-time-code" value={mfaCode} onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="Enter the six-digit code" aria-label="Authenticator verification code" />
                 <div className="security-actions"><button className="primary-button" onClick={() => void verifyMfaSetup()} disabled={securityBusy || mfaCode.length !== 6}>Verify and turn on</button><button className="text-button" onClick={() => void cancelMfaSetup()} disabled={securityBusy}>Cancel</button></div>
               </div>}
+            </div>
+            <div className="setting-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Passkeys and devices</h3>
+                  <p>Use a phishing-resistant passkey and revoke other active sessions when a device is lost.</p>
+                </div>
+                <span className="security-status enabled">{passkeys.length} saved</span>
+              </div>
+              {passkeys.map((passkey) => <div className="settings-item security-factor" key={passkey.id}><div><strong>{passkey.friendly_name || "Passkey"}</strong><small>Added {new Date(passkey.created_at).toLocaleDateString()}{passkey.last_used_at ? ` · last used ${new Date(passkey.last_used_at).toLocaleDateString()}` : ""}</small></div><div className="security-actions"><button className="text-button" onClick={() => void renamePasskey(passkey)} disabled={passkeyBusy}>Rename</button><button className="text-button danger-text-button" onClick={() => void removePasskey(passkey)} disabled={passkeyBusy}>Remove</button></div></div>)}
+              <div className="security-actions"><button className="secondary-button" onClick={() => void registerPasskey()} disabled={passkeyBusy}><ShieldAlert size={15} /> {passkeyBusy ? "Working…" : "Add passkey"}</button><button className="text-button" onClick={() => void revokeOtherSessions()} disabled={securityBusy}>Sign out other devices</button></div>
+              <small className="field-help">Passkeys require Supabase Auth passkey support to be enabled for this project and the production relying-party domain to be configured.</small>
+            </div>
+            <div className="setting-card">
+              <div className="setting-card-head"><div><h3>Recovery codes</h3><p>One-time backup codes can help you regain access if your authenticator is unavailable.</p></div><span className="rule-count">{recoveryCodeCount}/10</span></div>
+              <button className="secondary-button" onClick={() => void generateRecoveryCodes()} disabled={securityBusy}><ShieldAlert size={15} /> Generate new codes</button>
+              {generatedRecoveryCodes.length > 0 && <div className="recovery-code-list" role="status"><strong>Save these now — they will not be shown again.</strong><div>{generatedRecoveryCodes.map((code) => <code key={code}>{code}</code>)}</div></div>}
+              <small className="field-help">Each code works once and is stored only as a hash. Never paste these codes into support requests.</small>
             </div>
             <div className="setting-card">
               <div className="setting-card-head">
@@ -2550,6 +2978,7 @@ function SettingsPanel({
             </div>
           </div>
         )}
+        {tab === "administration" && <MailboxAdministration onChanged={onChanged} />}
         {tab === "integrations" && (
           <div className="settings-grid">
             <div className="setting-card">

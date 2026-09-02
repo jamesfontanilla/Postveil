@@ -62,7 +62,12 @@ interface Env {
 
 type JsonRecord = Record<string, unknown>;
 type User = { id: string; email?: string; accessToken?: string; mfaRequired?: boolean };
-type Mailbox = { id: string; owner_id: string; address: string; display_name: string; is_default: boolean; can_send: boolean; can_receive: boolean; settings?: JsonRecord };
+type Mailbox = { id: string; owner_id: string; address: string; display_name: string; is_default: boolean; can_send: boolean; can_receive: boolean; settings?: JsonRecord; created_at?: string };
+type Organization = { id: string; owner_id: string; name: string; slug: string; settings: JsonRecord; created_at: string; updated_at: string };
+type OrganizationMember = { organization_id: string; user_id: string; role: "owner" | "admin" | "member"; status: "active" | "suspended"; require_mfa: boolean; last_seen_at: string | null; created_at: string; updated_at: string };
+type MailboxAdminSettings = { mailbox_id: string; organization_id: string; status: "active" | "suspended" | "archived"; quota_bytes: number; storage_used_bytes: number; sending_limit_daily: number; sending_used_today: number; sending_window_started_at: string; inactivity_days: number; last_activity_at: string | null };
+type AdminAuthUser = { id: string; email?: string; created_at?: string; last_sign_in_at?: string | null; banned_until?: string | null; user_metadata?: JsonRecord };
+type SecurityEvent = { id: string; organization_id: string | null; actor_id: string | null; subject_user_id: string; event_type: string; event_key: string; session_id: string | null; ip_hash: string | null; user_agent: string | null; is_suspicious: boolean; details: JsonRecord; created_at: string };
 type Rule = RuleDefinition & { id: string; owner_id: string; conditions: JsonRecord; actions: JsonRecord; enabled: boolean; priority: number };
 type StoredAttachment = { object_key: string; filename: string; content_type: string; detected_content_type: string; byte_size: number; sha256: string; preview_state: "ready" | "not_available"; safety_status: "unknown" | "suspicious" | "blocked"; safety_reasons: string[]; content_id?: string; disposition?: string | null };
 
@@ -228,9 +233,629 @@ async function ensureProfileAndMailbox(env: Env, user: User): Promise<Mailbox> {
   return created[0];
 }
 
+function adminAuthClient(env: Env) {
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}
+
+function organizationSettings(value: unknown): JsonRecord {
+  return objectValue(value);
+}
+
+async function ensureOrganization(env: Env, user: User): Promise<Organization> {
+  const memberships = await dbRequest<Array<{ organization_id: string }>>(env, `organization_members?user_id=eq.${encodeURIComponent(user.id)}&status=eq.active&order=created_at.asc&limit=1`).catch(() => []);
+  let rows = memberships[0]
+    ? await dbRequest<Organization[]>(env, `organizations?id=eq.${encodeURIComponent(memberships[0].organization_id)}&limit=1`)
+    : await dbRequest<Organization[]>(env, `organizations?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+  if (!rows[0]) {
+    const slug = `workspace-${user.id.replace(/-/g, "").slice(0, 18)}`;
+    await dbRequest(env, "organizations", {
+      method: "POST",
+      headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify({
+        owner_id: user.id,
+        name: `${String(user.email || "Parcel").split("@")[0]} workspace`,
+        slug,
+      }),
+    });
+    rows = await dbRequest<Organization[]>(env, `organizations?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+  }
+  const organization = rows[0];
+  if (!organization) throw new Error("Organization could not be initialized");
+  if (organization.owner_id === user.id) {
+    await dbRequest(env, "organization_members", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ organization_id: organization.id, user_id: user.id, role: "owner", status: "active" }),
+    });
+  }
+  const mailboxes = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&select=id,owner_id,address,display_name,is_default,can_send,can_receive,settings,created_at`);
+  const settings = organizationSettings(organization.settings);
+  const defaultQuota = Math.max(0, Number(settings.default_quota_bytes || 5 * 1024 * 1024 * 1024));
+  const defaultSendingLimit = Math.max(0, Number(settings.default_sending_limit_daily || 100));
+  await Promise.all(mailboxes.map((mailbox) => dbRequest(env, "mailbox_admin_settings", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({
+      mailbox_id: mailbox.id,
+      organization_id: organization.id,
+      quota_bytes: defaultQuota,
+      sending_limit_daily: defaultSendingLimit,
+      inactivity_days: Math.max(0, Number(settings.inactivity_days || 90)),
+      last_activity_at: mailbox.created_at,
+    }),
+  }).catch(() => undefined)));
+  return organization;
+}
+
+async function organizationMember(env: Env, organizationId: string, userId: string): Promise<OrganizationMember | null> {
+  const rows = await dbRequest<OrganizationMember[]>(env, `organization_members?organization_id=eq.${encodeURIComponent(organizationId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`);
+  return rows[0] || null;
+}
+
+async function organizationAdmin(env: Env, user: User): Promise<{ organization: Organization; member: OrganizationMember } | null> {
+  const organization = await ensureOrganization(env, user);
+  const member = await organizationMember(env, organization.id, user.id);
+  if (!member || member.status !== "active" || !["owner", "admin"].includes(member.role)) return null;
+  return { organization, member };
+}
+
+async function organizationMfaBlocked(env: Env, user: User, organization: Organization): Promise<boolean> {
+  const member = await organizationMember(env, organization.id, user.id);
+  const required = Boolean(member?.require_mfa || organizationSettings(organization.settings).require_mfa === true);
+  if (!required) return false;
+  return (await verifiedFactorCount(env, user.id, user.accessToken || "")) === 0;
+}
+
+async function getMailboxAdminSettings(env: Env, mailbox: Mailbox, organizationId?: string): Promise<MailboxAdminSettings | null> {
+  const query = `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}&limit=1${organizationId ? `&organization_id=eq.${encodeURIComponent(organizationId)}` : ""}`;
+  const rows = await dbRequest<MailboxAdminSettings[]>(env, query).catch(() => []);
+  return rows[0] || null;
+}
+
+async function authUsers(env: Env): Promise<AdminAuthUser[]> {
+  const result = await adminAuthClient(env).auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (result.error) throw result.error;
+  return (result.data?.users || []) as unknown as AdminAuthUser[];
+}
+
+function authUserDisplayName(user: AdminAuthUser): string {
+  return String(organizationSettings(user.user_metadata).display_name || user.email?.split("@")[0] || "Mailbox user");
+}
+
+async function attachmentBytesForMailbox(env: Env, mailbox: Mailbox): Promise<number> {
+  const messages = await dbRequest<Array<{ id: string }>>(env, `messages?mailbox_id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(mailbox.owner_id)}&select=id&limit=10000`).catch(() => []);
+  if (!messages.length) return 0;
+  const ids = messages.map((message) => message.id).join(",");
+  const rows = await dbRequest<Array<{ byte_size?: number }>>(env, `attachments?owner_id=eq.${encodeURIComponent(mailbox.owner_id)}&message_id=in.(${ids})&select=byte_size`).catch(() => []);
+  return rows.reduce((total, row) => total + Math.max(0, Number(row.byte_size || 0)), 0);
+}
+
+async function listAdminUsers(env: Env, organization: Organization): Promise<JsonRecord[]> {
+  const members = await dbRequest<OrganizationMember[]>(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&order=created_at.asc`);
+  const users = await authUsers(env);
+  const userMap = new Map(users.map((user) => [user.id, user]));
+  const ids = members.map((member) => member.user_id);
+  const mailboxes = ids.length
+    ? await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=in.(${ids.join(",")})&order=owner_id.asc,is_default.desc,created_at.asc`)
+    : [];
+  const mailboxSettings = mailboxes.length
+    ? await dbRequest<MailboxAdminSettings[]>(env, `mailbox_admin_settings?mailbox_id=in.(${mailboxes.map((mailbox) => mailbox.id).join(",")})`)
+    : [];
+  const settingsMap = new Map(mailboxSettings.map((setting) => [setting.mailbox_id, setting]));
+  const result: JsonRecord[] = [];
+  for (const member of members) {
+    const user = userMap.get(member.user_id);
+    if (!user) continue;
+    const ownedMailboxes = mailboxes.filter((mailbox) => mailbox.owner_id === member.user_id);
+    const mailboxUsage = new Map(await Promise.all(ownedMailboxes.map(async (mailbox) => [mailbox.id, await attachmentBytesForMailbox(env, mailbox)] as const)));
+    const usedBytes = [...mailboxUsage.values()].reduce((total, value) => total + value, 0);
+    const userMailboxes = ownedMailboxes.map((mailbox) => {
+      const settings = settingsMap.get(mailbox.id);
+      return {
+        ...mailbox,
+        status: settings?.status || "active",
+        quota_bytes: settings?.quota_bytes || 0,
+        storage_used_bytes: mailboxUsage.get(mailbox.id) || 0,
+        sending_limit_daily: settings?.sending_limit_daily || 0,
+        sending_used_today: settings?.sending_used_today || 0,
+        inactivity_days: settings?.inactivity_days || 90,
+      };
+    });
+    result.push({
+      user_id: member.user_id,
+      email: user.email || "",
+      display_name: authUserDisplayName(user),
+      role: member.role,
+      status: member.status,
+      require_mfa: member.require_mfa,
+      last_seen_at: member.last_seen_at,
+      last_sign_in_at: user.last_sign_in_at || null,
+      created_at: member.created_at || user.created_at || null,
+      banned_until: user.banned_until || null,
+      storage_used_bytes: usedBytes,
+      mailboxes: userMailboxes,
+    });
+    await Promise.all(userMailboxes.map((mailbox) => dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(String(mailbox.id))}`, { method: "PATCH", body: JSON.stringify({ storage_used_bytes: Number(mailbox.storage_used_bytes || 0), updated_at: new Date().toISOString() }) }).catch(() => undefined)));
+  }
+  return result;
+}
+
+async function enforceInactivity(env: Env, organization: Organization, actorId: string): Promise<void> {
+  const settings = organizationSettings(organization.settings);
+  if (settings.inactivity_action !== "suspend") return;
+  const inactivityDays = Math.max(0, Number(settings.inactivity_days || 0));
+  if (!inactivityDays) return;
+  const cutoff = Date.now() - inactivityDays * 24 * 60 * 60 * 1000;
+  const members = await dbRequest<OrganizationMember[]>(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&status=eq.active&role=neq.owner`);
+  const users = await authUsers(env);
+  for (const member of members) {
+    const authUser = users.find((candidate) => candidate.id === member.user_id);
+    const lastActivity = member.last_seen_at || authUser?.last_sign_in_at || null;
+    if (!lastActivity || new Date(lastActivity).getTime() > cutoff) continue;
+    const authUpdate = await adminAuthClient(env).auth.admin.updateUserById(member.user_id, { ban_duration: "876000h" });
+    if (authUpdate.error) continue;
+    await dbRequest(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&user_id=eq.${encodeURIComponent(member.user_id)}`, { method: "PATCH", body: JSON.stringify({ status: "suspended", updated_at: new Date().toISOString() }) });
+    const mailboxes = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(member.user_id)}&select=id`);
+    await Promise.all(mailboxes.map((mailbox) => dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, { method: "PATCH", body: JSON.stringify({ status: "suspended", updated_at: new Date().toISOString() }) }).catch(() => undefined)));
+    await auditAdminEvent(env, organization.id, actorId, member.user_id, "account_suspended", { reason: "inactivity", inactivity_days: inactivityDays, last_activity_at: lastActivity });
+  }
+}
+
+async function enforceAllOrganizationInactivity(env: Env): Promise<void> {
+  const organizations = await dbRequest<Organization[]>(env, "organizations?select=id,owner_id,name,slug,settings,created_at,updated_at&limit=1000").catch(() => []);
+  for (const organization of organizations) await enforceInactivity(env, organization, organization.owner_id).catch(() => undefined);
+}
+
+async function recordSecurityEvent(env: Env, organization: Organization, user: User, request: Request, ctx: ExecutionContext): Promise<void> {
+  const payload = jwtPayload(user.accessToken || "");
+  const sessionId = typeof payload.session_id === "string" ? payload.session_id : typeof payload.jti === "string" ? payload.jti : String(payload.iat || "");
+  if (!sessionId) return;
+  const ip = request.headers.get("CF-Connecting-IP") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const userAgent = (request.headers.get("user-agent") || "unknown").slice(0, 240);
+  const ipHash = await sha256Hex(new TextEncoder().encode(ip));
+  const recent = await dbRequest<SecurityEvent[]>(env, `account_security_events?organization_id=eq.${encodeURIComponent(organization.id)}&subject_user_id=eq.${encodeURIComponent(user.id)}&event_type=eq.login&order=created_at.desc&limit=20`).catch(() => []);
+  const eventKey = `${user.id}:${sessionId}:${ipHash}`;
+  const suspicious = recent.length > 0 && !recent.some((event) => event.ip_hash === ipHash && event.user_agent === userAgent);
+  await dbRequest(env, "account_security_events", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({ organization_id: organization.id, actor_id: user.id, subject_user_id: user.id, event_type: "login", event_key: eventKey, session_id: sessionId, ip_hash: ipHash, user_agent: userAgent, is_suspicious: suspicious, details: { method: request.method, path: new URL(request.url).pathname } }),
+  }).catch(() => undefined);
+  await dbRequest(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&user_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
+  if (suspicious && user.email) {
+    ctx.waitUntil(sendViaBrevo(env, {
+      fromAddress: await defaultFromAddress(env, user.id),
+      to: [user.email],
+      subject: "New Parcel sign-in detected",
+      text: `A new sign-in to your Parcel account was detected. If this was not you, reset your password and revoke other sessions.\n\nBrowser: ${userAgent}`,
+    }).catch(() => undefined));
+  }
+}
+
+function csvCell(value: unknown): string {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function csvRows(value: string): string[][] {
+  return value.split(/\r?\n/).filter((line) => line.trim()).map((line) => {
+    const cells: string[] = [];
+    let cell = "";
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+      if (character === '"' && line[index + 1] === '"') { cell += '"'; index += 1; }
+      else if (character === '"') quoted = !quoted;
+      else if (character === "," && !quoted) { cells.push(cell.trim()); cell = ""; }
+      else cell += character;
+    }
+    cells.push(cell.trim());
+    return cells;
+  });
+}
+
+async function adminMailbox(env: Env, organizationId: string, mailboxId: string): Promise<Mailbox | null> {
+  const rows = await dbRequest<Mailbox[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxId)}&select=id,owner_id,address,display_name,is_default,can_send,can_receive,settings&limit=1`);
+  const mailbox = rows[0];
+  if (!mailbox) return null;
+  const members = await dbRequest<OrganizationMember[]>(env, `organization_members?organization_id=eq.${encodeURIComponent(organizationId)}&user_id=eq.${encodeURIComponent(mailbox.owner_id)}&limit=1`);
+  return members[0] ? mailbox : null;
+}
+
+async function mailboxObjectKeys(env: Env, mailboxId: string, ownerId: string): Promise<string[]> {
+  const messages = await dbRequest<Array<{ id: string; raw_object_key?: string | null }>>(env, `messages?mailbox_id=eq.${encodeURIComponent(mailboxId)}&owner_id=eq.${encodeURIComponent(ownerId)}&select=id,raw_object_key&limit=10000`).catch(() => []);
+  const messageIds = messages.map((message) => message.id).filter(Boolean);
+  const attachments = messageIds.length
+    ? await dbRequest<Array<{ object_key: string }>>(env, `attachments?owner_id=eq.${encodeURIComponent(ownerId)}&message_id=in.(${messageIds.join(",")})&select=object_key&limit=10000`).catch(() => [])
+    : [];
+  const keys = [...new Set([...messages.map((message) => message.raw_object_key || ""), ...attachments.map((attachment) => attachment.object_key)].filter(Boolean))];
+  return keys;
+}
+
+async function purgeOwnerObjects(env: Env, ownerId: string): Promise<void> {
+  const messages = await dbRequest<Array<{ id: string; raw_object_key?: string | null }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,raw_object_key&limit=10000`).catch(() => []);
+  const attachments = await dbRequest<Array<{ object_key: string }>>(env, `attachments?owner_id=eq.${encodeURIComponent(ownerId)}&select=object_key&limit=10000`).catch(() => []);
+  const keys = [...new Set([...messages.map((message) => message.raw_object_key || ""), ...attachments.map((attachment) => attachment.object_key)].filter(Boolean))];
+  await Promise.allSettled(keys.map((key) => deleteObject(env, key)));
+}
+
+async function auditAdminEvent(env: Env, organizationId: string, actorId: string, subjectUserId: string, eventType: string, details: JsonRecord = {}): Promise<void> {
+  await dbRequest(env, "account_security_events", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({
+      organization_id: organizationId,
+      actor_id: actorId,
+      subject_user_id: subjectUserId,
+      event_type: eventType,
+      event_key: `${eventType}:${actorId}:${subjectUserId}:${crypto.randomUUID()}`,
+      is_suspicious: false,
+      details,
+    }),
+  }).catch(() => undefined);
+}
+
+async function managedUser(env: Env, organizationId: string, userId: string): Promise<OrganizationMember | null> {
+  return organizationMember(env, organizationId, userId);
+}
+
+async function createManagedUser(env: Env, organization: Organization, actor: OrganizationMember, body: JsonRecord): Promise<JsonRecord> {
+  const email = cleanAddress(String(body.email || ""));
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid account email");
+  const role = String(body.role || "member") as "admin" | "member";
+  if (!["admin", "member"].includes(role)) throw new Error("Choose admin or member");
+  if (role === "admin" && actor.role !== "owner") throw new Error("Only the workspace owner can create administrators");
+  const displayName = String(body.displayName || email.split("@")[0]).trim().slice(0, 120);
+  const mailboxAddress = cleanAddress(String(body.mailboxAddress || email));
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mailboxAddress)) throw new Error("Enter a valid mailbox address");
+  const auth = adminAuthClient(env);
+  const invited = await auth.auth.admin.inviteUserByEmail(email, { data: { display_name: displayName }, redirectTo: new URL("/", `https://${env.APP_DOMAIN}`).toString() });
+  if (invited.error || !invited.data.user) throw invited.error || new Error("The invitation could not be created");
+  const createdUser = invited.data.user as unknown as AdminAuthUser;
+  try {
+    await dbRequest(env, "profiles", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ id: createdUser.id, display_name: displayName }) });
+    await dbRequest(env, "user_settings", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: createdUser.id }) });
+    await dbRequest(env, "organization_members", { method: "POST", body: JSON.stringify({ organization_id: organization.id, user_id: createdUser.id, role, status: "active", require_mfa: body.requireMfa === true }) });
+    const mailboxRows = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: createdUser.id, address: mailboxAddress, display_name: displayName, is_default: true, can_send: body.canSend !== false, can_receive: body.canReceive !== false }) });
+    const mailbox = mailboxRows[0];
+    if (!mailbox) throw new Error("Mailbox creation returned no row");
+    const orgSettings = organizationSettings(organization.settings);
+    await dbRequest(env, "mailbox_admin_settings", { method: "POST", body: JSON.stringify({ mailbox_id: mailbox.id, organization_id: organization.id, quota_bytes: Math.max(0, Number(body.quotaBytes || orgSettings.default_quota_bytes || 5 * 1024 * 1024 * 1024)), sending_limit_daily: Math.max(0, Number(body.sendingLimitDaily ?? orgSettings.default_sending_limit_daily ?? 100)), inactivity_days: Math.max(0, Number(body.inactivityDays ?? orgSettings.inactivity_days ?? 90)), last_activity_at: new Date().toISOString() }) });
+    await auditAdminEvent(env, organization.id, actor.user_id, createdUser.id, "account_reactivated", { action: "created", email });
+  } catch (creationError) {
+    await auth.auth.admin.deleteUser(createdUser.id, true).catch(() => undefined);
+    throw creationError;
+  }
+  return { user_id: createdUser.id, email, display_name: displayName, role, status: "active", invited: true };
+}
+
+async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor: User): Promise<Response> {
+  const access = await organizationAdmin(env, actor);
+  if (!access) return error("Workspace administrator access is required", 403);
+  const { organization, member: actorMember } = access;
+  const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname === "/api/admin/overview") {
+    await enforceInactivity(env, organization, actor.id);
+    const members = await listAdminUsers(env, organization);
+    const activity = await dbRequest<SecurityEvent[]>(env, `account_security_events?organization_id=eq.${encodeURIComponent(organization.id)}&order=created_at.desc&limit=50`).catch(() => []);
+    const groups = await groupList(env, organization.id).catch(() => []);
+    const mailboxList = members.flatMap((member) => Array.isArray(member.mailboxes) ? member.mailboxes as JsonRecord[] : []);
+    return json({
+      organization: { ...organization, settings: organizationSettings(organization.settings) },
+      members,
+      groups,
+      activity: activity.map((event) => ({ ...event, email: members.find((candidate) => candidate.user_id === event.subject_user_id)?.email || "" })),
+      stats: {
+        users: members.length,
+        active_users: members.filter((candidate) => candidate.status === "active").length,
+        suspended_users: members.filter((candidate) => candidate.status === "suspended").length,
+        mailboxes: mailboxList.length,
+        storage_used_bytes: members.reduce((total, candidate) => total + Number(candidate.storage_used_bytes || 0), 0),
+      },
+    });
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/activity") {
+    const events = await dbRequest<SecurityEvent[]>(env, `account_security_events?organization_id=eq.${encodeURIComponent(organization.id)}&order=created_at.desc&limit=100`);
+    const users = await authUsers(env);
+    return json(events.map((event) => ({ ...event, email: users.find((user) => user.id === event.subject_user_id)?.email || "" })));
+  }
+  if (request.method === "PATCH" && url.pathname === "/api/admin/organization") {
+    const body = (await request.json()) as JsonRecord;
+    const current = organizationSettings(organization.settings);
+    const nextSettings: JsonRecord = { ...current };
+    for (const key of ["inactivity_days", "inactivity_action", "require_mfa", "default_quota_bytes", "default_sending_limit_daily"]) {
+      if (key in body) nextSettings[key] = body[key];
+    }
+    if ("inactivity_days" in nextSettings) nextSettings.inactivity_days = Math.max(0, Math.min(3650, Number(nextSettings.inactivity_days || 90)));
+    if (!["notify", "suspend"].includes(String(nextSettings.inactivity_action || "notify"))) return error("Choose a valid inactivity action");
+    const name = String(body.name || organization.name).trim().slice(0, 120) || "Parcel workspace";
+    const rows = await dbRequest<Organization[]>(env, `organizations?id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ name, settings: nextSettings, updated_at: new Date().toISOString() }) });
+    return json(rows[0] || { ...organization, name, settings: nextSettings });
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/groups") return json(await groupList(env, organization.id));
+  if (request.method === "POST" && url.pathname === "/api/admin/groups") {
+    const body = (await request.json()) as JsonRecord;
+    const name = String(body.name || "").trim().slice(0, 120);
+    const address = cleanAddress(String(body.address || ""));
+    if (!name) return error("Group name is required");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return error("Enter a valid group address");
+    if (await organizationHasMailboxAddress(env, organization.id, address)) return error("That address is already assigned to a mailbox");
+    const rows = await dbRequest<JsonRecord[]>(env, "organization_groups", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ organization_id: organization.id, name, address, description: String(body.description || "").trim().slice(0, 500), delivery_mode: body.deliveryMode === "group" ? "group" : "distribution", enabled: body.enabled !== false }) });
+    await auditAdminEvent(env, organization.id, actor.id, actor.id, "group_created", { group_id: rows[0]?.id || null, address });
+    return json({ ...(rows[0] || {}), members: [] }, 201);
+  }
+  const groupMatch = url.pathname.match(/^\/api\/admin\/groups\/([^/]+)(?:\/members(?:\/([^/]+))?)?$/);
+  if (groupMatch) {
+    const groupId = decodeURIComponent(groupMatch[1]);
+    const group = await adminGroup(env, organization.id, groupId);
+    if (!group) return error("Group address not found in this workspace", 404);
+    const memberId = groupMatch[2] ? decodeURIComponent(groupMatch[2]) : "";
+    if (url.pathname.includes("/members")) {
+      if (request.method === "POST" && !memberId) {
+        const body = (await request.json()) as JsonRecord;
+        const email = cleanAddress(String(body.email || ""));
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return error("Enter a valid recipient email");
+        const member = (await authUsers(env)).find((candidate) => cleanAddress(String(candidate.email || "")) === email);
+        const workspaceMember = member ? await organizationMember(env, organization.id, member.id) : null;
+        const rows = await dbRequest<JsonRecord[]>(env, "organization_group_members", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ group_id: groupId, member_email: email, member_user_id: workspaceMember?.user_id || null }) });
+        return json(rows[0] || { group_id: groupId, member_email: email }, 201);
+      }
+      if (request.method === "DELETE" && memberId) {
+        await dbRequest(env, `organization_group_members?id=eq.${encodeURIComponent(memberId)}&group_id=eq.${encodeURIComponent(groupId)}`, { method: "DELETE" });
+        return json({ ok: true });
+      }
+      return error("Group member route not found", 404);
+    }
+    if (request.method === "PATCH") {
+      const body = (await request.json()) as JsonRecord;
+      const patch: JsonRecord = { updated_at: new Date().toISOString() };
+      if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 120);
+      if (typeof body.address === "string") {
+        const address = cleanAddress(body.address);
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return error("Enter a valid group address");
+        if (address !== cleanAddress(String(group.address || "")) && await organizationHasMailboxAddress(env, organization.id, address)) return error("That address is already assigned to a mailbox");
+        patch.address = address;
+      }
+      if (typeof body.description === "string") patch.description = body.description.trim().slice(0, 500);
+      if (body.deliveryMode === "distribution" || body.deliveryMode === "group") patch.delivery_mode = body.deliveryMode;
+      if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+      const rows = await dbRequest<JsonRecord[]>(env, `organization_groups?id=eq.${encodeURIComponent(groupId)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+      await auditAdminEvent(env, organization.id, actor.id, actor.id, "group_updated", { group_id: groupId });
+      return json(rows[0] || { ...group, ...patch });
+    }
+    if (request.method === "DELETE") {
+      await dbRequest(env, `organization_groups?id=eq.${encodeURIComponent(groupId)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "DELETE" });
+      await auditAdminEvent(env, organization.id, actor.id, actor.id, "group_deleted", { group_id: groupId });
+      return json({ ok: true });
+    }
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/users") return json(await listAdminUsers(env, organization));
+  if (request.method === "GET" && url.pathname === "/api/admin/users/export") {
+    const members = await listAdminUsers(env, organization);
+    const lines = ["email,display_name,role,status,require_mfa,mailboxes,storage_used_bytes,quota_bytes,sending_limit_daily"];
+    for (const candidate of members) {
+      const boxes = Array.isArray(candidate.mailboxes) ? candidate.mailboxes as JsonRecord[] : [];
+      const quota = boxes.reduce((total, mailbox) => total + Number(mailbox.quota_bytes || 0), 0);
+      const limit = boxes.reduce((total, mailbox) => total + Number(mailbox.sending_limit_daily || 0), 0);
+      lines.push([candidate.email, candidate.display_name, candidate.role, candidate.status, candidate.require_mfa, boxes.map((mailbox) => mailbox.address).join(";"), candidate.storage_used_bytes, quota, limit].map(csvCell).join(","));
+    }
+    return new Response(`${lines.join("\n")}\n`, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="parcel-users.csv"', "cache-control": "no-store" } });
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/users") {
+    try { return json(await createManagedUser(env, organization, actorMember, (await request.json()) as JsonRecord), 201); }
+    catch (createError) { return error(createError instanceof Error ? createError.message : "Account could not be created", 400); }
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/users/import") {
+    const body = (await request.json()) as JsonRecord;
+    const rawUsers = Array.isArray(body.users) ? body.users : [];
+    if (!rawUsers.length || rawUsers.length > 100) return error("Import between 1 and 100 users at a time");
+    const results: JsonRecord[] = [];
+    for (const rawUser of rawUsers) {
+      try { results.push({ ok: true, ...(await createManagedUser(env, organization, actorMember, objectValue(rawUser))) }); }
+      catch (importError) { results.push({ ok: false, email: String(objectValue(rawUser).email || ""), error: importError instanceof Error ? importError.message : "Import failed" }); }
+    }
+    return json({ results, created: results.filter((result) => result.ok).length, failed: results.filter((result) => !result.ok).length });
+  }
+  const userMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)(?:\/(reset-password|revoke-sessions))?$/);
+  if (userMatch) {
+    const targetId = decodeURIComponent(userMatch[1]);
+    const target = await managedUser(env, organization.id, targetId);
+    if (!target) return error("Account not found in this workspace", 404);
+    const targetAuth = (await authUsers(env)).find((candidate) => candidate.id === targetId);
+    if (!targetAuth) return error("Authentication account not found", 404);
+    if (request.method === "POST" && userMatch[2] === "reset-password") {
+      if (!targetAuth.email) return error("This account has no reset email", 400);
+      const link = await generateRecoveryLink(env, targetAuth.email, new URL("/", request.url).toString());
+      await sendViaBrevo(env, { fromAddress: await defaultFromAddress(env, actor.id), to: [targetAuth.email], subject: "Reset your Parcel password", text: `An administrator requested a password reset for your Parcel account. Use this one-time link:\n\n${link}\n\nIf you did not expect this, contact your workspace administrator.` });
+      await auditAdminEvent(env, organization.id, actor.id, targetId, "password_reset", { email: targetAuth.email });
+      return json({ ok: true });
+    }
+    if (request.method === "POST" && userMatch[2] === "revoke-sessions") {
+      const result = await adminAuthClient(env).auth.admin.signOut(targetId, "global");
+      if (result.error) return error(result.error.message, 400);
+      await auditAdminEvent(env, organization.id, actor.id, targetId, "session_revoked");
+      return json({ ok: true });
+    }
+    if (request.method === "PATCH" && !userMatch[2]) {
+      if (targetId === actor.id) return error("Use your own security settings to change your account");
+      const body = (await request.json()) as JsonRecord;
+      const nextRole = body.role === "admin" || body.role === "member" ? body.role : undefined;
+      if (nextRole === "admin" && actorMember.role !== "owner") return error("Only the workspace owner can grant administrator access", 403);
+      if (target.role === "owner") return error("The workspace owner cannot be changed here", 400);
+      const nextStatus = body.status === "suspended" ? "suspended" : body.status === "active" ? "active" : undefined;
+      if (nextStatus) {
+        const authUpdate = await adminAuthClient(env).auth.admin.updateUserById(targetId, { ban_duration: nextStatus === "suspended" ? "876000h" : "none" });
+        if (authUpdate.error) return error(authUpdate.error.message, 400);
+        if (nextStatus === "suspended") {
+          const targetMailboxes = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(targetId)}&select=id`);
+          await Promise.all(targetMailboxes.map((targetMailbox) => dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(targetMailbox.id)}`, { method: "PATCH", body: JSON.stringify({ status: "suspended", updated_at: new Date().toISOString() }) }).catch(() => undefined)));
+        }
+      }
+      if (typeof body.displayName === "string" && body.displayName.trim()) {
+        const displayName = body.displayName.trim().slice(0, 120);
+        await dbRequest(env, `profiles?id=eq.${encodeURIComponent(targetId)}`, { method: "PATCH", body: JSON.stringify({ display_name: displayName, updated_at: new Date().toISOString() }) });
+        const metadata = { ...organizationSettings(targetAuth.user_metadata), display_name: displayName };
+        const authUpdate = await adminAuthClient(env).auth.admin.updateUserById(targetId, { user_metadata: metadata });
+        if (authUpdate.error) return error(authUpdate.error.message, 400);
+      }
+      const patch: JsonRecord = { updated_at: new Date().toISOString() };
+      if (nextRole) patch.role = nextRole;
+      if (nextStatus) patch.status = nextStatus;
+      if (typeof body.requireMfa === "boolean") patch.require_mfa = body.requireMfa;
+      if (Object.keys(patch).length > 1) await dbRequest(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&user_id=eq.${encodeURIComponent(targetId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+      if (nextStatus) await auditAdminEvent(env, organization.id, actor.id, targetId, nextStatus === "suspended" ? "account_suspended" : "account_reactivated");
+      return json({ ok: true });
+    }
+    if (request.method === "DELETE" && !userMatch[2]) {
+      if (targetId === actor.id || target.role === "owner") return error("The workspace owner cannot be deleted", 400);
+      const result = await adminAuthClient(env).auth.admin.deleteUser(targetId, false);
+      if (result.error) return error(result.error.message, 400);
+      await purgeOwnerObjects(env, targetId);
+      return json({ ok: true });
+    }
+  }
+  const mailboxMatch = url.pathname.match(/^\/api\/admin\/mailboxes\/([^/]+)(?:\/delegates(?:\/([^/]+))?)?$/);
+  if (mailboxMatch) {
+    const mailboxId = decodeURIComponent(mailboxMatch[1]);
+    const mailbox = await adminMailbox(env, organization.id, mailboxId);
+    if (!mailbox) return error("Mailbox not found in this workspace", 404);
+    const delegateUserId = mailboxMatch[2] ? decodeURIComponent(mailboxMatch[2]) : "";
+    if (mailboxMatch[2]) {
+      const delegate = await organizationMember(env, organization.id, delegateUserId);
+      if (!delegate) return error("Delegate must belong to this workspace", 400);
+      if (request.method === "GET") {
+        const rows = await dbRequest<JsonRecord[]>(env, `mailbox_delegations?mailbox_id=eq.${encodeURIComponent(mailboxId)}&member_id=eq.${encodeURIComponent(delegateUserId)}&limit=1`);
+        return json(rows[0] || null);
+      }
+      if (request.method === "PATCH" || request.method === "POST") {
+        const body = (await request.json()) as JsonRecord;
+        const permissionPatch = { mailbox_id: mailboxId, member_id: delegateUserId, can_read: body.canRead !== false, can_send_as: body.canSendAs === true, can_send_on_behalf: body.canSendOnBehalf === true, can_manage: body.canManage === true, status: body.status === "revoked" ? "revoked" : "active", updated_at: new Date().toISOString() };
+        const rows = await dbRequest<JsonRecord[]>(env, "mailbox_delegations", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(permissionPatch) });
+        return json(rows[0] || permissionPatch);
+      }
+      if (request.method === "DELETE") {
+        await dbRequest(env, `mailbox_delegations?mailbox_id=eq.${encodeURIComponent(mailboxId)}&member_id=eq.${encodeURIComponent(delegateUserId)}`, { method: "DELETE" });
+        return json({ ok: true });
+      }
+    }
+    if (url.pathname.endsWith("/delegates") && request.method === "GET") {
+      const rows = await dbRequest<JsonRecord[]>(env, `mailbox_delegations?mailbox_id=eq.${encodeURIComponent(mailboxId)}&order=created_at.asc`);
+      const users = await authUsers(env);
+      return json(rows.map((row) => ({ ...row, email: users.find((user) => user.id === row.member_id)?.email || "", display_name: authUserDisplayName(users.find((user) => user.id === row.member_id) || { id: String(row.member_id) }) })));
+    }
+    if (request.method === "PATCH") {
+      const body = (await request.json()) as JsonRecord;
+      const mailboxPatch: JsonRecord = {};
+      for (const [input, column] of [["displayName", "display_name"], ["canSend", "can_send"], ["canReceive", "can_receive"]] as const) if (input in body) mailboxPatch[column] = body[input];
+      if (Object.keys(mailboxPatch).length) await dbRequest(env, `mailboxes?id=eq.${encodeURIComponent(mailboxId)}`, { method: "PATCH", body: JSON.stringify(mailboxPatch) });
+      const existing = await getMailboxAdminSettings(env, mailbox);
+      const settingsPatch: JsonRecord = { updated_at: new Date().toISOString() };
+      for (const [input, column] of [["status", "status"], ["quotaBytes", "quota_bytes"], ["sendingLimitDaily", "sending_limit_daily"], ["inactivityDays", "inactivity_days"]] as const) if (input in body) settingsPatch[column] = input === "status" ? body[input] : Math.max(0, Number(body[input]));
+      if (String(settingsPatch.status || "") === "archived") { mailboxPatch.can_send = false; mailboxPatch.can_receive = false; await dbRequest(env, `mailboxes?id=eq.${encodeURIComponent(mailboxId)}`, { method: "PATCH", body: JSON.stringify(mailboxPatch) }); }
+      const rows = existing
+        ? await dbRequest<MailboxAdminSettings[]>(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailboxId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(settingsPatch) })
+        : await dbRequest<MailboxAdminSettings[]>(env, "mailbox_admin_settings", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ mailbox_id: mailboxId, organization_id: organization.id, ...settingsPatch }) });
+      return json(rows[0] || settingsPatch);
+    }
+    if (request.method === "DELETE") {
+      if (mailbox.is_default) return error("The default mailbox cannot be deleted; set another default first", 400);
+      const objectKeys = await mailboxObjectKeys(env, mailboxId, mailbox.owner_id);
+      await dbRequest(env, `mailboxes?id=eq.${encodeURIComponent(mailboxId)}`, { method: "DELETE" });
+      await Promise.allSettled(objectKeys.map((key) => deleteObject(env, key)));
+      return json({ ok: true });
+    }
+  }
+  return error("Admin route not found", 404);
+}
+
 async function getMailbox(env: Env, ownerId: string, address: string): Promise<Mailbox | null> {
   const rows = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(ownerId)}&address=eq.${encodeURIComponent(cleanAddress(address))}&limit=1`);
   return rows[0] ?? null;
+}
+
+type MailboxDelegation = { mailbox_id: string; member_id: string; can_read: boolean; can_send_as: boolean; can_send_on_behalf: boolean; can_manage: boolean; status: "active" | "revoked" };
+
+async function delegatedMailboxIds(env: Env, memberId: string, capability: "read" | "send" = "read"): Promise<string[]> {
+  const capabilityFilter = capability === "read" ? "&can_read=eq.true" : "&or=(can_send_as.eq.true,can_send_on_behalf.eq.true)";
+  const rows = await dbRequest<MailboxDelegation[]>(env, `mailbox_delegations?member_id=eq.${encodeURIComponent(memberId)}&status=eq.active${capabilityFilter}&select=mailbox_id`);
+  return [...new Set(rows.map((row) => String(row.mailbox_id)).filter(Boolean))];
+}
+
+async function accessibleMailboxes(env: Env, userId: string): Promise<Array<Mailbox & { is_shared?: boolean; can_send_as?: boolean; can_send_on_behalf?: boolean }>> {
+  const own = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(userId)}&order=is_default.desc,created_at.asc`);
+  const delegated = await dbRequest<MailboxDelegation[]>(env, `mailbox_delegations?member_id=eq.${encodeURIComponent(userId)}&status=eq.active&select=mailbox_id,can_read,can_send_as,can_send_on_behalf`);
+  if (!delegated.length) return own;
+  const mailboxIds = [...new Set(delegated.map((row) => String(row.mailbox_id)).filter(Boolean))];
+  const shared = await dbRequest<Mailbox[]>(env, `mailboxes?id=in.(${mailboxIds.join(",")})&order=created_at.asc`);
+  const grants = new Map(delegated.map((row) => [String(row.mailbox_id), row]));
+  return [...own, ...shared.filter((mailbox) => mailbox.owner_id !== userId).map((mailbox) => {
+    const grant = grants.get(mailbox.id);
+    return {
+      ...mailbox,
+      is_shared: true,
+      can_send: mailbox.can_send && Boolean(grant?.can_send_as || grant?.can_send_on_behalf),
+      can_receive: mailbox.can_receive && grant?.can_read === true,
+      can_send_as: grant?.can_send_as === true,
+      can_send_on_behalf: grant?.can_send_on_behalf === true,
+      is_default: false,
+    };
+  })];
+}
+
+async function delegatedMailboxForSend(env: Env, actorId: string, address: string): Promise<{ mailbox: Mailbox; delegation: MailboxDelegation | null } | null> {
+  const normalized = cleanAddress(address);
+  const owned = await getMailbox(env, actorId, normalized);
+  if (owned) return { mailbox: owned, delegation: null };
+  const candidates = await dbRequest<Mailbox[]>(env, `mailboxes?address=eq.${encodeURIComponent(normalized)}&can_send=eq.true&limit=20`);
+  for (const mailbox of candidates) {
+    const grants = await dbRequest<MailboxDelegation[]>(env, `mailbox_delegations?mailbox_id=eq.${encodeURIComponent(mailbox.id)}&member_id=eq.${encodeURIComponent(actorId)}&status=eq.active&limit=1`);
+    const grant = grants[0];
+    if (grant?.can_send_as || grant?.can_send_on_behalf) return { mailbox, delegation: grant };
+  }
+  return null;
+}
+
+function messageScopeFilter(ownerId: string, mailboxIds: string[]): string {
+  if (!mailboxIds.length) return `owner_id=eq.${encodeURIComponent(ownerId)}`;
+  const ids = mailboxIds.map((id) => id.replace(/[^a-f0-9-]/gi, "")).filter(Boolean).join(",");
+  return ids ? `or=${encodeURIComponent(`owner_id.eq.${ownerId},mailbox_id.in.(${ids})`)}` : `owner_id=eq.${encodeURIComponent(ownerId)}`;
+}
+
+async function expandGroupRecipients(env: Env, organizationId: string | undefined, recipients: string[]): Promise<string[]> {
+  if (!organizationId || !recipients.length) return recipients;
+  const groups = await dbRequest<Array<{ id: string; address: string; enabled: boolean }>>(env, `organization_groups?organization_id=eq.${encodeURIComponent(organizationId)}&enabled=eq.true&select=id,address,enabled`).catch(() => []);
+  if (!groups.length) return recipients;
+  const groupsByAddress = new Map(groups.map((group) => [cleanAddress(group.address), group]));
+  const expanded: string[] = [];
+  for (const recipient of recipients) {
+    const group = groupsByAddress.get(cleanAddress(recipient));
+    if (!group) { expanded.push(recipient); continue; }
+    const members = await dbRequest<Array<{ member_email: string }>>(env, `organization_group_members?group_id=eq.${encodeURIComponent(group.id)}&select=member_email&order=created_at.asc`).catch(() => []);
+    expanded.push(...members.map((member) => cleanAddress(member.member_email)).filter(Boolean));
+  }
+  return [...new Set(expanded)];
+}
+
+async function groupList(env: Env, organizationId: string): Promise<JsonRecord[]> {
+  const groups = await dbRequest<JsonRecord[]>(env, `organization_groups?organization_id=eq.${encodeURIComponent(organizationId)}&order=name.asc`);
+  return Promise.all(groups.map(async (group) => ({
+    ...group,
+    members: await dbRequest<JsonRecord[]>(env, `organization_group_members?group_id=eq.${encodeURIComponent(String(group.id))}&order=created_at.asc`),
+  })));
+}
+
+async function adminGroup(env: Env, organizationId: string, groupId: string): Promise<JsonRecord | null> {
+  const rows = await dbRequest<JsonRecord[]>(env, `organization_groups?id=eq.${encodeURIComponent(groupId)}&organization_id=eq.${encodeURIComponent(organizationId)}&limit=1`);
+  return rows[0] || null;
+}
+
+async function organizationHasMailboxAddress(env: Env, organizationId: string, address: string): Promise<boolean> {
+  const members = await dbRequest<Array<{ user_id: string }>>(env, `organization_members?organization_id=eq.${encodeURIComponent(organizationId)}&select=user_id&limit=1000`).catch(() => []);
+  if (!members.length) return false;
+  const rows = await dbRequest<Array<{ id: string }>>(env, `mailboxes?owner_id=in.(${members.map((member) => member.user_id).join(",")})&address=eq.${encodeURIComponent(cleanAddress(address))}&limit=1`).catch(() => []);
+  return Boolean(rows[0]);
 }
 
 async function findOrCreateThread(env: Env, ownerId: string, subject: string, inReplyTo?: string, references?: string): Promise<string> {
@@ -629,6 +1254,38 @@ function recoveryCode(): string {
   return String(bytes[0] % 1_000_000).padStart(6, "0");
 }
 
+function mfaRecoveryCode(): string {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const value = Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+  return `${value.slice(0, 4)}-${value.slice(4, 8)}-${value.slice(8, 12)}`;
+}
+
+async function handleMfaRecoveryRequest(request: Request, env: Env): Promise<Response> {
+  const generic = json({ ok: true, message: "If the details are valid, a recovery link will arrive shortly." }, 202);
+  let body: JsonRecord;
+  try { body = (await request.json()) as JsonRecord; } catch { return generic; }
+  const email = normalizeRecoveryEmail(String(body.email || ""));
+  const code = String(body.code || "").trim().toUpperCase();
+  if (!isValidRecoveryEmail(email) || !/^[A-Z2-9]{4}(?:-[A-Z2-9]{4}){2}$/.test(code)) return generic;
+  try {
+    const codeHash = await sha256Hex(new TextEncoder().encode(code));
+    const rows = await dbRequest<Array<{ id: string; owner_id: string }>>(env, `account_mfa_recovery_codes?code_hash=eq.${encodeURIComponent(codeHash)}&used_at=is.null&limit=1`);
+    const row = rows[0];
+    if (!row) return generic;
+    const users = await authUsers(env);
+    const authUser = users.find((candidate) => candidate.id === row.owner_id);
+    if (!authUser?.email || normalizeRecoveryEmail(authUser.email) !== email) return generic;
+    await dbRequest(env, `account_mfa_recovery_codes?id=eq.${encodeURIComponent(row.id)}&owner_id=eq.${encodeURIComponent(row.owner_id)}&used_at=is.null`, { method: "PATCH", body: JSON.stringify({ used_at: new Date().toISOString() }) });
+    const link = await generateRecoveryLink(env, authUser.email, new URL("/", request.url).toString());
+    await sendViaBrevo(env, { fromAddress: await defaultFromAddress(env, row.owner_id), to: [authUser.email], subject: "Your Parcel recovery link", text: `Use this one-time link to regain access to Parcel and set a new password:\n\n${link}\n\nThis recovery code has now been consumed.` });
+  } catch {
+    // Keep recovery attempts indistinguishable from unknown or invalid details.
+  }
+  return generic;
+}
+
 async function defaultFromAddress(env: Env, ownerId?: string): Promise<string> {
   if (ownerId) {
     const rows = await dbRequest<Array<{ address: string }>>(
@@ -734,7 +1391,20 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   const ownerId = env.OWNER_USER_ID;
   if (!ownerId) throw new Error("OWNER_USER_ID is not configured");
   const mailbox = await getMailbox(env, ownerId, destination);
-  if (!mailbox) throw new Error(`No receiving mailbox configured for ${destination}`);
+  if (!mailbox) {
+    const organizations = await dbRequest<Array<{ id: string }>>(env, `organizations?owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`).catch(() => []);
+    const groups = organizations[0]
+      ? await dbRequest<Array<{ id: string }>>(env, `organization_groups?organization_id=eq.${encodeURIComponent(organizations[0].id)}&address=eq.${encodeURIComponent(destination)}&enabled=eq.true&limit=1`).catch(() => [])
+      : [];
+    if (groups[0] && forwardInbound) {
+      const members = await dbRequest<Array<{ member_email: string }>>(env, `organization_group_members?group_id=eq.${encodeURIComponent(groups[0].id)}&select=member_email&order=created_at.asc`).catch(() => []);
+      const recipients = [...new Set(members.map((member) => cleanAddress(member.member_email)).filter(Boolean))];
+      if (!recipients.length) throw new Error(`Group address ${destination} has no recipients`);
+      await Promise.all(recipients.map((recipient) => forwardInbound(recipient)));
+      return;
+    }
+    throw new Error(`No receiving mailbox configured for ${destination}`);
+  }
   const parsed = await new PostalMime().parse(raw);
   const subject = String(parsed.subject || "(no subject)");
   const textBody = String(parsed.text || "");
@@ -769,6 +1439,11 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
       await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, custom_folder_id: folder === "custom" ? customFolderId : null, status: "received", screening_status: screeningStatus, screening_policy_id: assessment.policyId, raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), spam_score: assessment.score, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, auth_spf: assessment.authResults.spf, auth_dkim: assessment.authResults.dkim, auth_dmarc: assessment.authResults.dmarc, auth_arc: assessment.authResults.arc, auth_tls: assessment.authResults.tls, trust_score: assessment.trustScore, trust_reasons: reasons, trust_evidence: { ...assessment.trustEvidence, blocked_attachments: attachmentResult.blocked }, received_auth_at: assessment.receivedAuthAt, sender_first_seen: assessment.senderFirstSeen, known_contact: assessment.knownContact, reply_to_mismatch: assessment.replyToMismatch, link_count: assessment.linkCount, tracking_pixel_count: assessment.trackingPixelCount, updated_at: new Date().toISOString() }) });
       await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, policy_id: assessment.policyId, decision: screeningStatus === "blocked" ? "blocked" : screeningStatus === "review" ? "screened" : "allowed", previous_folder: "inbox" }) }).catch(() => undefined);
       if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
+      const mailboxSettings = await getMailboxAdminSettings(env, mailbox);
+      if (mailboxSettings && attachmentResult.stored.length) {
+        const storedBytes = attachmentResult.stored.reduce((total, attachment) => total + Math.max(0, Number(attachment.byte_size || 0)), 0);
+        await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, { method: "PATCH", body: JSON.stringify({ storage_used_bytes: mailboxSettings.storage_used_bytes + storedBytes, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
+      }
       await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
       await applyInboundRules(env, ownerId, messageId, {
         from: headerFrom,
@@ -826,12 +1501,32 @@ async function processOutbox(env: Env, limit = 25): Promise<void> {
 
 async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ctx?: ExecutionContext): Promise<Response> {
   const fromAddress = cleanAddress(String(body.fromAddress || `james@${env.APP_DOMAIN}`));
-  const to = splitAddresses(body.to);
-  const cc = splitAddresses(body.cc);
-  const bcc = splitAddresses(body.bcc);
+  const toInput = splitAddresses(body.to);
+  const ccInput = splitAddresses(body.cc);
+  const bccInput = splitAddresses(body.bcc);
+  const access = ownerId ? await delegatedMailboxForSend(env, ownerId, fromAddress) : null;
+  const mailbox = access?.mailbox || null;
+  const sendMode = access?.delegation
+    ? body.sendMode === "send_on_behalf" && access.delegation.can_send_on_behalf
+      ? "send_on_behalf"
+      : access.delegation.can_send_as
+        ? "send_as"
+        : access.delegation.can_send_on_behalf
+          ? "send_on_behalf"
+          : "own"
+    : "own";
+  const mailboxAdminSettings = ownerId && mailbox ? await getMailboxAdminSettings(env, mailbox) : null;
+  const to = mailboxAdminSettings ? await expandGroupRecipients(env, mailboxAdminSettings.organization_id, toInput) : toInput;
+  const cc = mailboxAdminSettings ? await expandGroupRecipients(env, mailboxAdminSettings.organization_id, ccInput) : ccInput;
+  const bcc = mailboxAdminSettings ? await expandGroupRecipients(env, mailboxAdminSettings.organization_id, bccInput) : bccInput;
   if (!fromAddress || !to.length) return error("A sender and at least one recipient are required");
-  const mailbox = ownerId ? await getMailbox(env, ownerId, fromAddress) : null;
   if (ownerId && !mailbox?.can_send) return error("This sender address is not enabled for sending", 403);
+  if (ownerId && mailboxAdminSettings && mailboxAdminSettings.status !== "active") return error("This mailbox is currently suspended", 403);
+  if (ownerId && mailboxAdminSettings && mailboxAdminSettings.sending_limit_daily > 0) {
+    const today = new Date().toISOString().slice(0, 10);
+    const usedToday = mailboxAdminSettings.sending_window_started_at === today ? mailboxAdminSettings.sending_used_today : 0;
+    if (usedToday >= mailboxAdminSettings.sending_limit_daily) return error("This mailbox has reached its daily sending limit", 429);
+  }
   const subject = String(body.subject || "(no subject)");
   const text = String(body.text || "");
   const html = typeof body.html === "string" ? body.html : undefined;
@@ -847,19 +1542,31 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
     return json({ ok: true, providerMessageId: result.messageId });
   }
   const idempotencyKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() ? body.idempotencyKey.trim().slice(0, 200) : crypto.randomUUID();
-  const duplicate = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&send_idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=id,status,folder,send_after,scheduled_at&limit=1`);
+  const mailboxOwnerId = mailbox?.owner_id || ownerId;
+  const duplicate = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&send_idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=id,status,folder,send_after,scheduled_at&limit=1`);
   if (duplicate[0]) return json({ ok: true, replayed: true, id: duplicate[0].id, status: duplicate[0].status, scheduled: duplicate[0].status === "scheduled" });
   for (const attachment of attachments) if (!attachment.object_key.startsWith(`drafts/${ownerId}/`) && !attachment.object_key.startsWith(`attachments/${ownerId}/`)) return error("Attachment ownership could not be verified", 403);
-  const threadId = typeof body.threadId === "string" && body.threadId ? body.threadId : await findOrCreateThread(env, ownerId, subject, typeof body.inReplyTo === "string" ? body.inReplyTo : undefined, typeof body.references === "string" ? body.references : undefined);
+  let threadId = typeof body.threadId === "string" && body.threadId ? body.threadId : "";
+  if (threadId) {
+    const threadRows = await dbRequest<Array<{ id: string }>>(env, `threads?id=eq.${encodeURIComponent(threadId)}&owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&limit=1`);
+    if (!threadRows[0]) return error("The selected conversation is not available to this mailbox", 403);
+  } else {
+    threadId = await findOrCreateThread(env, mailboxOwnerId, subject, typeof body.inReplyTo === "string" ? body.inReplyTo : undefined, typeof body.references === "string" ? body.references : undefined);
+  }
   const scheduledInput = typeof body.scheduledAt === "string" && body.scheduledAt ? body.scheduledAt : null;
   const scheduledDate = scheduledInput ? new Date(scheduledInput) : null;
   if (scheduledInput && (!scheduledDate || Number.isNaN(scheduledDate.getTime()) || scheduledDate.getTime() <= Date.now())) return error("Scheduled send time must be in the future");
   const configuredUndo = normalizeUndoSeconds(objectValue(mailbox?.settings).send_undo_seconds, 0);
   const undoSeconds = scheduledDate ? 0 : normalizeUndoSeconds(body.undoSendSeconds, configuredUndo);
   const sendAfter = scheduledDate ? scheduledDate.toISOString() : new Date(Date.now() + undoSeconds * 1000).toISOString();
-  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox?.id, direction: "outbound", folder: scheduledDate ? "drafts" : "sent", status: scheduledDate ? "scheduled" : "queued", from_name: mailbox?.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledDate?.toISOString() || null, send_after: sendAfter, send_idempotency_key: idempotencyKey, send_warning_acknowledged: Object.fromEntries(warnings.map((warning) => [warning.code, true])), sent_at: null }) });
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: mailboxOwnerId, sent_by: ownerId, send_mode: sendMode, thread_id: threadId, mailbox_id: mailbox?.id, direction: "outbound", folder: scheduledDate ? "drafts" : "sent", status: scheduledDate ? "scheduled" : "queued", from_name: mailbox?.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, scheduled_at: scheduledDate?.toISOString() || null, send_after: sendAfter, send_idempotency_key: idempotencyKey, send_warning_acknowledged: Object.fromEntries(warnings.map((warning) => [warning.code, true])), sent_at: null }) });
   const messageId = inserted[0]?.id;
   if (!messageId) return error("The message could not be queued", 502);
+  if (mailboxAdminSettings && mailbox) {
+    const today = new Date().toISOString().slice(0, 10);
+    const usedToday = mailboxAdminSettings.sending_window_started_at === today ? mailboxAdminSettings.sending_used_today : 0;
+    await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, { method: "PATCH", body: JSON.stringify({ sending_used_today: usedToday + 1, sending_window_started_at: today, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
+  }
   if (attachments.length) {
     await dbRequest(env, "attachments", {
       method: "POST",
@@ -885,6 +1592,7 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
 }
 
 async function processScheduled(env: Env): Promise<void> {
+  await enforceAllOrganizationInactivity(env);
   await processOutbox(env);
   const now = new Date().toISOString();
   const snoozed = await dbRequest<JsonRecord[]>(env, `messages?snoozed_until=lte.${encodeURIComponent(now)}&limit=50`);
@@ -907,13 +1615,15 @@ async function processDueFollowUps(env: Env, now = new Date().toISOString()): Pr
 
 async function handleDraft(env: Env, user: User, body: JsonRecord): Promise<Response> {
   const fromAddress = cleanAddress(String(body.fromAddress || `james@${env.APP_DOMAIN}`));
-  const mailbox = await getMailbox(env, user.id, fromAddress);
+  const access = await delegatedMailboxForSend(env, user.id, fromAddress);
+  const mailbox = access?.mailbox || null;
   if (!mailbox) return error("Sender mailbox not found", 404);
+  const mailboxOwnerId = mailbox.owner_id;
   const id = typeof body.id === "string" ? body.id : "";
    const patch = { subject: String(body.subject || ""), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, to_addresses: splitAddresses(body.to), cc_addresses: splitAddresses(body.cc), bcc_addresses: splitAddresses(body.bcc), from_name: mailbox.display_name || "", from_address: fromAddress, snippet: snippet(String(body.text || "")), updated_at: new Date().toISOString() };
-  if (id) { const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.drafts`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows?.[0] || null); }
-  const threadId = await findOrCreateThread(env, user.id, patch.subject);
-  const rows = await dbRequest<JsonRecord[]>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: "drafts", status: "draft", message_id_header: `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`, ...patch }) });
+  if (id) { const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&folder=eq.drafts`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows?.[0] || null); }
+  const threadId = await findOrCreateThread(env, mailboxOwnerId, patch.subject);
+  const rows = await dbRequest<JsonRecord[]>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: mailboxOwnerId, sent_by: user.id, send_mode: access?.delegation?.can_send_as ? "send_as" : access?.delegation?.can_send_on_behalf ? "send_on_behalf" : "own", thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: "drafts", status: "draft", message_id_header: `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`, ...patch }) });
   return json(rows?.[0] || null, 201);
 }
 
@@ -1088,14 +1798,14 @@ async function attachmentSearchIds(env: Env, ownerId: string, filters: SearchFil
   return { include: include ? [...include] : null, exclude: [...exclude] };
 }
 
-type MailQueryOptions = { folder: string; query?: string; filter?: string; sort?: string; page?: number; pageSize?: number };
+type MailQueryOptions = { folder: string; query?: string; filter?: string; sort?: string; page?: number; pageSize?: number; mailboxIds?: string[] };
 
 async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptions): Promise<{ path: string; parsed?: ParsedSearch; page: number; pageSize: number; searchActive: boolean }> {
   const query = options.query?.trim() || "";
   const parsed = query ? parseSearchQuery(query) : undefined;
   const page = Math.max(1, Math.min(100, Number(options.page || 1)));
   const pageSize = Math.max(10, Math.min(100, Number(options.pageSize || 80)));
-  const parts = [`owner_id=eq.${encodeURIComponent(ownerId)}`, "select=id,thread_id,mailbox_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,spam_reasons,trust_score,trust_reasons,screening_status,focused_score,focused_category,scheduled_at,snoozed_until,work_state,follow_up_at,work_note,received_at,sent_at,created_at"];
+  const parts = [messageScopeFilter(ownerId, options.mailboxIds || []), "select=id,thread_id,mailbox_id,owner_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,is_read,is_starred,is_pinned,is_flagged,priority,has_attachment,spam_score,spam_reasons,trust_score,trust_reasons,screening_status,focused_score,focused_category,scheduled_at,snoozed_until,work_state,follow_up_at,work_note,received_at,sent_at,created_at"];
   const explicitFolders = parsed?.filters.filter((filter): filter is Extract<SearchFilter, { kind: "folder" }> => filter.kind === "folder") || [];
   if (!parsed) {
     if (options.folder.startsWith("custom:")) { parts.push("folder=eq.custom", `custom_folder_id=eq.${encodeURIComponent(options.folder.slice(7))}`); }
@@ -1246,8 +1956,12 @@ function protectedHeaders(response: Response, noStore = false): Response {
 
 async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname === "/api/health") return json({ ok: true, service: "email-service", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
+  if (url.pathname === "/api/health") {
+    if (request.method !== "GET" && request.method !== "HEAD") return error("Method not allowed", 405);
+    return json({ ok: true, service: "email-service", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
+  }
   if (url.pathname === "/api/webhooks/brevo") {
+    if (request.method !== "POST") return error("Method not allowed", 405);
     const secret = url.searchParams.get("token") || request.headers.get("x-webhook-secret");
     if (env.BREVO_WEBHOOK_SECRET && secret !== env.BREVO_WEBHOOK_SECRET) return error("Unauthorized", 401);
     const event = (await request.json()) as JsonRecord;
@@ -1258,11 +1972,35 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     return json({ ok: true });
   }
   if (request.method === "POST" && url.pathname === "/api/auth/recovery-request") return handleRecoveryRequest(request, env);
+  if (request.method === "POST" && url.pathname === "/api/auth/mfa-recovery") return handleMfaRecoveryRequest(request, env);
   if (url.pathname === "/api/internal/send-test") { if (!env.INTERNAL_TEST_TOKEN || request.headers.get("x-internal-test-token") !== env.INTERNAL_TEST_TOKEN) return error("Unauthorized", 401); try { return await handleSend(env, null, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
   const user = await getUser(request, env);
   if (!user) return error("Sign in required", 401);
   if (user.mfaRequired) return error("Complete two-step verification to continue", 401);
   const mailbox = await ensureProfileAndMailbox(env, user);
+  let organization: Organization | null = null;
+  try {
+    organization = await ensureOrganization(env, user);
+    const mfaSetupRoute = url.pathname === "/api/recovery-methods" || url.pathname.startsWith("/api/recovery-methods/") || url.pathname === "/api/recovery-codes" || url.pathname === "/api/recovery-codes/status" || url.pathname === "/api/admin/organization" || url.pathname === "/api/admin/overview";
+    if (!mfaSetupRoute && await organizationMfaBlocked(env, user, organization)) return error("Your workspace requires two-step verification before continuing", 401);
+    ctx.waitUntil(recordSecurityEvent(env, organization, user, request, ctx));
+  } catch {
+    // The administration migration is optional during staged rollouts. The
+    // regular mailbox remains available while it is being applied.
+  }
+  if (url.pathname.startsWith("/api/admin/")) return adminApi(request, env, ctx, user);
+
+  if (request.method === "GET" && url.pathname === "/api/recovery-codes/status") {
+    const rows = await dbRequest<Array<{ id: string }>>(env, `account_mfa_recovery_codes?owner_id=eq.${encodeURIComponent(user.id)}&used_at=is.null&select=id`);
+    return json({ remaining: rows.length });
+  }
+  if (request.method === "POST" && url.pathname === "/api/recovery-codes") {
+    await dbRequest(env, `account_mfa_recovery_codes?owner_id=eq.${encodeURIComponent(user.id)}&used_at=is.null`, { method: "DELETE" });
+    const codes = Array.from({ length: 10 }, () => mfaRecoveryCode());
+    const hashed = await Promise.all(codes.map(async (code) => ({ owner_id: user.id, code_hash: await sha256Hex(new TextEncoder().encode(code)) })));
+    await dbRequest(env, "account_mfa_recovery_codes", { method: "POST", body: JSON.stringify(hashed) });
+    return json({ codes, remaining: codes.length });
+  }
 
   if (request.method === "GET" && url.pathname === "/api/recovery-methods") {
     const rows = await dbRequest<RecoveryMethodRow[]>(
@@ -1340,7 +2078,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     return json({ ok: true });
   }
 
-  if (request.method === "GET" && url.pathname === "/api/mailboxes") return json(await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&order=is_default.desc,created_at.asc`));
+  if (request.method === "GET" && url.pathname === "/api/mailboxes") return json(await accessibleMailboxes(env, user.id));
   if (request.method === "POST" && url.pathname === "/api/mailboxes") { const body = (await request.json()) as JsonRecord; const address = cleanAddress(String(body.address || "")); if (!address.includes("@")) return error("Enter a valid email address"); const rows = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: false }) }); return json(rows[0], 201); }
   const mailboxMatch = url.pathname.match(/^\/api\/mailboxes\/([^/]+)$/);
   if (request.method === "PATCH" && mailboxMatch) { const body = (await request.json()) as JsonRecord; const patch: JsonRecord = {}; for (const key of ["display_name", "can_send", "can_receive", "is_default", "reply_to", "settings"]) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || null); }
@@ -1425,7 +2163,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
 
   if (request.method === "GET" && url.pathname === "/api/mail") {
     try {
-      const query = await buildMailQuery(env, user.id, { folder: url.searchParams.get("folder") || "inbox", query: url.searchParams.get("q") || "", filter: url.searchParams.get("filter") || "all", sort: url.searchParams.get("sort") || "newest", page: Number(url.searchParams.get("page") || 1), pageSize: Number(url.searchParams.get("page_size") || url.searchParams.get("limit") || 80) });
+      const query = await buildMailQuery(env, user.id, { folder: url.searchParams.get("folder") || "inbox", query: url.searchParams.get("q") || "", filter: url.searchParams.get("filter") || "all", sort: url.searchParams.get("sort") || "newest", page: Number(url.searchParams.get("page") || 1), pageSize: Number(url.searchParams.get("page_size") || url.searchParams.get("limit") || 80), mailboxIds: await delegatedMailboxIds(env, user.id, "read") });
       const rows = await dbRequest<JsonRecord[]>(env, query.path);
       const hasMore = rows.length > query.pageSize;
       const items = hasMore ? rows.slice(0, query.pageSize) : rows;
@@ -1589,8 +2327,8 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const updated = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
     return json({ ok: true, feedback, message: updated[0] || null });
   }
-  if (request.method === "GET" && messageMatch) { const id = messageMatch[1]; const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!rows[0]) return error("Message not found", 404); const attachments = await dbRequest<JsonRecord[]>(env, `attachments?message_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`); const labels = await dbRequest<JsonRecord[]>(env, `message_labels?message_id=eq.${encodeURIComponent(id)}&select=label_id`); return json({ ...rows[0], attachments, labels }); }
-  if (request.method === "GET" && url.pathname.startsWith("/api/threads/")) { const id = url.pathname.split("/").pop() || ""; return json(await dbRequest(env, `messages?thread_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`)); }
+  if (request.method === "GET" && messageMatch) { const id = messageMatch[1]; const scope = messageScopeFilter(user.id, await delegatedMailboxIds(env, user.id, "read")); const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&${scope}&limit=1`); if (!rows[0]) return error("Message not found", 404); const messageOwnerId = String(rows[0].owner_id || user.id); const attachments = await dbRequest<JsonRecord[]>(env, `attachments?message_id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(messageOwnerId)}&order=created_at.asc`); const labels = await dbRequest<JsonRecord[]>(env, `message_labels?message_id=eq.${encodeURIComponent(id)}&select=label_id`); return json({ ...rows[0], attachments, labels }); }
+  if (request.method === "GET" && url.pathname.startsWith("/api/threads/")) { const id = url.pathname.split("/").pop() || ""; return json(await dbRequest(env, `messages?thread_id=eq.${encodeURIComponent(id)}&${messageScopeFilter(user.id, await delegatedMailboxIds(env, user.id, "read"))}&order=created_at.asc`)); }
   const outboxCancelMatch = url.pathname.match(/^\/api\/outbox\/([^/]+)\/cancel$/);
   if (request.method === "POST" && outboxCancelMatch) {
     const id = outboxCancelMatch[1];
@@ -1926,8 +2664,63 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "GET" && url.pathname === "/api/integrations") return json(await dbRequest(env, `integrations?owner_id=eq.${encodeURIComponent(user.id)}&order=provider.asc`));
   if (request.method === "PATCH" && url.pathname === "/api/integrations") { const body = (await request.json()) as JsonRecord; const provider = String(body.provider || ""); if (!provider) return error("Provider is required"); const rows = await dbRequest<JsonRecord[]>(env, "integrations", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, provider, status: String(body.status || "not_configured"), settings: body.settings || {} }) }); return json(rows[0] || null); }
   if (request.method === "POST" && url.pathname === "/api/drafts") return handleDraft(env, user, (await request.json()) as JsonRecord);
-  if (request.method === "POST" && url.pathname === "/api/attachments") { const form = await request.formData(); const file = form.get("file"); if (!(file instanceof File)) return error("File is required"); if (file.size > 15 * 1024 * 1024) return error("Attachments are limited to 15 MB"); const bytes = new Uint8Array(await file.arrayBuffer()); const declaredContentType = file.type || "application/octet-stream"; const detectedContentType = detectAttachmentContentType(file.name, declaredContentType, bytes); const safety = buildAttachmentSafety(file.name, declaredContentType, detectedContentType, file.size); if (safety.safetyStatus === "blocked") return error("This attachment type is blocked for safety"); const objectKey = `drafts/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`; await putObject(env, objectKey, bytes, detectedContentType); return json({ object_key: objectKey, filename: file.name, content_type: declaredContentType, detected_content_type: detectedContentType, byte_size: file.size, sha256: await sha256Hex(bytes), preview_state: safety.previewState, safety_status: safety.safetyStatus, safety_reasons: safety.safetyReasons }); }
+  if (request.method === "POST" && url.pathname === "/api/attachments") {
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!(file instanceof File)) return error("File is required");
+    if (file.size > 15 * 1024 * 1024) return error("Attachments are limited to 15 MB");
+    const requestedFrom = cleanAddress(String(form.get("fromAddress") || mailbox.address));
+    const uploadAccess = await delegatedMailboxForSend(env, user.id, requestedFrom);
+    const uploadMailbox = uploadAccess?.mailbox || (requestedFrom === mailbox.address ? mailbox : null);
+    if (!uploadMailbox || !uploadMailbox.can_send) return error("This sender address is not enabled for attachments", 403);
+    const attachmentSettings = await getMailboxAdminSettings(env, uploadMailbox);
+    if (attachmentSettings && attachmentSettings.status !== "active") return error("This mailbox is currently suspended", 403);
+    if (attachmentSettings && attachmentSettings.quota_bytes > 0 && attachmentSettings.storage_used_bytes + file.size > attachmentSettings.quota_bytes) return error("This mailbox has reached its storage quota", 413);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const declaredContentType = file.type || "application/octet-stream";
+    const detectedContentType = detectAttachmentContentType(file.name, declaredContentType, bytes);
+    const safety = buildAttachmentSafety(file.name, declaredContentType, detectedContentType, file.size);
+    if (safety.safetyStatus === "blocked") return error("This attachment type is blocked for safety");
+    const objectKey = `drafts/${user.id}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    await putObject(env, objectKey, bytes, detectedContentType);
+    if (attachmentSettings) await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(uploadMailbox.id)}`, { method: "PATCH", body: JSON.stringify({ storage_used_bytes: attachmentSettings.storage_used_bytes + file.size, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
+    return json({ object_key: objectKey, filename: file.name, content_type: declaredContentType, detected_content_type: detectedContentType, byte_size: file.size, sha256: await sha256Hex(bytes), preview_state: safety.previewState, safety_status: safety.safetyStatus, safety_reasons: safety.safetyReasons });
+  }
   if (request.method === "POST" && url.pathname === "/api/send") { try { return await handleSend(env, user.id, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
+  const sharedAttachmentDownload = url.pathname.match(/^\/api\/messages\/([^/]+)\/attachments\/download$/);
+  const sharedAttachmentPreview = url.pathname.match(/^\/api\/attachments\/([^/]+)\/preview$/);
+  if (request.method === "GET" && (sharedAttachmentDownload || sharedAttachmentPreview || url.pathname.startsWith("/api/attachments/"))) {
+    const scope = messageScopeFilter(user.id, await delegatedMailboxIds(env, user.id, "read"));
+    if (sharedAttachmentDownload) {
+      const messageId = sharedAttachmentDownload[1];
+      const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&${scope}&limit=1`);
+      if (!messageRows[0]) return error("Message not found", 404);
+      const messageOwnerId = String(messageRows[0].owner_id || user.id);
+      const rows = await dbRequest<Array<{ filename: string; object_key: string; byte_size: number }>>(env, `attachments?message_id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(messageOwnerId)}&order=created_at.asc&limit=10`);
+      if (!rows.length) return error("There are no attachments to download", 404);
+      const totalBytes = rows.reduce((sum, row) => sum + Number(row.byte_size || 0), 0);
+      if (totalBytes > 25 * 1024 * 1024) return error("The download is limited to 25 MB", 413);
+      const entries: Array<{ filename: string; data: Uint8Array }> = [];
+      for (const row of rows) entries.push({ filename: row.filename, data: await readObject(env, row.object_key) });
+      const archive = buildZip(entries);
+      const archiveName = `${String(messageRows[0].subject || "attachments").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "attachments"}.zip`;
+      return new Response(archive, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${archiveName}"`, "cache-control": "no-store" } });
+    }
+    const attachmentId = (sharedAttachmentPreview?.[1] || url.pathname.split("/").pop() || "");
+    const rows = await dbRequest<Array<{ object_key: string; filename: string; content_type: string; detected_content_type?: string | null; byte_size: number; preview_state: string; safety_status: string; message_id: string }>>(env, `attachments?id=eq.${encodeURIComponent(attachmentId)}&limit=1`);
+    const attachment = rows[0];
+    if (!attachment) return error("Attachment not found", 404);
+    const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(attachment.message_id)}&${scope}&limit=1`);
+    if (!messageRows[0]) return error("Attachment not found", 404);
+    const contentType = attachment.detected_content_type || attachment.content_type;
+    if (sharedAttachmentPreview) {
+      if (attachment.safety_status === "blocked" || attachment.safety_status === "infected") return error("This attachment is blocked from preview", 409);
+      if (attachment.preview_state !== "ready" || (!contentType.startsWith("image/") && contentType !== "application/pdf") || Number(attachment.byte_size || 0) > 5 * 1024 * 1024) return error("This file is not eligible for safe preview", 415);
+      return json({ url: await signedObjectUrl(env, attachment.object_key), filename: attachment.filename, contentType, previewState: attachment.preview_state });
+    }
+    const signedUrl = await signedObjectUrl(env, attachment.object_key);
+    return url.searchParams.get("json") === "true" ? json({ url: signedUrl }) : Response.redirect(signedUrl, 302);
+  }
   const downloadAllMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/attachments\/download$/);
   if (request.method === "GET" && downloadAllMatch) { const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!messageRows[0]) return error("Message not found", 404); const rows = await dbRequest<Array<{ filename: string; object_key: string; byte_size: number }>>(env, `attachments?message_id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc&limit=10`); if (!rows.length) return error("There are no attachments to download", 404); const totalBytes = rows.reduce((sum, row) => sum + Number(row.byte_size || 0), 0); if (totalBytes > 25 * 1024 * 1024) return error("The download is limited to 25 MB", 413); const entries: Array<{ filename: string; data: Uint8Array }> = []; for (const row of rows) entries.push({ filename: row.filename, data: await readObject(env, row.object_key) }); const archive = buildZip(entries); const archiveName = `${String(messageRows[0].subject || "attachments").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "attachments"}.zip`; return new Response(archive, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${archiveName}"`, "cache-control": "no-store" } }); }
   const previewMatch = url.pathname.match(/^\/api\/attachments\/([^/]+)\/preview$/);

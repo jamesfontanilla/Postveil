@@ -23,7 +23,8 @@ The full server requires the Worker secrets in `wrangler secret` or the Cloudfla
 Run `supabase/migrations/202608250001_initial.sql`, followed by
 `supabase/migrations/202608250002_outlook_features.sql` and
 `supabase/migrations/20260825133332_capability_foundation.sql` and
-`supabase/migrations/20260825140219_sender_identity.sql` in the Supabase
+`supabase/migrations/20260825140219_sender_identity.sql` and
+`supabase/migrations/202609020001_mailbox_administration.sql` in the Supabase
 SQL Editor. The second migration adds custom folders, labels, contacts, rules,
 signatures, automatic replies, calendar events, tasks, mailbox membership,
 integrations, spam feedback, full-text search, threading metadata, scheduled
@@ -34,6 +35,9 @@ address profiles, collaboration records, push devices, domain checks, and
 explicit RLS boundaries for the next application updates. The sender identity
 migration preserves display names from incoming `From` headers and adds
 optional HTTPS contact avatars.
+The mailbox administration migration adds organizations, roles, account
+lifecycle state, quotas, usage tracking, sending limits, delegation, group
+addresses, recovery-code hashes, security activity, and send-as metadata.
 
 ## Worker secrets
 
@@ -79,12 +83,21 @@ The Backblaze bucket should be private. The application uses short-lived signed 
 - `/api/attachments` — private B2 upload and signed download URLs
 - `/api/webhooks/brevo` — delivery-status callback
 - `/api/internal/send-test` — secret-protected smoke test only
+- `/api/admin/overview` — workspace administration dashboard data
+- `/api/admin/organization` — organization defaults and inactivity policy
+- `/api/admin/users` — invite, import, export, suspend, reset, and revoke sessions
+- `/api/admin/mailboxes/:id` — mailbox lifecycle, quotas, and sending limits
+- `/api/admin/mailboxes/:id/delegates/:memberId` — shared mailbox permissions
+- `/api/admin/groups` — distribution lists and group addresses
 
 ## Current feature boundaries
 
 The application implements the mail workflow, local spam scoring, static
 attachment safety checks, custom organization, scheduled send, snooze, PWA
-shell, polling, and optional Supabase Realtime updates. Provider-specific
+shell, polling, optional Supabase Realtime updates, mailbox administration,
+delegated mailboxes, and organization group-address expansion. Passkeys use
+the experimental Supabase Auth passkey API and require the corresponding Auth
+configuration in the target project. Provider-specific
 Google/Microsoft calendar, OneDrive, Teams, AI, push delivery, and third-party
 antivirus scanning still require provider credentials or a separately operated
 service; the UI exposes these as integration points rather than pretending they
