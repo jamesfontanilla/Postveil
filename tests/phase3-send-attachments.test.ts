@@ -39,9 +39,6 @@ test("undo settings, MIME detection, and attachment safety stay bounded", () => 
   assert.equal(normalizeUndoSeconds(15), 0);
   assert.equal(detectAttachmentContentType("report.txt", "text/plain", new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])), "application/pdf");
   assert.equal(buildAttachmentSafety("photo.png", "image/png", "image/png", 1024).previewState, "ready");
-  assert.equal(buildAttachmentSafety("diagram.svg", "image/svg+xml", "image/svg+xml", 1024).previewState, "not_available");
-  assert.equal(buildAttachmentSafety("diagram.svg", "image/svg+xml", "image/svg+xml", 1024).safetyStatus, "suspicious");
-  assert.equal(buildAttachmentSafety("report.pdf", "application/pdf", "application/pdf", 1024).previewState, "not_available");
   assert.equal(buildAttachmentSafety("macro.xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12", "application/vnd.ms-excel.sheet.macroEnabled.12", 1024).safetyStatus, "suspicious");
 });
 

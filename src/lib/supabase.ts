@@ -6,19 +6,17 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
 
-export let supabase: SupabaseClient | null = supabaseUrl && supabaseAnonKey
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : null;
+export let supabase: SupabaseClient | null = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    experimental: { passkey: true },
+  },
+}) : null;
 
 type RuntimeSupabaseConfig = {
   supabaseUrl?: unknown;
   supabaseAnonKey?: unknown;
 };
 
-/**
- * Worker deployments can provide the browser-safe Supabase values at runtime.
- * This keeps the static bundle forkable while never exposing service keys.
- */
 export async function initializeSupabase(): Promise<SupabaseClient | null> {
   if (supabase) return supabase;
 
@@ -29,7 +27,11 @@ export async function initializeSupabase(): Promise<SupabaseClient | null> {
     const runtimeUrl = typeof config.supabaseUrl === "string" ? config.supabaseUrl.trim() : "";
     const runtimeKey = typeof config.supabaseAnonKey === "string" ? config.supabaseAnonKey.trim() : "";
     if (!runtimeUrl || !runtimeKey) return null;
-    supabase = createClient(runtimeUrl, runtimeKey);
+    supabase = createClient(runtimeUrl, runtimeKey, {
+      auth: {
+        experimental: { passkey: true },
+      },
+    });
     return supabase;
   } catch {
     return null;
