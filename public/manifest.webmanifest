@@ -1,6 +1,6 @@
 {
-  "name": "Parcel private mail",
-  "short_name": "Parcel",
+  "name": "Postveil private mail",
+  "short_name": "Postveil",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f4f6fa",

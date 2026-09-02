@@ -1,6 +1,6 @@
-# Parcel — self-hosted custom-domain mail
+# Postveil — self-hosted custom-domain mail
 
-Parcel is a Cloudflare Worker and React webmail application for a custom domain. It can receive mail through Cloudflare Email Routing, parse MIME messages, store metadata in Supabase Postgres, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through Brevo.
+Postveil is a Cloudflare Worker and React webmail application for a custom domain. It can receive mail through Cloudflare Email Routing, parse MIME messages, store metadata in Supabase Postgres, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through Brevo.
 
 This repository is a self-hosted reference implementation. It is currently designed around one owner per deployment; it is not a hosted multi-tenant service. Each deployment must use its own Supabase project, provider accounts, storage bucket, domain, and secrets.
 

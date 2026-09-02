@@ -110,7 +110,7 @@ async function sendBrevo(env: DeliveryEnvironment, input: DeliveryInput, config:
   if (input.cc.length) payload.cc = input.cc.map((email) => ({ email }));
   if (input.bcc.length) payload.bcc = input.bcc.map((email) => ({ email }));
   if (input.attachments?.length) payload.attachment = input.attachments.map((attachment) => ({ url: attachment.url, name: attachment.filename })).filter((attachment) => Boolean(attachment.url));
-  if (input.openTrackingEnabled !== undefined || input.clickTrackingEnabled !== undefined) payload.headers = { "X-Parcel-Open-Tracking": String(Boolean(input.openTrackingEnabled)), "X-Parcel-Click-Tracking": String(Boolean(input.clickTrackingEnabled)) };
+  if (input.openTrackingEnabled !== undefined || input.clickTrackingEnabled !== undefined) payload.headers = { "X-Postveil-Open-Tracking": String(Boolean(input.openTrackingEnabled)), "X-Postveil-Click-Tracking": String(Boolean(input.clickTrackingEnabled)) };
   const started = Date.now();
   const response = await fetch(String(config.endpoint || "https://api.brevo.com/v3/smtp/email"), {
     method: "POST",
@@ -135,8 +135,8 @@ async function sendMailgun(env: DeliveryEnvironment, input: DeliveryInput, confi
   form.set("text", input.text || "");
   if (input.html) form.set("html", input.html);
   if (input.replyTo) form.set("h:Reply-To", input.replyTo);
-  if (input.messageIdHeader) form.set("h:X-Parcel-Message-ID", input.messageIdHeader);
-  if (input.idempotencyKey) form.set("v:parcel-idempotency-key", input.idempotencyKey);
+  if (input.messageIdHeader) form.set("h:X-Postveil-Message-ID", input.messageIdHeader);
+  if (input.idempotencyKey) form.set("v:postveil-idempotency-key", input.idempotencyKey);
   form.set("o:tracking-opens", input.openTrackingEnabled ? "yes" : "no");
   form.set("o:tracking-clicks", input.clickTrackingEnabled ? "yes" : "no");
   for (const attachment of input.attachments || []) form.append("attachment", new File([attachment.bytes], attachment.filename, { type: attachment.contentType }));
@@ -161,7 +161,7 @@ async function sendPostmark(env: DeliveryEnvironment, input: DeliveryInput, conf
     TrackOpens: Boolean(input.openTrackingEnabled),
     TrackLinks: input.clickTrackingEnabled ? "HtmlAndText" : "None",
     MessageStream: String(config.messageStream || env.POSTMARK_MESSAGE_STREAM || "outbound"),
-    Headers: input.messageIdHeader ? [{ Name: "X-Parcel-Message-ID", Value: input.messageIdHeader }] : undefined,
+    Headers: input.messageIdHeader ? [{ Name: "X-Postveil-Message-ID", Value: input.messageIdHeader }] : undefined,
     Attachments: (input.attachments || []).map((attachment) => ({ Name: attachment.filename, Content: base64(attachment.bytes), ContentType: attachment.contentType })),
   };
   const started = Date.now();
@@ -182,8 +182,8 @@ async function sendSendGrid(env: DeliveryEnvironment, input: DeliveryInput, conf
     reply_to: { email: input.replyTo || input.fromAddress },
     subject: input.subject || "(no subject)",
     content: [{ type: "text/plain", value: input.text || "" }, ...(input.html ? [{ type: "text/html", value: input.html }] : [])],
-    headers: input.messageIdHeader ? { "X-Parcel-Message-ID": input.messageIdHeader } : undefined,
-    custom_args: input.idempotencyKey ? { "parcel-idempotency-key": input.idempotencyKey } : undefined,
+    headers: input.messageIdHeader ? { "X-Postveil-Message-ID": input.messageIdHeader } : undefined,
+    custom_args: input.idempotencyKey ? { "postveil-idempotency-key": input.idempotencyKey } : undefined,
     tracking_settings: { open_tracking: { enable: Boolean(input.openTrackingEnabled) }, click_tracking: { enable: Boolean(input.clickTrackingEnabled), enable_text: Boolean(input.clickTrackingEnabled) } },
     attachments: (input.attachments || []).map((attachment) => ({ content: base64(attachment.bytes), filename: attachment.filename, type: attachment.contentType, disposition: "attachment" })),
   };

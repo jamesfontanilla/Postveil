@@ -124,7 +124,7 @@ export function safeEmailUrl(value: string, kind: "link" | "image" = "link"): st
   const normalized = raw.startsWith("//") ? `https:${raw}` : raw;
   if (kind === "image" && isDataImage(normalized)) return normalized;
   try {
-    const url = new URL(normalized, "https://parcel.invalid");
+    const url = new URL(normalized, "https://postveil.invalid");
     const allowedProtocols = kind === "image"
       ? new Set(["http:", "https:"])
       : new Set(["http:", "https:", "mailto:", "tel:"]);
