@@ -4,9 +4,9 @@ select plan(8);
 
 insert into auth.users (id, email)
 values
-  ('11111111-1111-1111-1111-111111111111', 'parcel-owner-test@example.com'),
-  ('22222222-2222-2222-2222-222222222222', 'parcel-member-test@example.com'),
-  ('33333333-3333-3333-3333-333333333333', 'parcel-other-test@example.com');
+  ('11111111-1111-1111-1111-111111111111', 'postveil-owner-test@example.com'),
+  ('22222222-2222-2222-2222-222222222222', 'postveil-member-test@example.com'),
+  ('33333333-3333-3333-3333-333333333333', 'postveil-other-test@example.com');
 
 insert into public.saved_searches (id, owner_id, name, query)
 values

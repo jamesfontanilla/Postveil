@@ -1,6 +1,6 @@
-# Parcel — private custom-domain mail
+# Postveil — private custom-domain mail
 
-Parcel is a small, personal webmail application for `jamesfontanilla.com`.
+Postveil is a small, personal webmail application for `jamesfontanilla.com`.
 
 ## Architecture
 

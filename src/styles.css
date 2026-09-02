@@ -239,7 +239,7 @@ input:focus, textarea:focus, select:focus { border-color: #2d5bff; background: #
 .detail-labels .eyebrow { margin-right: .25rem; }
 .label-chip { display: inline-flex; align-items: center; gap: .25rem; border: 1px solid currentColor; border-radius: 999px; background: transparent; padding: .28rem .55rem; font-size: .75rem; }
 
-/* Parcel visual system: a quiet, paper-like mail desk with strong hierarchy. */
+/* Postveil visual system: a quiet, paper-like mail desk with strong hierarchy. */
 :root {
   --canvas: #f3f4f1;
   --surface: #ffffff;
