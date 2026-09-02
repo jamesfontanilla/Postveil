@@ -1,7 +1,6 @@
 export const UNDO_SEND_SECONDS = [0, 10, 20, 30] as const;
 export type UndoSendSeconds = (typeof UNDO_SEND_SECONDS)[number];
 export const UNAVAILABLE_SCANNER_MESSAGE = "No malware scanner is configured";
-export const SAFE_PREVIEW_CONTENT_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 export type AttachmentScanResult = { status: "clean" | "suspicious" | "blocked" | "unavailable"; reasons: string[] };
 export interface AttachmentScanner {
@@ -146,10 +145,8 @@ export function buildAttachmentSafety(filename: string, declaredType: string, de
 } {
   const dangerous = /\.(exe|dll|scr|js|vbs|cmd|bat|ps1|msi|jar|hta|iso|lnk)$/i.test(filename) || /application\/(?:x-msdownload|x-sh|javascript)/i.test(declaredType) || /application\/(?:x-msdownload|x-sh|javascript)/i.test(detectedType);
   const suspicious = /\.(docm|dotm|xlsm|xltm|pptm|ppsm|zip|rar|7z)$/i.test(filename) || /application\/(?:vnd\.ms-.*macroEnabled|x-7z-compressed|x-rar-compressed)/i.test(declaredType) || /application\/(?:vnd\.ms-.*macroEnabled|x-7z-compressed|x-rar-compressed)/i.test(detectedType);
-  const svg = detectedType === "image/svg+xml" || declaredType === "image/svg+xml" || /\.svg$/i.test(filename);
-  const previewable = SAFE_PREVIEW_CONTENT_TYPES.has(detectedType.toLowerCase()) && byteSize <= 5 * 1024 * 1024;
+  const previewable = (detectedType === "application/pdf" || detectedType.startsWith("image/")) && byteSize <= 5 * 1024 * 1024;
   if (dangerous) return { safetyStatus: "blocked", safetyReasons: ["Executable or script content is not accepted"], previewState: "not_available" };
-  if (svg) return { safetyStatus: "suspicious", safetyReasons: ["SVG content is not previewed because it can contain active markup", UNAVAILABLE_SCANNER_MESSAGE], previewState: "not_available" };
   if (suspicious) return { safetyStatus: "suspicious", safetyReasons: ["Archive or macro-enabled content needs extra care", UNAVAILABLE_SCANNER_MESSAGE], previewState: "not_available" };
   return { safetyStatus: "unknown", safetyReasons: ["Static type and size checks only", UNAVAILABLE_SCANNER_MESSAGE], previewState: previewable ? "ready" : "not_available" };
 }
