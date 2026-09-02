@@ -101,7 +101,7 @@ export default function EmailBody({ htmlBody, textBody, fallback, attachments = 
             {showExternalImages ? <ShieldCheck size={15} /> : <EyeOff size={15} />}
             <span>
               <strong>{showExternalImages ? "External images are enabled" : "External images are blocked"}</strong>
-              <small>{showExternalImages ? "Images load without sending a referrer from Parcel." : "This protects privacy and blocks invisible tracking images."}</small>
+              <small>{showExternalImages ? "Images load without sending a referrer from Postveil." : "This protects privacy and blocks invisible tracking images."}</small>
             </span>
           </div>
           {!showExternalImages && (

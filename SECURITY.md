@@ -7,7 +7,7 @@ published, so deployments should record the exact commit they run.
 
 ## Scope and limitations
 
-Parcel is a self-hosted reference implementation. Operators are responsible
+Postveil is a self-hosted reference implementation. Operators are responsible
 for their Cloudflare, Supabase, Brevo, Backblaze, DNS, identity, backup, and
 monitoring configuration. Static attachment checks do not provide antivirus
 protection, and a public deployment must add quotas, abuse controls, backups,

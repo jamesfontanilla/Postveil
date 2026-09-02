@@ -243,10 +243,10 @@ function rawMessageSource(input: { from: string; to: string[]; cc?: string[]; bc
     ...(input.replyTo ? [`Reply-To: ${safeHeader(input.replyTo)}`] : []),
     `Message-ID: ${safeHeader(input.messageId)}`,
     "MIME-Version: 1.0",
-    input.html ? "Content-Type: multipart/alternative; boundary=parcel-boundary" : "Content-Type: text/plain; charset=utf-8",
+    input.html ? "Content-Type: multipart/alternative; boundary=postveil-boundary" : "Content-Type: text/plain; charset=utf-8",
   ];
   if (!input.html) return `${headers.join("\r\n")}\r\n\r\n${input.text || ""}\r\n`;
-  return `${headers.join("\r\n")}\r\n\r\n--parcel-boundary\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${input.text || ""}\r\n--parcel-boundary\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${input.html}\r\n--parcel-boundary--\r\n`;
+  return `${headers.join("\r\n")}\r\n\r\n--postveil-boundary\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${input.text || ""}\r\n--postveil-boundary\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${input.html}\r\n--postveil-boundary--\r\n`;
 }
 
 function supabaseHeaders(env: Env, token?: string): HeadersInit {
@@ -487,7 +487,7 @@ async function ensureOrganization(env: Env, user: User): Promise<Organization> {
       headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
       body: JSON.stringify({
         owner_id: user.id,
-        name: `${String(user.email || "Parcel").split("@")[0]} workspace`,
+        name: `${String(user.email || "Postveil").split("@")[0]} workspace`,
         slug,
       }),
     });
@@ -660,8 +660,8 @@ async function recordSecurityEvent(env: Env, organization: Organization, user: U
     ctx.waitUntil(sendViaBrevo(env, {
       fromAddress: await defaultFromAddress(env, user.id),
       to: [user.email],
-      subject: "New Parcel sign-in detected",
-      text: `A new sign-in to your Parcel account was detected. If this was not you, reset your password and revoke other sessions.\n\nBrowser: ${userAgent}`,
+      subject: "New Postveil sign-in detected",
+      text: `A new sign-in to your Postveil account was detected. If this was not you, reset your password and revoke other sessions.\n\nBrowser: ${userAgent}`,
     }).catch(() => undefined));
   }
 }
@@ -829,7 +829,7 @@ async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor
     }
     if ("inactivity_days" in nextSettings) nextSettings.inactivity_days = Math.max(0, Math.min(3650, Number(nextSettings.inactivity_days || 90)));
     if (!["notify", "suspend"].includes(String(nextSettings.inactivity_action || "notify"))) return error("Choose a valid inactivity action");
-    const name = String(body.name || organization.name).trim().slice(0, 120) || "Parcel workspace";
+    const name = String(body.name || organization.name).trim().slice(0, 120) || "Postveil workspace";
     const rows = await dbRequest<Organization[]>(env, `organizations?id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ name, settings: nextSettings, updated_at: new Date().toISOString() }) });
     return json(rows[0] || { ...organization, name, settings: nextSettings });
   }
@@ -900,7 +900,7 @@ async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor
       const limit = boxes.reduce((total, mailbox) => total + Number(mailbox.sending_limit_daily || 0), 0);
       lines.push([candidate.email, candidate.display_name, candidate.role, candidate.status, candidate.require_mfa, boxes.map((mailbox) => mailbox.address).join(";"), candidate.storage_used_bytes, quota, limit].map(csvCell).join(","));
     }
-    return new Response(`${lines.join("\n")}\n`, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="parcel-users.csv"', "cache-control": "no-store" } });
+    return new Response(`${lines.join("\n")}\n`, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="postveil-users.csv"', "cache-control": "no-store" } });
   }
   if (request.method === "POST" && url.pathname === "/api/admin/users") {
     try { return json(await createManagedUser(env, organization, actorMember, (await request.json()) as JsonRecord), 201); }
@@ -927,7 +927,7 @@ async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor
     if (request.method === "POST" && userMatch[2] === "reset-password") {
       if (!targetAuth.email) return error("This account has no reset email", 400);
       const link = await generateRecoveryLink(env, targetAuth.email, new URL("/", request.url).toString());
-      await sendViaBrevo(env, { fromAddress: await defaultFromAddress(env, actor.id), to: [targetAuth.email], subject: "Reset your Parcel password", text: `An administrator requested a password reset for your Parcel account. Use this one-time link:\n\n${link}\n\nIf you did not expect this, contact your workspace administrator.` });
+      await sendViaBrevo(env, { fromAddress: await defaultFromAddress(env, actor.id), to: [targetAuth.email], subject: "Reset your Postveil password", text: `An administrator requested a password reset for your Postveil account. Use this one-time link:\n\n${link}\n\nIf you did not expect this, contact your workspace administrator.` });
       await auditAdminEvent(env, organization.id, actor.id, targetId, "password_reset", { email: targetAuth.email });
       return json({ ok: true });
     }
@@ -1548,7 +1548,7 @@ async function handleMfaRecoveryRequest(request: Request, env: Env): Promise<Res
     if (!authUser?.email || normalizeRecoveryEmail(authUser.email) !== email) return generic;
     await dbRequest(env, `account_mfa_recovery_codes?id=eq.${encodeURIComponent(row.id)}&owner_id=eq.${encodeURIComponent(row.owner_id)}&used_at=is.null`, { method: "PATCH", body: JSON.stringify({ used_at: new Date().toISOString() }) });
     const link = await generateRecoveryLink(env, authUser.email, new URL("/", request.url).toString());
-    await sendViaBrevo(env, { fromAddress: await defaultFromAddress(env, row.owner_id), to: [authUser.email], subject: "Your Parcel recovery link", text: `Use this one-time link to regain access to Parcel and set a new password:\n\n${link}\n\nThis recovery code has now been consumed.` });
+    await sendViaBrevo(env, { fromAddress: await defaultFromAddress(env, row.owner_id), to: [authUser.email], subject: "Your Postveil recovery link", text: `Use this one-time link to regain access to Postveil and set a new password:\n\n${link}\n\nThis recovery code has now been consumed.` });
   } catch {
     // Keep recovery attempts indistinguishable from unknown or invalid details.
   }
@@ -1644,9 +1644,9 @@ async function handleRecoveryRequest(request: Request, env: Env): Promise<Respon
     await sendViaBrevo(env, {
       fromAddress,
       to: [email],
-      subject: "Your Parcel password recovery link",
-      text: `Use this one-time link to reset your Parcel password:\n\n${link}\n\nIf you did not request this, you can ignore this email.`,
-      html: `<p>Use this one-time link to reset your Parcel password:</p><p><a href="${link}">Reset your Parcel password</a></p><p>If you did not request this, you can ignore this email.</p>`,
+      subject: "Your Postveil password recovery link",
+      text: `Use this one-time link to reset your Postveil password:\n\n${link}\n\nIf you did not request this, you can ignore this email.`,
+      html: `<p>Use this one-time link to reset your Postveil password:</p><p><a href="${link}">Reset your Postveil password</a></p><p>If you did not request this, you can ignore this email.</p>`,
     });
     await recordRecoverySend(env, email, rate.row);
   } catch {
@@ -1966,7 +1966,7 @@ async function processDueFollowUps(env: Env, now = new Date().toISOString()): Pr
     const previous = await dbRequest<JsonRecord[]>(env, `mail_events?message_id=eq.${encodeURIComponent(messageId)}&event_type=eq.work_follow_up_due&order=created_at.desc&limit=1&select=payload`).catch(() => []);
     const previousAt = previous[0] && objectValue(previous[0].payload).followUpAt;
     if (previousAt && String(previousAt) === followUpAt) continue;
-    await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, provider: "parcel", event_type: "work_follow_up_due", payload: { messageId, workState: message.work_state, followUpAt, subject: message.subject || "(no subject)" } }) }).catch(() => undefined);
+    await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, provider: "postveil", event_type: "work_follow_up_due", payload: { messageId, workState: message.work_state, followUpAt, subject: message.subject || "(no subject)" } }) }).catch(() => undefined);
   }
 }
 
@@ -2437,7 +2437,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (url.pathname === "/api/health") {
     if (request.method !== "GET" && request.method !== "HEAD") return error("Method not allowed", 405);
-    return json({ ok: true, service: "email-service", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
+    return json({ ok: true, service: "postveil", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
   }
   const deliveryWebhookMatch = url.pathname.match(/^\/api\/webhooks\/(brevo|ses|mailgun|postmark|sendgrid|smtp)$/);
   if (deliveryWebhookMatch) {
@@ -2554,9 +2554,9 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     await sendViaBrevo(env, {
       fromAddress: await defaultFromAddress(env, user.id),
       to: [email],
-      subject: "Verify your Parcel recovery email",
-      text: `Your Parcel recovery email verification code is ${code}. It expires in 15 minutes. If you did not request this, you can ignore this email.`,
-      html: `<p>Your Parcel recovery email verification code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>It expires in 15 minutes. If you did not request this, you can ignore this email.</p>`,
+      subject: "Verify your Postveil recovery email",
+      text: `Your Postveil recovery email verification code is ${code}. It expires in 15 minutes. If you did not request this, you can ignore this email.`,
+      html: `<p>Your Postveil recovery email verification code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:4px">${code}</p><p>It expires in 15 minutes. If you did not request this, you can ignore this email.</p>`,
     });
     return json(recoveryMethodView(rows[0] || { ...(existing || {}), ...patch, id: existing?.id || "", owner_id: user.id } as RecoveryMethodRow), existing ? 200 : 201);
   }
@@ -3019,7 +3019,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "GET" && url.pathname === "/api/rules/export") {
     const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`);
     const payload = { schemaVersion: 1, exportedAt: new Date().toISOString(), rules: rows.map((row) => normalizeRuleRecord(row)) };
-    return new Response(JSON.stringify(payload, null, 2), { headers: { "content-type": "application/json; charset=utf-8", "content-disposition": "attachment; filename=parcel-rules.json", "cache-control": "no-store" } });
+    return new Response(JSON.stringify(payload, null, 2), { headers: { "content-type": "application/json; charset=utf-8", "content-disposition": "attachment; filename=postveil-rules.json", "cache-control": "no-store" } });
   }
   if (request.method === "POST" && url.pathname === "/api/rules/import") {
     const body = (await request.json()) as JsonRecord;

@@ -680,7 +680,7 @@ function PasswordResetScreen({ onComplete }: { onComplete: () => void }) {
           {completed ? <button type="button" className="primary-button" onClick={onComplete}>Continue to mailbox</button> : <button className="primary-button" disabled={busy}>{busy ? "Updating…" : "Update password"}</button>}
         </form>
       </section>
-      <aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> protected recovery</div><p className="aside-quote">One link. One new password. Back to your mailbox.</p><p className="aside-meta">Parcel never reveals whether an email address has an account.</p></aside>
+      <aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> protected recovery</div><p className="aside-quote">One link. One new password. Back to your mailbox.</p><p className="aside-meta">Postveil never reveals whether an email address has an account.</p></aside>
     </main>
   );
 }
@@ -723,7 +723,7 @@ function MfaChallengeScreen({ onVerified }: { onVerified: () => void }) {
     }
   }
   return (
-    <main className="auth-shell"><section className="auth-card"><div className="brand-mark">P</div><p className="eyebrow">SECOND STEP</p><h1>Confirm it’s you.</h1><p className="auth-copy">Open your authenticator app and enter the six-digit code to continue to Parcel.</p>{factors.length > 1 && <label>Authenticator<select value={factorId} onChange={(event) => setFactorId(event.target.value)}>{factors.map((factor) => <option key={factor.id} value={factor.id}>{factor.friendly_name || "Authenticator app"}</option>)}</select></label>}<form onSubmit={submit} className="auth-form"><label>Authentication code<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" /></label>{error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={busy || !factorId}>{busy ? "Checking…" : "Verify and open mailbox"}</button></form><button className="text-button" onClick={() => void requireSupabase().auth.signOut()}>Sign out</button></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> two-step verification</div><p className="aside-quote">Your password is only the first lock.</p><p className="aside-meta">Keep your authenticator app available. Recovery email is for resetting access, not a replacement for the second factor.</p></aside></main>
+    <main className="auth-shell"><section className="auth-card"><div className="brand-mark">P</div><p className="eyebrow">SECOND STEP</p><h1>Confirm it’s you.</h1><p className="auth-copy">Open your authenticator app and enter the six-digit code to continue to Postveil.</p>{factors.length > 1 && <label>Authenticator<select value={factorId} onChange={(event) => setFactorId(event.target.value)}>{factors.map((factor) => <option key={factor.id} value={factor.id}>{factor.friendly_name || "Authenticator app"}</option>)}</select></label>}<form onSubmit={submit} className="auth-form"><label>Authentication code<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" /></label>{error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={busy || !factorId}>{busy ? "Checking…" : "Verify and open mailbox"}</button></form><button className="text-button" onClick={() => void requireSupabase().auth.signOut()}>Sign out</button></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> two-step verification</div><p className="aside-quote">Your password is only the first lock.</p><p className="aside-meta">Keep your authenticator app available. Recovery email is for resetting access, not a replacement for the second factor.</p></aside></main>
   );
 }
 
@@ -1429,7 +1429,7 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
     const authSession = (await requireSupabase().auth.getSession()).data.session;
     const response = await fetch("/api/admin/users/export", { headers: authSession?.access_token ? { authorization: `Bearer ${authSession.access_token}` } : {} });
     if (!response.ok) throw new Error(`Export failed (${response.status})`);
-    const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "parcel-users.csv"; link.click(); URL.revokeObjectURL(url); setNotice("User list exported");
+    const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "postveil-users.csv"; link.click(); URL.revokeObjectURL(url); setNotice("User list exported");
   }
 
   async function importUsers(event: ChangeEvent<HTMLInputElement>) {
@@ -1681,7 +1681,7 @@ function SettingsPanel({
     }
   }
   async function applyPolicyToExisting(policy: SenderPolicy) {
-    if (!window.confirm(`Apply this decision to matching messages already in Parcel? Up to 500 messages will be reviewed.`)) return;
+    if (!window.confirm(`Apply this decision to matching messages already in Postveil? Up to 500 messages will be reviewed.`)) return;
     try {
       const result = await apiFetch<{ matched: number; changed: number; capped?: boolean }>(`/api/sender-policies/${policy.id}/apply-existing`, { method: "POST", body: JSON.stringify({ confirm: true }) });
       setNotice(`${result.changed} existing message${result.changed === 1 ? "" : "s"} updated${result.capped ? " · limited to 500" : ""}`);
@@ -1910,7 +1910,7 @@ function SettingsPanel({
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = "parcel-rules.json";
+      link.download = "postveil-rules.json";
       link.click();
       URL.revokeObjectURL(url);
       setNotice("Rules exported");
@@ -2118,7 +2118,7 @@ function SettingsPanel({
         if (discarded.error) throw discarded.error;
         setMfaPendingFactor(null);
       }
-      let result = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "Parcel authenticator" });
+      let result = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "Postveil authenticator" });
       if (result.error && /friendly name.*already exists/i.test(result.error.message)) {
         const retryFactors = await client.auth.mfa.listFactors();
         if (retryFactors.error) throw retryFactors.error;
@@ -2126,7 +2126,7 @@ function SettingsPanel({
         if (retryPending) {
           const discarded = await client.auth.mfa.unenroll({ factorId: retryPending.id });
           if (discarded.error) throw discarded.error;
-          result = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "Parcel authenticator" });
+          result = await client.auth.mfa.enroll({ factorType: "totp", friendlyName: "Postveil authenticator" });
         }
       }
       if (result.error) throw result.error;
@@ -2287,7 +2287,7 @@ function SettingsPanel({
               <div className="setting-card-head">
                 <div>
                   <h3>Two-step verification</h3>
-                  <p>Use an authenticator app after your password. Parcel will require it at every new sign-in.</p>
+                  <p>Use an authenticator app after your password. Postveil will require it at every new sign-in.</p>
                 </div>
                 <span className={`security-status ${mfaFactors.length ? "enabled" : mfaPendingFactor ? "pending" : ""}`}>{mfaFactors.length ? "On" : mfaPendingFactor ? "Setup paused" : "Off"}</span>
               </div>
@@ -2336,7 +2336,7 @@ function SettingsPanel({
             </div>
             <div className="setting-card">
               <h3>How recovery works</h3>
-              <p>Parcel keeps your recovery addresses separate from your sign-in email. A recovery request never reveals whether an account exists, and every reset link is one-time.</p>
+              <p>Postveil keeps your recovery addresses separate from your sign-in email. A recovery request never reveals whether an account exists, and every reset link is one-time.</p>
               <small className="field-help">Keep at least one recovery address available and store your authenticator app on a device you control. Recovery email can reset access; it cannot bypass an enabled authenticator challenge.</small>
             </div>
           </div>
@@ -2604,7 +2604,7 @@ function SettingsPanel({
             </div>
             <div className="setting-card spam-explainer-card">
               <h3>How screening works</h3>
-              <p>Parcel combines authentication alignment, sender history, user feedback, links, risky requests, and attachments.</p>
+              <p>Postveil combines authentication alignment, sender history, user feedback, links, risky requests, and attachments.</p>
               <div className="screening-legend">
                 <span><i className="legend-dot safe" /> Inbox</span>
                 <span><i className="legend-dot review" /> Warning</span>
@@ -3536,7 +3536,7 @@ function MailboxApp({ session }: { session: Session }) {
       if (bulkAction === "export" && payload.exported?.length) {
         const download = document.createElement("a");
         download.href = URL.createObjectURL(new Blob([JSON.stringify(payload.exported, null, 2)], { type: "application/json" }));
-        download.download = `parcel-export-${new Date().toISOString().slice(0, 10)}.json`;
+        download.download = `postveil-export-${new Date().toISOString().slice(0, 10)}.json`;
         download.click();
         URL.revokeObjectURL(download.href);
       }
@@ -3577,7 +3577,7 @@ function MailboxApp({ session }: { session: Session }) {
         .forEach(
           (message) =>
             new Notification(message.subject || "New message", {
-              body: `${message.from_address}: ${message.snippet || "Open Parcel to read it."}`,
+              body: `${message.from_address}: ${message.snippet || "Open Postveil to read it."}`,
             }),
         );
     }
@@ -3954,7 +3954,7 @@ function MailboxApp({ session }: { session: Session }) {
           <Menu size={19} />
         </button>
         <div className="mini-brand">
-          <span>P</span> Parcel
+          <span>P</span> Postveil
         </div>
         <button
           className="icon-button"
@@ -3969,7 +3969,7 @@ function MailboxApp({ session }: { session: Session }) {
           <div className="brand-lockup">
             <div className="brand-mark small">P</div>
             <div>
-              <strong>Parcel</strong>
+              <strong>Postveil</strong>
               <span>private mail</span>
             </div>
           </div>
@@ -4842,7 +4842,7 @@ export default function App() {
     return (
       <div className="loading-screen">
         <div className="brand-mark">P</div>
-        <p>Loading Parcel…</p>
+        <p>Loading Postveil…</p>
       </div>
     );
   if (!supabase)

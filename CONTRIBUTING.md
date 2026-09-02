@@ -1,6 +1,6 @@
-# Contributing to Parcel
+# Contributing to Postveil
 
-Thanks for helping improve Parcel. Please keep changes focused, explain the
+Thanks for helping improve Postveil. Please keep changes focused, explain the
 security or user-facing impact, and avoid committing provider credentials,
 personal mailbox data, generated build output, or deployment-specific values.
 
