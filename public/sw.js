@@ -1,11 +1,11 @@
-const CACHE = "parcel-shell-v2";
+const CACHE = "postveil-shell-v2";
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(["/", "/manifest.webmanifest"])));
   self.skipWaiting();
 });
 self.addEventListener("activate", (event) => event.waitUntil(
   caches.keys().then((keys) => Promise.all(
-    keys.filter((key) => key.startsWith("parcel-shell-") && key !== CACHE).map((key) => caches.delete(key)),
+    keys.filter((key) => key.startsWith("postveil-shell-") && key !== CACHE).map((key) => caches.delete(key)),
   )).then(() => self.clients.claim()),
 ));
 self.addEventListener("fetch", (event) => {
