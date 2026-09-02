@@ -1417,6 +1417,13 @@ function protectedHeaders(response: Response, noStore = false, supabaseUrl?: str
 async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   await enforceRequestBodyLimit(request);
+  if (url.pathname === "/api/client-config") {
+    if (request.method !== "GET") return error("Method not allowed", 405);
+    const publicUrl = String(env.SUPABASE_URL || "").trim();
+    const publicKey = String(env.SUPABASE_ANON_KEY || "").trim();
+    if (!publicUrl || !publicKey) return error("Service temporarily unavailable", 503);
+    return json({ supabaseUrl: publicUrl, supabaseAnonKey: publicKey });
+  }
   if (url.pathname === "/api/health") {
     if (!["GET", "HEAD"].includes(request.method)) return error("Method not allowed", 405);
     return json({ ok: true, service: "email-service", status: "healthy" });
