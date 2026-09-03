@@ -3833,6 +3833,7 @@ function SettingsPanel({
                     onChange={(event) => setRuleLabel(event.target.value)}
                     placeholder="Add label (optional)"
                     list="rule-labels"
+                    aria-label="Add label"
                   />
                   <datalist id="rule-labels">{labels.map((label) => <option key={label.id} value={label.name} />)}</datalist>
                   <input
@@ -3840,6 +3841,7 @@ function SettingsPanel({
                     onChange={(event) => setRuleForwardTo(event.target.value)}
                     placeholder="Forward to (optional)"
                     type="email"
+                    aria-label="Forward to"
                   />
                   <input
                     value={ruleSnoozeMinutes}
@@ -3848,22 +3850,26 @@ function SettingsPanel({
                     type="number"
                     min="1"
                     max="43200"
+                    aria-label="Snooze minutes"
                   />
                   <input
                     value={ruleAssignTo}
                     onChange={(event) => setRuleAssignTo(event.target.value)}
                     placeholder="Assign to account id or self"
+                    aria-label="Assign to account id or self"
                   />
                   <input
                     value={ruleCreateTask}
                     onChange={(event) => setRuleCreateTask(event.target.value)}
                     placeholder="Create task (optional title)"
+                    aria-label="Create task title"
                   />
                   <input
                     value={ruleWebhookUrl}
                     onChange={(event) => setRuleWebhookUrl(event.target.value)}
                     placeholder="Webhook URL (HTTPS)"
                     type="url"
+                    aria-label="Webhook URL"
                   />
                   {ruleWebhookUrl && <input
                     value={ruleWebhookSecret}
@@ -3871,6 +3877,7 @@ function SettingsPanel({
                     placeholder="Webhook signing secret (optional)"
                     type="password"
                     autoComplete="new-password"
+                    aria-label="Webhook signing secret"
                   />}
                 </div>
                 <div className="rule-automation-options">
