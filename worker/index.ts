@@ -92,6 +92,8 @@ interface Env {
   SMTP_RELAY_URL?: string;
   SMTP_USERNAME?: string;
   SMTP_PASSWORD?: string;
+  CONFIDENTIAL_LINK_SECRET?: string;
+  CONFIDENTIAL_ENCRYPTION_KEY?: string;
   MAX_EMAIL_BYTES?: string;
   MAX_RECIPIENTS?: string;
   MAX_RETRY_ATTEMPTS?: string;
@@ -116,6 +118,29 @@ type StoredAttachment = { object_key: string; filename: string; content_type: st
 type ProviderConfig = { id?: string; organization_id?: string; provider: ProviderName; enabled: boolean; priority: number; config: JsonRecord; daily_limit?: number };
 type ProviderHealth = { id?: string; organization_id?: string; provider: ProviderName; status: string; last_success_at?: string | null; last_failure_at?: string | null; last_latency_ms?: number | null; consecutive_failures?: number; circuit_open_until?: string | null; sent_24h?: number; delivered_24h?: number; bounced_24h?: number; complained_24h?: number; updated_at?: string };
 type DeliveryEvent = { provider: string; eventType: string; providerMessageId?: string; eventId?: string; recipient?: string; reason?: string; occurredAt?: string; payload: JsonRecord };
+type ComposeMetadata = {
+  composeMode?: "plain" | "html" | "markdown";
+  timezone?: string;
+  recurrence?: "none" | "daily" | "weekly" | "monthly";
+  recurrenceUntil?: string | null;
+  recurrenceCount?: number | null;
+  readReceipt?: boolean;
+  deliveryReceipt?: boolean;
+  requestConfirmation?: boolean;
+  replyTracking?: boolean;
+  followUpTracking?: boolean;
+  mailMerge?: boolean;
+  personalizedBulk?: boolean;
+  contactGroup?: string;
+  confidentialMode?: boolean;
+  expiresHours?: number;
+  passwordProtected?: boolean;
+  passwordHint?: string;
+  linkPreviewEnabled?: boolean;
+  confidentialPassword?: string;
+  maxViews?: number;
+};
+type ConfidentialRow = { id: string; owner_id: string; message_id: string; token_hash: string; encryption_iv: string; encrypted_payload: string; password_hash: string | null; password_salt: string | null; password_hint: string; expires_at: string; max_views: number; view_count: number; revoked_at: string | null };
 
 const SYSTEM_FOLDERS = ["inbox", "sent", "drafts", "archive", "trash", "spam", "quarantine"] as const;
 const SPAM_THRESHOLD = 0.70;
@@ -171,6 +196,65 @@ function splitAddresses(value: unknown): string[] {
   return values
     .map((item) => cleanAddress(String(item)))
     .filter((address) => isValidEmailAddress(address));
+}
+
+const MAX_EMAIL_IMAGE_PROXY_BYTES = 5 * 1024 * 1024;
+
+function publicHttpUrl(value: string): URL | null {
+  const raw = value.trim();
+  if (!raw || raw.length > 4096) return null;
+  const normalized = raw.startsWith("//") ? `https:${raw}` : raw;
+  try {
+    const url = new URL(normalized);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host === "metadata.google.internal" || host === "169.254.169.254" || host === "[::1]" || host === "::1") return null;
+    const ipv4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (ipv4) {
+      const octets = ipv4.slice(1).map(Number);
+      const [first, second] = octets;
+      if (octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255) || first === 10 || first === 127 || first === 0 || (first === 169 && second === 254) || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168)) return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchProxiedEmailImage(source: string): Promise<Response> {
+  const target = publicHttpUrl(source);
+  if (!target) return error("This image destination is not allowed", 400);
+  const upstream = await fetch(target.toString(), {
+    redirect: "follow",
+    headers: { accept: "image/avif,image/webp,image/apng,image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.1", "user-agent": "Postveil privacy image proxy" },
+  });
+  if (!upstream.ok) return error("The remote image is unavailable", 502);
+  const contentType = (upstream.headers.get("content-type") || "").split(";", 1)[0].toLowerCase();
+  if (!/^image\/(?:avif|gif|jpeg|png|webp)$/.test(contentType)) return error("Only safe raster images can be proxied", 415);
+  const declaredLength = Number(upstream.headers.get("content-length") || 0);
+  if (declaredLength > MAX_EMAIL_IMAGE_PROXY_BYTES) return error("The remote image is too large", 413);
+  const bytes = await upstream.arrayBuffer();
+  if (bytes.byteLength > MAX_EMAIL_IMAGE_PROXY_BYTES) return error("The remote image is too large", 413);
+  return new Response(bytes, { headers: { "content-type": contentType, "content-length": String(bytes.byteLength), "cache-control": "private, no-store", "content-disposition": "inline" } });
+}
+
+async function inspectExternalLink(source: string): Promise<JsonRecord> {
+  const initial = publicHttpUrl(source);
+  if (!initial) return { ok: false, url: source, warning: "This destination is not allowed." };
+  const chain: Array<{ url: string; status: number; location?: string | null }> = [];
+  let current = initial;
+  for (let hop = 0; hop < 6; hop += 1) {
+    const response = await fetch(current.toString(), { method: "HEAD", redirect: "manual", headers: { "user-agent": "Postveil link inspection" } }).catch(() => null);
+    if (!response) return { ok: false, url: initial.toString(), chain, warning: "The destination could not be reached for inspection." };
+    const location = response.headers.get("location");
+    chain.push({ url: current.toString(), status: response.status, location });
+    if (![301, 302, 303, 307, 308].includes(response.status) || !location) break;
+    const next = publicHttpUrl(new URL(location, current).toString());
+    if (!next) return { ok: false, url: initial.toString(), chain, warning: "The redirect leaves the safe inspection boundary." };
+    current = next;
+  }
+  const tooMany = chain.length >= 6 && [301, 302, 303, 307, 308].includes(chain[chain.length - 1]?.status || 0);
+  return { ok: !tooMany, url: initial.toString(), finalUrl: current.toString(), chain, warning: tooMany ? "Too many redirects were detected." : chain.length > 1 ? "This link redirects before reaching its destination." : undefined };
 }
 
 function parseAddressList(value: unknown): { addresses: string[]; invalid: boolean } {
@@ -422,6 +506,63 @@ async function putObject(env: Env, key: string, body: Uint8Array | string, conte
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function base64Encode(bytes: Uint8Array): string {
+  let value = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) value += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  return btoa(value);
+}
+
+function base64Decode(value: string): Uint8Array {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const decoded = atob(normalized);
+  const bytes = new Uint8Array(decoded.length);
+  for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
+  return bytes;
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  return base64Encode(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function hmacSha256(secret: string, value: string): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
+}
+
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+async function aesKey(secret: string): Promise<CryptoKey> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function deriveConfidentialToken(env: Env, id: string): Promise<string> {
+  if (!env.CONFIDENTIAL_LINK_SECRET) throw new Error("Confidential message links are not configured");
+  return base64UrlEncode(await hmacSha256(env.CONFIDENTIAL_LINK_SECRET, `share:${id}`));
+}
+
+async function derivePasswordHash(password: string, salt: Uint8Array): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: asArrayBuffer(salt), iterations: 100_000, hash: "SHA-256" }, key, 256);
+  return base64UrlEncode(new Uint8Array(bits));
+}
+
+async function encryptConfidentialPayload(env: Env, payload: JsonRecord): Promise<{ iv: string; encrypted: string }> {
+  if (!env.CONFIDENTIAL_ENCRYPTION_KEY) throw new Error("Confidential message encryption is not configured");
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: asArrayBuffer(iv) }, await aesKey(env.CONFIDENTIAL_ENCRYPTION_KEY), new TextEncoder().encode(JSON.stringify(payload)));
+  return { iv: base64UrlEncode(iv), encrypted: base64UrlEncode(new Uint8Array(encrypted)) };
+}
+
+async function decryptConfidentialPayload(env: Env, row: ConfidentialRow): Promise<JsonRecord> {
+  if (!env.CONFIDENTIAL_ENCRYPTION_KEY) throw new Error("Confidential message encryption is not configured");
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: asArrayBuffer(base64Decode(row.encryption_iv)) }, await aesKey(env.CONFIDENTIAL_ENCRYPTION_KEY), asArrayBuffer(base64Decode(row.encrypted_payload)));
+  return JSON.parse(new TextDecoder().decode(decrypted)) as JsonRecord;
 }
 
 async function readObject(env: Env, key: string): Promise<Uint8Array> {
@@ -700,7 +841,7 @@ async function recordSecurityEvent(env: Env, organization: Organization, user: U
   }).catch(() => undefined);
   await dbRequest(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&user_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
   if (suspicious && user.email) {
-    ctx.waitUntil(sendViaBrevo(env, {
+    ctx.waitUntil(sendSystemMessage(env, {
       fromAddress: await defaultFromAddress(env, user.id),
       to: [user.email],
       subject: "New Postveil sign-in detected",
@@ -970,7 +1111,7 @@ async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor
     if (request.method === "POST" && userMatch[2] === "reset-password") {
       if (!targetAuth.email) return error("This account has no reset email", 400);
       const link = await generateRecoveryLink(env, targetAuth.email, new URL("/", request.url).toString());
-      await sendViaBrevo(env, { fromAddress: await defaultFromAddress(env, actor.id), to: [targetAuth.email], subject: "Reset your Postveil password", text: `An administrator requested a password reset for your Postveil account. Use this one-time link:\n\n${link}\n\nIf you did not expect this, contact your workspace administrator.` });
+      await sendSystemMessage(env, { fromAddress: await defaultFromAddress(env, actor.id), to: [targetAuth.email], subject: "Reset your Postveil password", text: `An administrator requested a password reset for your Postveil account. Use this one-time link:\n\n${link}\n\nIf you did not expect this, contact your workspace administrator.` }, organization.id);
       await auditAdminEvent(env, organization.id, actor.id, targetId, "password_reset", { email: targetAuth.email });
       return json({ ok: true });
     }
@@ -1442,6 +1583,11 @@ function objectValue(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 }
 
+function safeComposeMetadata(metadata: ComposeMetadata): JsonRecord {
+  const { confidentialPassword: _confidentialPassword, ...safe } = metadata;
+  return safe;
+}
+
 function buildRuleConditions(conditions: unknown, exceptions: unknown): JsonRecord {
   const next = { ...objectValue(conditions) };
   const exceptionObject = objectValue(exceptions);
@@ -1521,15 +1667,20 @@ async function applyExistingRuleMatches(env: Env, ownerId: string, rule: Rule, r
   return { changedCount, failures };
 }
 
-async function sendViaBrevo(env: Env, input: { fromAddress: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; html?: string; replyTo?: string; idempotencyKey?: string; attachments?: Array<{ filename: string; object_key: string }> }): Promise<{ messageId?: string }> {
-  const payload: JsonRecord = { sender: { email: input.fromAddress }, to: input.to.map((email) => ({ email })), subject: input.subject || "(no subject)", textContent: input.text || "", htmlContent: input.html || undefined, replyTo: { email: input.replyTo || input.fromAddress } };
-  if (input.cc?.length) payload.cc = input.cc.map((email) => ({ email }));
-  if (input.bcc?.length) payload.bcc = input.bcc.map((email) => ({ email }));
-  if (input.attachments?.length) payload.attachment = await Promise.all(input.attachments.map(async (attachment) => ({ url: await signedObjectUrl(env, attachment.object_key), name: attachment.filename })));
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", { method: "POST", headers: { accept: "application/json", "api-key": env.BREVO_API_KEY, "content-type": "application/json", ...(input.idempotencyKey ? { "x-idempotency-key": input.idempotencyKey } : {}) }, body: JSON.stringify(payload) });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Brevo ${response.status}: ${JSON.stringify(result).slice(0, 500)}`);
-  return result as { messageId?: string };
+async function sendSystemMessage(env: Env, input: { fromAddress: string; to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; html?: string; replyTo?: string; idempotencyKey?: string; attachments?: Array<{ filename: string; object_key: string }> }, organizationId?: string): Promise<{ messageId?: string; provider?: ProviderName }> {
+  const attachments: DeliveryAttachment[] = await Promise.all((input.attachments || []).map(async (attachment) => ({ filename: attachment.filename, contentType: "application/octet-stream", bytes: await readObject(env, attachment.object_key), url: await signedObjectUrl(env, attachment.object_key) })));
+  const configs = await providerConfigs(env, organizationId);
+  let lastError: unknown = null;
+  for (const config of configs) {
+    if (await providerIsCircuitOpen(env, organizationId, config.provider)) continue;
+    try {
+      const result = await sendThroughProvider(config.provider, env, { fromAddress: input.fromAddress, to: input.to, cc: input.cc || [], bcc: input.bcc || [], subject: input.subject, text: input.text, html: input.html, replyTo: input.replyTo, idempotencyKey: input.idempotencyKey, attachments });
+      return { messageId: result.providerMessageId, provider: result.provider };
+    } catch (sendError) {
+      lastError = sendError;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("No configured delivery provider is available");
 }
 
 type RecoveryMethodRow = {
@@ -1591,7 +1742,7 @@ async function handleMfaRecoveryRequest(request: Request, env: Env): Promise<Res
     if (!authUser?.email || normalizeRecoveryEmail(authUser.email) !== email) return generic;
     await dbRequest(env, `account_mfa_recovery_codes?id=eq.${encodeURIComponent(row.id)}&owner_id=eq.${encodeURIComponent(row.owner_id)}&used_at=is.null`, { method: "PATCH", body: JSON.stringify({ used_at: new Date().toISOString() }) });
     const link = await generateRecoveryLink(env, authUser.email, new URL("/", request.url).toString());
-    await sendViaBrevo(env, { fromAddress: await defaultFromAddress(env, row.owner_id), to: [authUser.email], subject: "Your Postveil recovery link", text: `Use this one-time link to regain access to Postveil and set a new password:\n\n${link}\n\nThis recovery code has now been consumed.` });
+    await sendSystemMessage(env, { fromAddress: await defaultFromAddress(env, row.owner_id), to: [authUser.email], subject: "Your Postveil recovery link", text: `Use this one-time link to regain access to Postveil and set a new password:\n\n${link}\n\nThis recovery code has now been consumed.` });
   } catch {
     // Keep recovery attempts indistinguishable from unknown or invalid details.
   }
@@ -1684,7 +1835,7 @@ async function handleRecoveryRequest(request: Request, env: Env): Promise<Respon
     const redirectTo = new URL("/", request.url).toString();
     const link = await generateRecoveryLink(env, primaryEmail, redirectTo);
     const fromAddress = await defaultFromAddress(env, method.owner_id);
-    await sendViaBrevo(env, {
+    await sendSystemMessage(env, {
       fromAddress,
       to: [email],
       subject: "Your Postveil password recovery link",
@@ -1768,6 +1919,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
         await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, { method: "PATCH", body: JSON.stringify({ storage_used_bytes: mailboxSettings.storage_used_bytes + storedBytes, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
       }
       await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
+      await markInboundReply(env, ownerId, threadId, messageId, headerFrom);
       await applyInboundRules(env, ownerId, messageId, {
         from: headerFrom,
         to: toAddresses,
@@ -1784,7 +1936,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
       const autoReplies = await dbRequest<Array<{ enabled: boolean; subject: string; body: string; starts_at: string | null; ends_at: string | null }>>(env, `auto_replies?owner_id=eq.${encodeURIComponent(ownerId)}&mailbox_id=eq.${encodeURIComponent(mailbox.id)}&enabled=eq.true&limit=1`);
       const autoReply = autoReplies[0];
       const now = Date.now();
-      if (autoReply && (!autoReply.starts_at || now >= Date.parse(autoReply.starts_at)) && (!autoReply.ends_at || now <= Date.parse(autoReply.ends_at)) && headerFrom !== destination && !/auto-submitted|list-/i.test(headerValue(parsed, "auto-submitted") || "")) await sendViaBrevo(env, { fromAddress: destination, to: [headerFrom], subject: autoReply.subject, text: autoReply.body, replyTo: destination });
+      if (autoReply && (!autoReply.starts_at || now >= Date.parse(autoReply.starts_at)) && (!autoReply.ends_at || now <= Date.parse(autoReply.ends_at)) && headerFrom !== destination && !/auto-submitted|list-/i.test(headerValue(parsed, "auto-submitted") || "")) await sendSystemMessage(env, { fromAddress: destination, to: [headerFrom], subject: autoReply.subject, text: autoReply.body, replyTo: destination }, mailboxSettings?.organization_id);
     } catch (processingError) {
       const note = processingError instanceof Error ? processingError.message.slice(0, 500) : "Inbound processing failed";
       await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ status: "failed", delivery_status: "failed", delivery_error_code: "inbound_processing_failed", delivery_error: note, work_note: note, updated_at: new Date().toISOString() }) }).catch(() => undefined);
@@ -1832,12 +1984,68 @@ async function recordDomainOutcome(env: Env, organizationId: string | undefined,
   if (status === "suspended" && (!current || current.status !== "suspended")) await dbRequest(env, "abuse_actions", { method: "POST", body: JSON.stringify({ organization_id: organizationId, action: "suspended", reason: `Domain reputation crossed the automatic safety threshold (${Math.round(bounceRate * 100)}% bounce, ${Math.round(complaintRate * 100)}% complaint)`, metadata: { domain, sentCount, bounceRate, complaintRate } }) }).catch(() => undefined);
 }
 
+async function markInboundReply(env: Env, ownerId: string, threadId: string, inboundMessageId: string, sender: string): Promise<void> {
+  const tracked = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&thread_id=eq.${encodeURIComponent(threadId)}&direction=eq.outbound&reply_tracking_enabled=eq.true&select=id&limit=50`).catch(() => []);
+  for (const message of tracked) {
+    await dbRequest(env, `messages?id=eq.${encodeURIComponent(message.id)}&owner_id=eq.${encodeURIComponent(ownerId)}&reply_tracking_enabled=eq.true`, { method: "PATCH", body: JSON.stringify({ reply_received_at: new Date().toISOString(), follow_up_at: null, work_state: "none", updated_at: new Date().toISOString() }) }).catch(() => undefined);
+    await recordReceiptEvent(env, ownerId, message.id, "reply", sender, "inbound", `reply:${inboundMessageId}:${message.id}`, { inboundMessageId, threadId });
+  }
+}
+
+function htmlEscape(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character] || character));
+}
+
+async function confidentialDeliveryContent(env: Env, row: ConfidentialRow): Promise<{ text: string; html: string }> {
+  const token = await deriveConfidentialToken(env, row.id);
+  const link = `https://${configuredAppDomain(env)}/share/${token}`;
+  const passwordNotice = row.password_hash ? " The recipient will need the password you set." : "";
+  return {
+    text: `You have received a confidential Postveil message. Open it securely here: ${link}\n\nThis link expires ${new Date(row.expires_at).toLocaleString()} and can be opened ${row.max_views ? `up to ${row.max_views} time${row.max_views === 1 ? "" : "s"}` : "until it expires"}.${passwordNotice}`,
+    html: `<p>You have received a confidential Postveil message.</p><p><a href="${htmlEscape(link)}">Open the protected message</a></p><p>This link expires ${htmlEscape(new Date(row.expires_at).toLocaleString())}.${htmlEscape(passwordNotice)}</p>`,
+  };
+}
+
+async function createConfidentialRecord(env: Env, ownerId: string, messageId: string, payload: JsonRecord, metadata: ComposeMetadata): Promise<void> {
+  const id = crypto.randomUUID();
+  const token = await deriveConfidentialToken(env, id);
+  const encrypted = await encryptConfidentialPayload(env, payload);
+  const password = metadata.passwordProtected ? String(metadata.confidentialPassword || "") : "";
+  if (metadata.passwordProtected && password.length < 10) throw new Error("Password-protected messages require a password of at least 10 characters");
+  const passwordSalt = password ? crypto.getRandomValues(new Uint8Array(16)) : null;
+  const passwordHash = passwordSalt ? await derivePasswordHash(password, passwordSalt) : null;
+  const hours = Math.max(1, Math.min(168, Number(metadata.expiresHours || 24)));
+  const maxViews = Math.max(0, Math.min(100, Number(metadata.maxViews || 0)));
+  await dbRequest(env, "confidential_messages", {
+    method: "POST",
+    body: JSON.stringify({ id, owner_id: ownerId, message_id: messageId, token_hash: await sha256Hex(new TextEncoder().encode(token)), encryption_iv: encrypted.iv, encrypted_payload: encrypted.encrypted, password_hash: passwordHash, password_salt: passwordSalt ? base64UrlEncode(passwordSalt) : null, password_hint: String(metadata.passwordHint || "").slice(0, 120), expires_at: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(), max_views: maxViews }),
+  });
+}
+
+function personalizeComposeValue(value: string, email: string, displayName = "", company = ""): string {
+  const firstName = displayName.trim().split(/\s+/)[0] || "there";
+  return value
+    .replace(/\{\{\s*first_name\s*\}\}/gi, firstName)
+    .replace(/\{\{\s*name\s*\}\}/gi, displayName || firstName)
+    .replace(/\{\{\s*company\s*\}\}/gi, company || "your team")
+    .replace(/\{\{\s*email\s*\}\}/gi, email);
+}
+
+async function recipientContact(env: Env, ownerId: string, email: string): Promise<{ displayName: string; company: string }> {
+  const rows = await dbRequest<Array<{ display_name?: string | null; company?: string | null }>>(env, `contacts?owner_id=eq.${encodeURIComponent(ownerId)}&email=eq.${encodeURIComponent(email)}&select=display_name,company&limit=1`).catch(() => []);
+  return { displayName: String(rows[0]?.display_name || ""), company: String(rows[0]?.company || "") };
+}
+
 async function sendOutboxMessage(env: Env, message: JsonRecord): Promise<{ messageId?: string; provider?: ProviderName }> {
   const attachmentRows = await dbRequest<Array<{ filename: string; object_key: string; content_type?: string; byte_size?: number }>>(env, `attachments?message_id=eq.${encodeURIComponent(String(message.id))}&select=filename,object_key,content_type,byte_size&order=created_at.asc`);
-  const attachments: DeliveryAttachment[] = await Promise.all(attachmentRows.map(async (attachment) => ({ filename: attachment.filename, contentType: attachment.content_type || "application/octet-stream", byteSize: Number(attachment.byte_size || 0), bytes: await readObject(env, attachment.object_key), url: await signedObjectUrl(env, attachment.object_key) })));
   const mailboxSettings = message.mailbox_id ? (await dbRequest<MailboxAdminSettings[]>(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(String(message.mailbox_id))}&limit=1`).catch(() => []))[0] : undefined;
   const organizationId = mailboxSettings?.organization_id;
-  const input: DeliveryInput = { fromAddress: String(message.from_address), to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [], cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [], bcc: Array.isArray(message.bcc_addresses) ? message.bcc_addresses.map(String) : [], subject: String(message.subject || "(no subject)"), text: String(message.text_body || ""), html: typeof message.html_body === "string" ? message.html_body : undefined, replyTo: String(message.reply_to || message.from_address), idempotencyKey: typeof message.send_idempotency_key === "string" ? message.send_idempotency_key : undefined, messageIdHeader: typeof message.message_id_header === "string" ? message.message_id_header : undefined, openTrackingEnabled: message.open_tracking_enabled === true, clickTrackingEnabled: message.click_tracking_enabled === true, attachments };
+  const confidential = message.confidential_mode === true ? (await dbRequest<ConfidentialRow[]>(env, `confidential_messages?message_id=eq.${encodeURIComponent(String(message.id))}&limit=1`).catch(() => []))[0] : undefined;
+  if (message.confidential_mode === true && !confidential) throw new Error("Confidential message protection is unavailable; delivery was blocked");
+  if (confidential && attachmentRows.length) throw new Error("Confidential message delivery was blocked because attachments are not supported");
+  const attachments: DeliveryAttachment[] = await Promise.all(attachmentRows.map(async (attachment) => ({ filename: attachment.filename, contentType: attachment.content_type || "application/octet-stream", byteSize: Number(attachment.byte_size || 0), bytes: await readObject(env, attachment.object_key), url: await signedObjectUrl(env, attachment.object_key) })));
+  const deliveryContent = confidential ? await confidentialDeliveryContent(env, confidential) : null;
+  const input: DeliveryInput = { fromAddress: String(message.from_address), to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [], cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [], bcc: Array.isArray(message.bcc_addresses) ? message.bcc_addresses.map(String) : [], subject: String(message.subject || "(no subject)"), text: deliveryContent?.text || String(message.text_body || ""), html: deliveryContent?.html || (typeof message.html_body === "string" ? message.html_body : undefined), replyTo: String(message.reply_to || message.from_address), idempotencyKey: typeof message.send_idempotency_key === "string" ? message.send_idempotency_key : undefined, messageIdHeader: typeof message.message_id_header === "string" ? message.message_id_header : undefined, openTrackingEnabled: message.open_tracking_enabled === true, clickTrackingEnabled: message.click_tracking_enabled === true, requestDeliveryReceipt: message.delivery_receipt_requested === true, requestReadReceipt: message.read_receipt_requested === true, requestConfirmation: message.request_confirmation === true, attachments };
   const configs = await providerConfigs(env, organizationId);
   let lastFailure: ReturnType<typeof providerFailure> | null = null;
   for (let index = 0; index < configs.length; index += 1) {
@@ -1854,6 +2062,8 @@ async function sendOutboxMessage(env: Env, message: JsonRecord): Promise<{ messa
       await dbRequest(env, `delivery_queue?message_id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ status: "succeeded", last_provider: config.provider, last_error_code: null, last_error: null, locked_until: null, updated_at: new Date().toISOString() }) }).catch(() => undefined);
       await recordDomainOutcome(env, organizationId, domainOf(input.fromAddress), "sent");
       await updateProviderHealth(env, organizationId, config.provider, { success: true, latencyMs: result.latencyMs, status: result.responseStatus });
+      if (confidential) await recordReceiptEvent(env, String(message.owner_id), String(message.id), "confirmation", input.to[0], config.provider, `accepted:${result.providerMessageId || result.responseStatus}`, { providerMessageId: result.providerMessageId || null });
+      await scheduleNextRecurringMessage(env, message);
       return { messageId: result.providerMessageId, provider: config.provider };
     } catch (sendError) {
       lastFailure = providerFailure(sendError, config.provider);
@@ -1865,6 +2075,58 @@ async function sendOutboxMessage(env: Env, message: JsonRecord): Promise<{ messa
   const failure = new Error(`${providerLabel(exhausted.provider)}: ${exhausted.message}`) as Error & { delivery?: ReturnType<typeof providerFailure> };
   failure.delivery = exhausted;
   throw failure;
+}
+
+async function recordReceiptEvent(env: Env, ownerId: string, messageId: string, kind: "delivery" | "read" | "confirmation" | "reply", recipient: string | undefined, provider: string | undefined, eventId: string, payload: JsonRecord): Promise<void> {
+  await dbRequest(env, "message_receipt_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: ownerId, message_id: messageId, kind, recipient: recipient || null, provider: provider || null, provider_event_id: eventId, payload }) }).catch(() => undefined);
+}
+
+function nextRecurringDate(value: string, rule: string): string | null {
+  const next = new Date(value);
+  if (Number.isNaN(next.getTime())) return null;
+  if (rule === "daily") next.setUTCDate(next.getUTCDate() + 1);
+  else if (rule === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+  else if (rule === "monthly") {
+    const day = next.getUTCDate();
+    next.setUTCDate(1);
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    const lastDay = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
+    next.setUTCDate(Math.min(day, lastDay));
+  } else return null;
+  return next.toISOString();
+}
+
+async function scheduleNextRecurringMessage(env: Env, message: JsonRecord): Promise<void> {
+  const rule = String(message.recurrence_rule || "none");
+  if (rule === "none") return;
+  const currentSequence = Number(message.recurrence_sequence || 0);
+  const maxCount = message.recurrence_count === null || message.recurrence_count === undefined ? null : Number(message.recurrence_count);
+  if (maxCount !== null && currentSequence + 1 >= maxCount) return;
+  const nextAt = nextRecurringDate(String(message.scheduled_at || message.sent_at || new Date().toISOString()), rule);
+  if (!nextAt || (message.recurrence_until && Date.parse(nextAt) > Date.parse(String(message.recurrence_until)))) return;
+  const existing = await dbRequest<JsonRecord[]>(env, `messages?recurrence_parent_id=eq.${encodeURIComponent(String(message.id))}&recurrence_sequence=eq.${currentSequence + 1}&limit=1`).catch(() => []);
+  if (existing[0]) return;
+  const nextId = crypto.randomUUID();
+  const nextHeader = `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`;
+  const nextMessageRows = await dbRequest<Array<{ id: string }>>(env, "messages", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ owner_id: message.owner_id, sent_by: message.sent_by || message.owner_id, send_mode: message.send_mode || "own", thread_id: message.thread_id, mailbox_id: message.mailbox_id, direction: "outbound", folder: "drafts", status: "scheduled", delivery_status: "queued", from_name: message.from_name || "", from_address: message.from_address, to_addresses: message.to_addresses || [], cc_addresses: message.cc_addresses || [], bcc_addresses: message.bcc_addresses || [], reply_to: message.reply_to || message.from_address, subject: message.subject || "(no subject)", text_body: message.text_body || "", html_body: message.html_body || null, snippet: message.snippet || "", message_id_header: nextHeader, in_reply_to: message.in_reply_to || null, references_header: message.references_header || null, has_attachment: message.has_attachment === true, message_size_bytes: message.message_size_bytes || 0, max_size_bytes: message.max_size_bytes || maxEmailBytes(env), open_tracking_enabled: message.open_tracking_enabled === true, click_tracking_enabled: message.click_tracking_enabled === true, compose_mode: message.compose_mode || "plain", schedule_timezone: message.schedule_timezone || "UTC", recurrence_rule: rule, recurrence_until: message.recurrence_until || null, recurrence_count: maxCount, recurrence_sequence: currentSequence + 1, recurrence_parent_id: message.id, read_receipt_requested: message.read_receipt_requested === true, delivery_receipt_requested: message.delivery_receipt_requested === true, request_confirmation: message.request_confirmation === true, reply_tracking_enabled: message.reply_tracking_enabled === true, follow_up_tracking_enabled: message.follow_up_tracking_enabled === true, confidential_mode: message.confidential_mode === true, scheduled_at: nextAt, send_after: nextAt, next_delivery_at: nextAt, send_idempotency_key: `${String(message.send_idempotency_key || message.id)}:recurrence:${currentSequence + 1}` }),
+  });
+  const nextIdValue = nextMessageRows[0]?.id;
+  if (!nextIdValue) return;
+  await dbRequest(env, "delivery_queue", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: nextIdValue, owner_id: message.owner_id, status: "queued", available_at: nextAt, attempt_count: 0 }) }).catch(() => undefined);
+  const attachments = await dbRequest<JsonRecord[]>(env, `attachments?message_id=eq.${encodeURIComponent(String(message.id))}&select=owner_id,object_key,filename,content_type,detected_content_type,byte_size,sha256,preview_state,safety_status,safety_reasons,content_id,disposition`).catch(() => []);
+  if (attachments.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachments.map((attachment) => ({ ...attachment, message_id: nextIdValue }))) }).catch(() => undefined);
+  if (message.confidential_mode === true) {
+    const confidential = (await dbRequest<ConfidentialRow[]>(env, `confidential_messages?message_id=eq.${encodeURIComponent(String(message.id))}&limit=1`).catch(() => []))[0];
+    if (confidential) {
+      const nextConfidentialId = crypto.randomUUID();
+      const token = await deriveConfidentialToken(env, nextConfidentialId);
+      await dbRequest(env, "confidential_messages", { method: "POST", body: JSON.stringify({ ...confidential, id: nextConfidentialId, message_id: nextIdValue, token_hash: await sha256Hex(new TextEncoder().encode(token)), view_count: 0, revoked_at: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
+    }
+  }
+  await putObject(env, `raw/${String(message.owner_id)}/${nextIdValue}.eml`, rawMessageSource({ from: String(message.from_address), to: Array.isArray(message.to_addresses) ? message.to_addresses.map(String) : [], cc: Array.isArray(message.cc_addresses) ? message.cc_addresses.map(String) : [], bcc: Array.isArray(message.bcc_addresses) ? message.bcc_addresses.map(String) : [], subject: String(message.subject || "(no subject)"), text: String(message.text_body || ""), html: typeof message.html_body === "string" ? message.html_body : undefined, replyTo: String(message.reply_to || message.from_address), messageId: nextHeader }), "message/rfc822").then(() => dbRequest(env, `messages?id=eq.${encodeURIComponent(nextIdValue)}`, { method: "PATCH", body: JSON.stringify({ raw_object_key: `raw/${String(message.owner_id)}/${nextIdValue}.eml` }) })).catch(() => undefined);
 }
 
 async function processOutbox(env: Env, limit = 25): Promise<void> {
@@ -1891,6 +2153,65 @@ async function processOutbox(env: Env, limit = 25): Promise<void> {
       await dbRequest(env, `delivery_queue?message_id=eq.${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: shouldRetry ? "retrying" : "dead", available_at: shouldRetry ? retryAt : new Date().toISOString(), locked_until: null, attempt_count: attempt, last_provider: delivery?.provider || null, last_error_code: delivery?.code || "delivery_failed", last_error: delivery?.message || "Send failed", updated_at: new Date().toISOString() }) }).catch(() => undefined);
     }
   }
+}
+
+async function queueOutboundMessage(env: Env, input: {
+  ownerId: string;
+  actorId: string;
+  mailbox: Mailbox;
+  sendMode: string;
+  threadId: string;
+  fromAddress: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  replyTo: string;
+  subject: string;
+  text: string;
+  html?: string;
+  scheduledDate: Date | null;
+  sendAfter: string;
+  messageBytes: number;
+  maxSizeBytes: number;
+  openTrackingEnabled: boolean;
+  clickTrackingEnabled: boolean;
+  composeMetadata: ComposeMetadata;
+  warnings: SendWarning[];
+  idempotencyKey: string;
+  attachments: OutboundAttachment[];
+}): Promise<string> {
+  const messageIdHeader = `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`;
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ owner_id: input.ownerId, sent_by: input.actorId, send_mode: input.sendMode, thread_id: input.threadId, mailbox_id: input.mailbox.id, direction: "outbound", folder: input.scheduledDate ? "drafts" : "sent", status: input.scheduledDate ? "scheduled" : "queued", delivery_status: "queued", from_name: input.mailbox.display_name || "", from_address: input.fromAddress, to_addresses: input.to, cc_addresses: input.cc, bcc_addresses: input.bcc, reply_to: input.replyTo, subject: input.subject, text_body: input.text, html_body: input.html || null, snippet: snippet(input.text), message_id_header: messageIdHeader, has_attachment: input.attachments.length > 0, message_size_bytes: input.messageBytes, max_size_bytes: input.maxSizeBytes, open_tracking_enabled: input.openTrackingEnabled, click_tracking_enabled: input.clickTrackingEnabled, compose_mode: input.composeMetadata.composeMode || "plain", schedule_timezone: input.composeMetadata.timezone || "UTC", recurrence_rule: input.composeMetadata.recurrence || "none", recurrence_until: input.composeMetadata.recurrenceUntil || null, recurrence_count: input.composeMetadata.recurrenceCount ?? null, read_receipt_requested: input.composeMetadata.readReceipt === true, delivery_receipt_requested: input.composeMetadata.deliveryReceipt === true, request_confirmation: input.composeMetadata.requestConfirmation === true, reply_tracking_enabled: input.composeMetadata.replyTracking === true, follow_up_tracking_enabled: input.composeMetadata.followUpTracking === true, confidential_mode: input.composeMetadata.confidentialMode === true, scheduled_at: input.scheduledDate?.toISOString() || null, send_after: input.sendAfter, next_delivery_at: input.sendAfter, send_idempotency_key: input.idempotencyKey, send_warning_acknowledged: Object.fromEntries(input.warnings.map((warning) => [warning.code, true])) }),
+  });
+  const messageId = inserted[0]?.id;
+  if (!messageId) throw new Error("The message could not be queued");
+  await dbRequest(env, "delivery_queue", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, owner_id: input.ownerId, status: "queued", available_at: input.sendAfter, attempt_count: 0 }) });
+  const rawKey = `raw/${input.ownerId}/${messageId}.eml`;
+  await putObject(env, rawKey, rawMessageSource({ from: input.fromAddress, to: input.to, cc: input.cc, bcc: input.bcc, subject: input.subject, text: input.text, html: input.html, replyTo: input.replyTo, messageId: messageIdHeader }), "message/rfc822").then(() => dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}`, { method: "PATCH", body: JSON.stringify({ raw_object_key: rawKey, updated_at: new Date().toISOString() }) })).catch(() => undefined);
+  if (input.attachments.length) {
+    await dbRequest(env, "attachments", {
+      method: "POST",
+      body: JSON.stringify(input.attachments.map((attachment) => ({
+        owner_id: input.ownerId,
+        message_id: messageId,
+        object_key: attachment.object_key,
+        filename: attachment.filename,
+        content_type: attachment.content_type || "application/octet-stream",
+        detected_content_type: attachment.detected_content_type || attachment.content_type || "application/octet-stream",
+        byte_size: attachment.byte_size || 0,
+        sha256: attachment.sha256 || null,
+        preview_state: attachment.preview_state === "ready" ? "ready" : "not_available",
+        safety_status: ["unknown", "suspicious", "blocked", "infected"].includes(String(attachment.safety_status)) ? attachment.safety_status : "unknown",
+        safety_reasons: Array.isArray(attachment.safety_reasons) ? attachment.safety_reasons : ["No malware scanner is configured"],
+      }))),
+    });
+  }
+  if (input.composeMetadata.confidentialMode === true) await createConfidentialRecord(env, input.ownerId, messageId, { subject: input.subject, text: input.text, html: input.html || null }, input.composeMetadata);
+  if (Object.keys(input.composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: input.ownerId, message_id: messageId, provider: "postveil", event_type: "compose_features", payload: safeComposeMetadata(input.composeMetadata) }) }).catch(() => undefined);
+  return messageId;
 }
 
 async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ctx?: ExecutionContext): Promise<Response> {
@@ -1935,19 +2256,35 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   if (messageBytes > maxEmailBytes(env)) return error(`This message exceeds the ${Math.round(maxEmailBytes(env) / 1024 / 1024)} MB limit`, 413);
   const openTrackingEnabled = body.openTrackingEnabled === true;
   const clickTrackingEnabled = body.clickTrackingEnabled === true;
+  const composeMetadata = objectValue(body.composeMetadata) as ComposeMetadata;
+  const recurrence = ["none", "daily", "weekly", "monthly"].includes(String(composeMetadata.recurrence)) ? String(composeMetadata.recurrence) as ComposeMetadata["recurrence"] : "none";
+  composeMetadata.recurrence = recurrence;
+  composeMetadata.timezone = typeof composeMetadata.timezone === "string" && composeMetadata.timezone.length <= 80 ? composeMetadata.timezone : "UTC";
+  composeMetadata.recurrenceUntil = typeof composeMetadata.recurrenceUntil === "string" && !Number.isNaN(Date.parse(composeMetadata.recurrenceUntil)) ? new Date(composeMetadata.recurrenceUntil).toISOString() : null;
+  composeMetadata.recurrenceCount = Number.isFinite(Number(composeMetadata.recurrenceCount)) && Number(composeMetadata.recurrenceCount) > 0 ? Math.min(365, Number(composeMetadata.recurrenceCount)) : null;
   const warnings = ownerId ? buildSendWarnings({ fromAddress, mailboxAddress: mailbox?.address, mailboxCanSend: mailbox?.can_send, to, cc, bcc, replyTo, subject, text, attachmentCount: attachments.length }) : [];
   const acknowledged = new Set(Array.isArray(body.warningsAcknowledged) ? body.warningsAcknowledged.map(String) : []);
   const unacknowledgedWarnings = warnings.filter((warning) => !acknowledged.has(warning.code));
   if (unacknowledgedWarnings.length) return json({ ok: false, requiresConfirmation: true, warnings: unacknowledgedWarnings }, 409);
   const messageIdHeader = `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`;
   if (!ownerId) {
-    const result = await sendViaBrevo(env, { fromAddress, to, cc, bcc, subject, text, html, replyTo, attachments });
+    const result = await sendSystemMessage(env, { fromAddress, to, cc, bcc, subject, text, html, replyTo, attachments });
     return json({ ok: true, providerMessageId: result.messageId });
   }
   const idempotencyKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() ? body.idempotencyKey.trim().slice(0, 200) : crypto.randomUUID();
   const mailboxOwnerId = mailbox?.owner_id || ownerId;
   const duplicate = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&send_idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=id,status,folder,send_after,scheduled_at&limit=1`);
   if (duplicate[0]) return json({ ok: true, replayed: true, id: duplicate[0].id, status: duplicate[0].status, scheduled: duplicate[0].status === "scheduled" });
+  const mergeRequested = composeMetadata.mailMerge === true || composeMetadata.personalizedBulk === true;
+  if (mergeRequested && to.length > 1) {
+    const priorJobs = await dbRequest<JsonRecord[]>(env, `mail_events?owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&event_type=eq.mail_merge_job&order=created_at.desc&limit=100&select=payload`).catch(() => []);
+    const priorJob = priorJobs.find((job) => objectValue(job.payload).idempotencyKey === idempotencyKey);
+    if (priorJob) {
+      const priorPayload = objectValue(priorJob.payload);
+      const priorIds = Array.isArray(priorPayload.messageIds) ? priorPayload.messageIds.map(String) : [];
+      if (priorIds.length) return json({ ok: true, replayed: true, mailMerge: true, ids: priorIds, status: "queued" });
+    }
+  }
   for (const attachment of attachments) if (!attachment.object_key.startsWith(`drafts/${ownerId}/`) && !attachment.object_key.startsWith(`attachments/${ownerId}/`)) return error("Attachment ownership could not be verified", 403);
   let threadId = typeof body.threadId === "string" && body.threadId ? body.threadId : "";
   if (threadId) {
@@ -1962,8 +2299,35 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   const configuredUndo = normalizeUndoSeconds(objectValue(mailbox?.settings).send_undo_seconds, 0);
   const undoSeconds = scheduledDate ? 0 : normalizeUndoSeconds(body.undoSendSeconds, configuredUndo);
   const sendAfter = scheduledDate ? scheduledDate.toISOString() : new Date(Date.now() + undoSeconds * 1000).toISOString();
+  if (composeMetadata.confidentialMode === true && !env.CONFIDENTIAL_LINK_SECRET) return error("Confidential messages are not configured on this deployment", 503);
+  if (composeMetadata.confidentialMode === true && !env.CONFIDENTIAL_ENCRYPTION_KEY) return error("Confidential message encryption is not configured on this deployment", 503);
+  if (composeMetadata.confidentialMode === true && attachments.length) return error("Confidential messages cannot include attachments yet; send the files in a separate protected message", 422);
+  if (mergeRequested && to.length > 1) {
+    if (cc.length || bcc.length) return error("Mail merge cannot use shared Cc or Bcc recipients; send each copy privately");
+    const messageIds: string[] = [];
+    for (const recipient of to) {
+      const contact = await recipientContact(env, mailboxOwnerId, recipient);
+      const personalizedSubject = personalizeComposeValue(subject, recipient, contact.displayName, contact.company);
+      const personalizedText = personalizeComposeValue(text, recipient, contact.displayName, contact.company);
+      const personalizedHtml = html ? personalizeComposeValue(html, recipient, contact.displayName, contact.company) : undefined;
+      const personalizedThreadId = threadId || await findOrCreateThread(env, mailboxOwnerId, personalizedSubject);
+      const childMetadata: ComposeMetadata = { ...composeMetadata, mailMerge: false, personalizedBulk: false };
+      const childId = await queueOutboundMessage(env, { ownerId: mailboxOwnerId, actorId: ownerId, mailbox: mailbox!, sendMode, threadId: personalizedThreadId, fromAddress, to: [recipient], cc: [], bcc: [], replyTo, subject: personalizedSubject, text: personalizedText, html: personalizedHtml, scheduledDate, sendAfter, messageBytes: messageSizeBytes({ subject: personalizedSubject, text: personalizedText, html: personalizedHtml, to: [recipient], cc: [], bcc: [], attachments }), maxSizeBytes: maxEmailBytes(env), openTrackingEnabled, clickTrackingEnabled, composeMetadata: childMetadata, warnings, idempotencyKey: `${idempotencyKey}:${recipient}`, attachments });
+      messageIds.push(childId);
+    }
+    if (mailboxAdminSettings && mailbox) {
+      const today = new Date().toISOString().slice(0, 10);
+      const usedToday = mailboxAdminSettings.sending_window_started_at === today ? mailboxAdminSettings.sending_used_today : 0;
+      await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, { method: "PATCH", body: JSON.stringify({ sending_used_today: usedToday + messageIds.length, sending_window_started_at: today, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
+    }
+    await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, provider: "postveil", event_type: "mail_merge_job", payload: { idempotencyKey, messageIds, recipientCount: messageIds.length } }) }).catch(() => undefined);
+    const run = async () => { if (undoSeconds) await new Promise<void>((resolve) => setTimeout(resolve, undoSeconds * 1000)); await processOutbox(env, Math.min(5, messageIds.length)); };
+    if (ctx) { if (scheduledDate) return json({ ok: true, mailMerge: true, ids: messageIds, scheduled: true, sendAfter }); ctx.waitUntil(run()); return json({ ok: true, mailMerge: true, ids: messageIds, status: "queued", sendAfter, undoSeconds }); }
+    await run();
+    return json({ ok: true, mailMerge: true, ids: messageIds, status: "queued", sendAfter, undoSeconds });
+  }
   const threadFingerprint = await sha256Hex(new TextEncoder().encode(`${mailboxOwnerId}\n${normalizeSubject(subject)}\n${fromAddress}\n${to.join(",")}`));
-  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: mailboxOwnerId, sent_by: ownerId, send_mode: sendMode, thread_id: threadId, mailbox_id: mailbox?.id, direction: "outbound", folder: scheduledDate ? "drafts" : "sent", status: scheduledDate ? "scheduled" : "queued", delivery_status: "queued", from_name: mailbox?.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, message_size_bytes: messageBytes, max_size_bytes: maxEmailBytes(env), open_tracking_enabled: openTrackingEnabled, click_tracking_enabled: clickTrackingEnabled, thread_fingerprint: threadFingerprint, scheduled_at: scheduledDate?.toISOString() || null, send_after: sendAfter, next_delivery_at: sendAfter, send_idempotency_key: idempotencyKey, send_warning_acknowledged: Object.fromEntries(warnings.map((warning) => [warning.code, true])), sent_at: null }) });
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: mailboxOwnerId, sent_by: ownerId, send_mode: sendMode, thread_id: threadId, mailbox_id: mailbox?.id, direction: "outbound", folder: scheduledDate ? "drafts" : "sent", status: scheduledDate ? "scheduled" : "queued", delivery_status: "queued", from_name: mailbox?.display_name || "", from_address: fromAddress, to_addresses: to, cc_addresses: cc, bcc_addresses: bcc, reply_to: replyTo, subject, text_body: text, html_body: html || null, snippet: snippet(text), message_id_header: messageIdHeader, in_reply_to: typeof body.inReplyTo === "string" ? body.inReplyTo : null, references_header: typeof body.references === "string" ? body.references : null, has_attachment: attachments.length > 0, message_size_bytes: messageBytes, max_size_bytes: maxEmailBytes(env), open_tracking_enabled: openTrackingEnabled, click_tracking_enabled: clickTrackingEnabled, compose_mode: composeMetadata.composeMode || "plain", schedule_timezone: composeMetadata.timezone || "UTC", recurrence_rule: composeMetadata.recurrence || "none", recurrence_until: composeMetadata.recurrenceUntil || null, recurrence_count: composeMetadata.recurrenceCount ?? null, read_receipt_requested: composeMetadata.readReceipt === true, delivery_receipt_requested: composeMetadata.deliveryReceipt === true, request_confirmation: composeMetadata.requestConfirmation === true, reply_tracking_enabled: composeMetadata.replyTracking === true, follow_up_tracking_enabled: composeMetadata.followUpTracking === true, confidential_mode: composeMetadata.confidentialMode === true, thread_fingerprint: threadFingerprint, scheduled_at: scheduledDate?.toISOString() || null, send_after: sendAfter, next_delivery_at: sendAfter, send_idempotency_key: idempotencyKey, send_warning_acknowledged: Object.fromEntries(warnings.map((warning) => [warning.code, true])), sent_at: null }) });
   const messageId = inserted[0]?.id;
   if (!messageId) return error("The message could not be queued", 502);
   await dbRequest(env, "delivery_queue", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, owner_id: mailboxOwnerId, status: "queued", available_at: sendAfter, attempt_count: 0 }) });
@@ -1991,12 +2355,45 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
       }))),
     });
   }
-  const composeMetadata = objectValue(body.composeMetadata);
-  if (Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: messageId, provider: "postveil", event_type: "compose_features", payload: composeMetadata }) }).catch(() => undefined);
+  if (composeMetadata.confidentialMode === true) await createConfidentialRecord(env, mailboxOwnerId, messageId, { subject, text, html: html || null }, composeMetadata);
+  if (Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: messageId, provider: "postveil", event_type: "compose_features", payload: safeComposeMetadata(composeMetadata) }) }).catch(() => undefined);
   const run = async () => { if (undoSeconds) await new Promise<void>((resolve) => setTimeout(resolve, undoSeconds * 1000)); await processOutbox(env); };
   if (ctx) { if (scheduledDate) return json({ ok: true, id: messageId, scheduled: true, sendAfter }); ctx.waitUntil(run()); return json({ ok: true, id: messageId, status: "queued", sendAfter, undoSeconds }); }
   await run();
   return json({ ok: true, id: messageId, status: "queued", sendAfter, undoSeconds });
+}
+
+function confidentialPortalPage(): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Protected Postveil message</title><style>body{margin:0;background:#f4f6f2;color:#17221f;font:16px system-ui,sans-serif;display:grid;min-height:100vh;place-items:center;padding:24px}.card{width:min(680px,100%);background:white;border:1px solid #dce4df;border-radius:18px;padding:32px;box-shadow:0 18px 50px #17221f18}h1{font-size:24px;margin:0 0 8px}p{line-height:1.55;color:#52615b}.message{white-space:pre-wrap;background:#f6f8f6;border-radius:12px;padding:18px;margin-top:20px;line-height:1.6}.error{color:#9b3027}.hidden{display:none}label{display:block;margin:20px 0 8px;font-weight:600}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b9c7c0;border-radius:9px;font:inherit}button{margin-top:16px;background:#172d26;color:#fff;border:0;border-radius:9px;padding:12px 18px;font:inherit;font-weight:700;cursor:pointer}</style></head><body><main class="card"><p>POSTVEIL · PROTECTED MESSAGE</p><h1>Someone shared a confidential message with you</h1><p id="status">This message is encrypted and expires automatically. Open it only on a trusted device.</p><form id="unlock"><label for="password">Message password <span id="optional"></span></label><input id="password" type="password" autocomplete="off" placeholder="Enter the password if required"><button>Open message</button></form><section id="content" class="hidden"><h2 id="subject"></h2><div class="message" id="body"></div></section></main><script>(()=>{const form=document.querySelector('#unlock'),status=document.querySelector('#status'),content=document.querySelector('#content'),subject=document.querySelector('#subject'),body=document.querySelector('#body'),password=document.querySelector('#password'),token=location.pathname.split('/').filter(Boolean).pop();fetch('/api/share/'+encodeURIComponent(token)+'/unlock',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(async r=>{const data=await r.json();if(data.requiresPassword){status.textContent=data.hint?'Password hint: '+data.hint:'Enter the password to continue';return}if(r.ok)show(data);}).catch(()=>{});form.addEventListener('submit',async event=>{event.preventDefault();status.textContent='Unlocking…';const response=await fetch('/api/share/'+encodeURIComponent(token)+'/unlock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:password.value})});const data=await response.json().catch(()=>({}));if(!response.ok){status.textContent=data.error||'This message could not be opened';status.className='error';return}show(data)});function show(data){form.classList.add('hidden');status.classList.add('hidden');subject.textContent=data.subject||'(no subject)';body.textContent=data.text||'';content.classList.remove('hidden')}})()</script></body></html>`;
+}
+
+async function handleConfidentialRoute(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  await enforceRequestBodyLimit(request);
+  const pageMatch = url.pathname.match(/^\/share\/([^/]+)$/);
+  if (pageMatch) {
+    if (request.method !== "GET") return error("Method not allowed", 405);
+    return new Response(confidentialPortalPage(), { headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'", "cache-control": "no-store" } });
+  }
+  const unlockMatch = url.pathname.match(/^\/api\/share\/([^/]+)\/unlock$/);
+  if (!unlockMatch) return error("Not found", 404);
+  if (request.method !== "POST") return error("Method not allowed", 405);
+  const token = unlockMatch[1];
+  const tokenHash = await sha256Hex(new TextEncoder().encode(token));
+  const rows = await dbRequest<ConfidentialRow[]>(env, `confidential_messages?token_hash=eq.${encodeURIComponent(tokenHash)}&limit=1`).catch(() => []);
+  const row = rows[0];
+  if (!row || row.revoked_at || Date.parse(row.expires_at) <= Date.now() || (row.max_views > 0 && row.view_count >= row.max_views)) return error("This confidential message is no longer available", 410);
+  let body: JsonRecord = {};
+  try { body = (await request.json()) as JsonRecord; } catch { /* the initial no-password probe is an empty request */ }
+  const password = String(body.password || "");
+  if (row.password_hash) {
+    if (!password || !row.password_salt || await derivePasswordHash(password, base64Decode(row.password_salt)) !== row.password_hash) return json({ requiresPassword: true, hint: row.password_hint || "" }, 401);
+  }
+  const payload = await decryptConfidentialPayload(env, row);
+  const updated = await dbRequest<ConfidentialRow[]>(env, `confidential_messages?id=eq.${encodeURIComponent(row.id)}&view_count=eq.${row.view_count}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ view_count: row.view_count + 1, updated_at: new Date().toISOString() }) }).catch(() => []);
+  if (!updated[0] && row.max_views > 0) return error("This confidential message has reached its view limit", 410);
+  await recordReceiptEvent(env, row.owner_id, row.message_id, "read", undefined, "postveil", `share:${row.id}:${row.view_count + 1}`, { confidential: true }).catch(() => undefined);
+  return json({ subject: String(payload.subject || "(no subject)"), text: String(payload.text || stripHtml(String(payload.html || ""))), expiresAt: row.expires_at });
 }
 
 async function enforceRetentionPolicies(env: Env): Promise<void> {
@@ -2058,16 +2455,16 @@ async function handleDraft(env: Env, user: User, body: JsonRecord): Promise<Resp
   if (!mailbox) return error("Sender mailbox not found", 404);
   const mailboxOwnerId = mailbox.owner_id;
   const id = typeof body.id === "string" ? body.id : "";
-   const patch = { subject: String(body.subject || ""), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, to_addresses: splitAddresses(body.to), cc_addresses: splitAddresses(body.cc), bcc_addresses: splitAddresses(body.bcc), from_name: mailbox.display_name || "", from_address: fromAddress, snippet: snippet(String(body.text || "")), updated_at: new Date().toISOString() };
-  const composeMetadata = objectValue(body.composeMetadata);
+   const composeMetadata = objectValue(body.composeMetadata) as ComposeMetadata;
+   const patch = { subject: String(body.subject || ""), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, to_addresses: splitAddresses(body.to), cc_addresses: splitAddresses(body.cc), bcc_addresses: splitAddresses(body.bcc), from_name: mailbox.display_name || "", from_address: fromAddress, snippet: snippet(String(body.text || "")), compose_mode: body.composeMode === "markdown" || body.composeMode === "html" ? body.composeMode : "plain", schedule_timezone: typeof body.timezone === "string" ? body.timezone.slice(0, 80) : "UTC", recurrence_rule: ["daily", "weekly", "monthly"].includes(String(composeMetadata.recurrence)) ? composeMetadata.recurrence : "none", confidential_mode: composeMetadata.confidentialMode === true, reply_tracking_enabled: composeMetadata.replyTracking === true, follow_up_tracking_enabled: composeMetadata.followUpTracking === true, updated_at: new Date().toISOString() };
   if (id) {
     const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&folder=eq.drafts`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
-    if (rows[0] && Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: id, provider: "postveil", event_type: "draft_version_saved", payload: { ...composeMetadata, subject: patch.subject, text: patch.text_body, html: patch.html_body, savedAt: new Date().toISOString() } }) }).catch(() => undefined);
+    if (rows[0] && Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: id, provider: "postveil", event_type: "draft_version_saved", payload: { ...safeComposeMetadata(composeMetadata), subject: patch.subject, text: patch.text_body, html: patch.html_body, savedAt: new Date().toISOString() } }) }).catch(() => undefined);
     return json(rows?.[0] || null);
   }
   const threadId = await findOrCreateThread(env, mailboxOwnerId, patch.subject);
   const rows = await dbRequest<JsonRecord[]>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: mailboxOwnerId, sent_by: user.id, send_mode: access?.delegation?.can_send_as ? "send_as" : access?.delegation?.can_send_on_behalf ? "send_on_behalf" : "own", thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: "drafts", status: "draft", message_id_header: `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`, ...patch }) });
-  if (rows[0] && Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: rows[0].id, provider: "postveil", event_type: "draft_version_saved", payload: { ...composeMetadata, subject: patch.subject, text: patch.text_body, html: patch.html_body, savedAt: new Date().toISOString() } }) }).catch(() => undefined);
+  if (rows[0] && Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: rows[0].id, provider: "postveil", event_type: "draft_version_saved", payload: { ...safeComposeMetadata(composeMetadata), subject: patch.subject, text: patch.text_body, html: patch.html_body, savedAt: new Date().toISOString() } }) }).catch(() => undefined);
   return json(rows?.[0] || null, 201);
 }
 
@@ -2589,7 +2986,10 @@ function providerWebhookSecret(env: Env, provider: ProviderName): string | undef
 }
 
 function webhookEventId(provider: ProviderName, event: JsonRecord): string {
-  return String(event.eventId || event.event_id || event.sg_event_id || event.id || event.MessageID || event.messageId || event["message-id"] || `${provider}:${event.eventType || event.event || event.Type || "event"}:${event.timestamp || event.occurredAt || ""}`);
+  const mail = objectValue(event.mail);
+  const eventData = objectValue(event["event-data"] || event.eventData);
+  const headers = objectValue(objectValue(eventData.message).headers || objectValue(event.message).headers);
+  return String(event.eventId || event.event_id || event.sg_event_id || event.id || event.MessageID || event.messageId || event["message-id"] || mail.messageId || mail["message-id"] || headers["message-id"] || `${provider}:${event.eventType || event.event || event.Type || event.RecordType || event.notificationType || "event"}:${event.timestamp || event.occurredAt || event.recipient || event.email || ""}`);
 }
 
 function normalizeDeliveryEvents(provider: ProviderName, input: unknown): DeliveryEvent[] {
@@ -2599,12 +2999,21 @@ function normalizeDeliveryEvents(provider: ProviderName, input: unknown): Delive
   }
   const values = Array.isArray(input) ? input : Array.isArray(payload?.events) ? payload.events : [payload];
   return values.filter((value): value is JsonRecord => Boolean(value && typeof value === "object")).map((raw) => {
-    const nested = objectValue(raw["event-data"] || raw.eventData || raw.mail || raw);
-    const eventType = String(raw.event || raw.eventType || raw.Type || nested.event || nested.eventType || raw.RecordType || "unknown").toLowerCase();
-    const providerMessageId = String(raw["message-id"] || raw.messageId || raw.sg_message_id || raw.MessageID || nested.id || nested.messageId || raw.id || "");
-    const recipient = cleanAddress(String(raw.email || raw.recipient || nested.recipient || nested.destination || ""));
-    const reason = String(raw.reason || raw.description || raw.error || nested.message || nested.reason || nested.description || "").slice(0, 500);
-    const timestamp = Number(raw.timestamp || nested.timestamp || 0);
+    const eventData = objectValue(raw["event-data"] || raw.eventData);
+    const mail = objectValue(raw.mail);
+    const delivery = objectValue(raw.delivery);
+    const bounce = objectValue(raw.bounce);
+    const complaint = objectValue(raw.complaint);
+    const nested = Object.keys(eventData).length ? eventData : Object.keys(mail).length ? mail : raw;
+    const nestedMessage = objectValue(nested.message);
+    const nestedHeaders = objectValue(nestedMessage.headers);
+    const bounceRecipient = objectValue(Array.isArray(bounce.bouncedRecipients) ? bounce.bouncedRecipients[0] : undefined);
+    const complaintRecipient = objectValue(Array.isArray(complaint.complainedRecipients) ? complaint.complainedRecipients[0] : undefined);
+    const eventType = String(raw.event || raw.eventType || raw.Type || raw.RecordType || raw.notificationType || nested.event || nested.eventType || (Object.keys(delivery).length ? "delivered" : Object.keys(bounce).length ? "bounce" : Object.keys(complaint).length ? "complaint" : "unknown")).toLowerCase();
+    const providerMessageId = String(raw["message-id"] || raw.messageId || raw.sg_message_id || raw.MessageID || mail.messageId || mail["message-id"] || nestedHeaders["message-id"] || nested.id || nested.messageId || raw.id || "");
+    const recipient = cleanAddress(String(raw.email || raw.recipient || nested.recipient || nested.destination || (Array.isArray(delivery.recipients) ? delivery.recipients[0] : "") || bounceRecipient.emailAddress || complaintRecipient.emailAddress || ""));
+    const reason = String(raw.reason || raw.description || raw.error || bounceRecipient.diagnosticCode || bounceRecipient.action || nested.message || nested.reason || nested.description || "").slice(0, 500);
+    const timestamp = Number(raw.timestamp || delivery.timestamp || bounce.timestamp || complaint.timestamp || nested.timestamp || 0);
     return { provider, eventType, providerMessageId: providerMessageId || undefined, eventId: webhookEventId(provider, raw), recipient: recipient || undefined, reason: reason || undefined, occurredAt: timestamp ? new Date(timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp).toISOString() : typeof raw.occurredAt === "string" ? raw.occurredAt : undefined, payload: raw };
   });
 }
@@ -2664,6 +3073,9 @@ async function processDeliveryEvent(env: Env, event: DeliveryEvent): Promise<{ m
   }
   await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify(patch) });
   await dbRequest(env, "mail_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: message.owner_id, message_id: message.id, provider, event_type: event.eventType, raw_event_type: event.eventType, provider_message_id: event.providerMessageId || null, event_id: event.eventId || null, event_hash: claim.hash, occurred_at: now, payload: event.payload }) }).catch(() => undefined);
+  const eventName = event.eventType.toLowerCase();
+  const receiptKind = eventName.includes("open") || eventName.includes("read") ? "read" : eventName.includes("confirm") || eventName.includes("receipt") ? "confirmation" : state?.deliveryStatus === "delivered" ? "delivery" : null;
+  if (receiptKind) await recordReceiptEvent(env, String(message.owner_id), String(message.id), receiptKind, event.recipient, provider, event.eventId || claim.hash, event.payload);
   const organizationId = message.mailbox_id ? (await dbRequest<MailboxAdminSettings[]>(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(String(message.mailbox_id))}&limit=1`).catch(() => []))[0]?.organization_id : undefined;
   if (state?.deliveryStatus === "delivered") await recordDomainOutcome(env, organizationId, domainOf(String(message.from_address || "")), "delivered");
   if (state?.deliveryStatus === "bounced" || state?.deliveryStatus === "complained") {
@@ -2719,9 +3131,9 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (request.method !== "POST") return error("Method not allowed", 405);
     const provider = deliveryWebhookMatch[1] as ProviderName;
     const expectedSecret = providerWebhookSecret(env, provider);
-    const suppliedSecret = url.searchParams.get("token") || request.headers.get("x-webhook-secret") || request.headers.get("x-webhook-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const suppliedSecret = request.headers.get("x-webhook-secret") || request.headers.get("x-webhook-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
     if (!expectedSecret) return error("This provider webhook is not configured", 503);
-    if (suppliedSecret !== expectedSecret) return error("Unauthorized", 401);
+    if (!constantTimeEqual(suppliedSecret, expectedSecret)) return error("Unauthorized", 401);
     const payload = (await request.json()) as unknown;
     const events = normalizeDeliveryEvents(provider, payload);
     const results = [];
@@ -2733,9 +3145,9 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (request.method !== "POST") return error("Method not allowed", 405);
     const provider = inboundWebhookMatch[1] as ProviderName;
     const expectedSecret = providerWebhookSecret(env, provider);
-    const suppliedSecret = url.searchParams.get("token") || request.headers.get("x-webhook-secret") || request.headers.get("x-webhook-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const suppliedSecret = request.headers.get("x-webhook-secret") || request.headers.get("x-webhook-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
     if (!expectedSecret) return error("This inbound webhook is not configured", 503);
-    if (suppliedSecret !== expectedSecret) return error("Unauthorized", 401);
+    if (!constantTimeEqual(suppliedSecret, expectedSecret)) return error("Unauthorized", 401);
     const payload = (await request.json()) as JsonRecord;
     const inboundEvent: DeliveryEvent = { provider, eventType: "inbound", eventId: webhookEventId(provider, payload), payload };
     const claim = await claimWebhookEvent(env, provider, inboundEvent);
@@ -2759,6 +3171,20 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (!user) return error("Sign in required", 401);
   if (user.mfaRequired) return error("Complete two-step verification to continue", 401);
   const mailbox = await ensureProfileAndMailbox(env, user);
+  if (request.method === "GET" && url.pathname === "/api/email-image-proxy") {
+    try {
+      return await fetchProxiedEmailImage(url.searchParams.get("url") || "");
+    } catch {
+      return error("The remote image could not be loaded", 502);
+    }
+  }
+  if (request.method === "GET" && url.pathname === "/api/link-inspection") {
+    try {
+      return json(await inspectExternalLink(url.searchParams.get("url") || ""));
+    } catch {
+      return error("The link destination could not be inspected", 502);
+    }
+  }
   let organization: Organization | null = null;
   try {
     organization = await ensureOrganization(env, user);
@@ -2826,7 +3252,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const rows = existing
       ? await dbRequest<RecoveryMethodRow[]>(env, `account_recovery_methods?id=eq.${encodeURIComponent(existing.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) })
       : await dbRequest<RecoveryMethodRow[]>(env, "account_recovery_methods", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, ...patch }) });
-    await sendViaBrevo(env, {
+    await sendSystemMessage(env, {
       fromAddress: await defaultFromAddress(env, user.id),
       to: [email],
       subject: "Verify your Postveil recovery email",
@@ -3630,6 +4056,25 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "POST" && url.pathname === "/api/auto-replies") { const body = (await request.json()) as JsonRecord; const mailboxId = String(body.mailboxId || mailbox.id); if (!(await hasOwnedRecord(env, "mailboxes", user.id, mailboxId))) return error("Mailbox not found", 404); const rows = await dbRequest<JsonRecord[]>(env, "auto_replies", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: mailboxId, enabled: body.enabled === true, subject: String(body.subject || "Automatic reply"), body: String(body.body || ""), starts_at: body.startsAt || null, ends_at: body.endsAt || null }) }); return json(rows[0] || null); }
   if (request.method === "GET" && url.pathname === "/api/integrations") return json(await dbRequest(env, `integrations?owner_id=eq.${encodeURIComponent(user.id)}&order=provider.asc`));
   if (request.method === "PATCH" && url.pathname === "/api/integrations") { const body = (await request.json()) as JsonRecord; const provider = String(body.provider || ""); if (!provider) return error("Provider is required"); const rows = await dbRequest<JsonRecord[]>(env, "integrations", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, provider, status: String(body.status || "not_configured"), settings: body.settings || {} }) }); return json(rows[0] || null); }
+  const draftVersionsMatch = url.pathname.match(/^\/api\/drafts\/([^/]+)\/versions$/);
+  if (draftVersionsMatch && request.method === "GET") {
+    const draft = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(draftVersionsMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.drafts&limit=1`).catch(() => []);
+    if (!draft[0]) return error("Draft not found", 404);
+    const versions = await dbRequest<JsonRecord[]>(env, `mail_events?owner_id=eq.${encodeURIComponent(user.id)}&message_id=eq.${encodeURIComponent(draftVersionsMatch[1])}&event_type=eq.draft_version_saved&order=created_at.desc&limit=100`).catch(() => []);
+    return json(versions.map((version) => ({ id: version.id, createdAt: version.created_at, ...objectValue(version.payload) })));
+  }
+  if (draftVersionsMatch && request.method === "POST") {
+    const draft = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(draftVersionsMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.drafts&limit=1`).catch(() => []);
+    if (!draft[0]) return error("Draft not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const versionId = String(body.versionId || "");
+    if (!versionId) return error("Version is required");
+    const versions = await dbRequest<JsonRecord[]>(env, `mail_events?id=eq.${encodeURIComponent(versionId)}&owner_id=eq.${encodeURIComponent(user.id)}&message_id=eq.${encodeURIComponent(draftVersionsMatch[1])}&event_type=eq.draft_version_saved&limit=1`).catch(() => []);
+    const version = objectValue(versions[0]?.payload);
+    if (!versions[0] || (!version.subject && !version.text && !version.html)) return error("Draft version not found", 404);
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(draftVersionsMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.drafts`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ subject: String(version.subject || ""), text_body: String(version.text || ""), html_body: typeof version.html === "string" ? version.html : null, snippet: snippet(String(version.text || "")), updated_at: new Date().toISOString() }) });
+    return json(rows[0] || null);
+  }
   if (request.method === "POST" && url.pathname === "/api/drafts") return handleDraft(env, user, (await request.json()) as JsonRecord);
   if (request.method === "POST" && url.pathname === "/api/attachments") {
     const form = await request.formData();
@@ -3727,6 +4172,7 @@ async function readStreamWithLimit(stream: ReadableStream<Uint8Array>, maxBytes:
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/share/") || url.pathname.startsWith("/api/share/")) { try { return protectedHeaders(await handleConfidentialRoute(request, env)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Message could not be opened", 500); } }
     if (url.pathname.startsWith("/api/")) { try { return protectedHeaders(await api(request, env, ctx)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
     const assetResponse = await env.ASSETS.fetch(request);
     const noStoreAsset = url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest";
