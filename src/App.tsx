@@ -1,8 +1,12 @@
 import {
   ChangeEvent,
+  createContext,
   DragEvent,
   FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -557,6 +561,216 @@ async function publicApiFetch<T>(path: string, init: RequestInit = {}): Promise<
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`);
   return payload as T;
+}
+
+type AppDialogOptions = {
+  message: string;
+  title?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+};
+
+type AppPromptOptions = AppDialogOptions & {
+  defaultValue?: string;
+  placeholder?: string;
+  inputType?: "text" | "number";
+};
+
+type AppDialogRequest =
+  | {
+      kind: "confirm";
+      title: string;
+      message: string;
+      confirmLabel: string;
+      cancelLabel: string;
+      danger: boolean;
+    }
+  | {
+      kind: "prompt";
+      title: string;
+      message: string;
+      confirmLabel: string;
+      cancelLabel: string;
+      danger: boolean;
+      defaultValue: string;
+      placeholder: string;
+      inputType: "text" | "number";
+    };
+
+type AppDialogResult = boolean | string | null;
+
+type AppDialogContextValue = {
+  confirm: (options: AppDialogOptions) => Promise<boolean>;
+  prompt: (options: AppPromptOptions) => Promise<string | null>;
+};
+
+const AppDialogContext = createContext<AppDialogContextValue | null>(null);
+
+function useAppDialog() {
+  const context = useContext(AppDialogContext);
+  if (!context) throw new Error("The Postveil dialog system is unavailable");
+  return context;
+}
+
+function AppDialog({
+  dialog,
+  onResolve,
+}: {
+  dialog: AppDialogRequest | null;
+  onResolve: (value: AppDialogResult) => void;
+}) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const previousActiveRef = useRef<HTMLElement | null>(null);
+  const [value, setValue] = useState("");
+
+  useEffect(() => {
+    if (!dialog) return;
+    previousActiveRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setValue(dialog.kind === "prompt" ? dialog.defaultValue : "");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    requestAnimationFrame(() => {
+      const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
+        "input:not([disabled]), button:not([disabled])",
+      );
+      firstFocusable?.focus();
+    });
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      if (previousActiveRef.current && document.contains(previousActiveRef.current)) previousActiveRef.current.focus();
+    };
+  }, [dialog]);
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!dialog) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onResolve(dialog.kind === "prompt" ? null : false);
+      return;
+    }
+    if (dialog.kind === "prompt" && event.key === "Enter" && event.target instanceof HTMLInputElement) {
+      event.preventDefault();
+      onResolve(value);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        "input:not([disabled]), button:not([disabled])",
+      ) ?? [],
+    );
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  if (!dialog) return null;
+  const darkThemeActive = typeof document !== "undefined" && Boolean(document.querySelector(".theme-dark"));
+  return (
+    <div className={`app-dialog-backdrop${darkThemeActive ? " theme-dark-dialog" : ""}`} role="presentation">
+      <section
+        ref={dialogRef}
+        className={`app-dialog${dialog.danger ? " app-dialog-danger" : ""}`}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="postveil-dialog-title"
+        aria-describedby="postveil-dialog-message"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+      >
+        <div className="app-dialog-icon" aria-hidden="true"><AlertTriangle size={21} /></div>
+        <div className="app-dialog-copy">
+          <p className="app-dialog-kicker">{dialog.danger ? "CONFIRM ACTION" : "CHECK THIS FIRST"}</p>
+          <h2 id="postveil-dialog-title">{dialog.title}</h2>
+          <p id="postveil-dialog-message">{dialog.message}</p>
+          {dialog.kind === "prompt" && (
+            <input
+              className="app-dialog-input"
+              type={dialog.inputType}
+              value={value}
+              placeholder={dialog.placeholder}
+              onChange={(event) => setValue(event.target.value)}
+              aria-label={dialog.title}
+            />
+          )}
+        </div>
+        <div className="app-dialog-actions">
+          <button className="secondary-button" type="button" onClick={() => onResolve(dialog.kind === "prompt" ? null : false)}>
+            {dialog.cancelLabel}
+          </button>
+          <button
+            className={dialog.danger ? "app-dialog-danger-button" : "primary-button"}
+            type="button"
+            onClick={() => onResolve(dialog.kind === "prompt" ? value : true)}
+          >
+            {dialog.confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AppDialogProvider({ children }: { children: ReactNode }) {
+  const [dialog, setDialog] = useState<AppDialogRequest | null>(null);
+  const resolverRef = useRef<((value: AppDialogResult) => void) | null>(null);
+
+  const resolveDialog = useCallback((value: AppDialogResult) => {
+    const resolver = resolverRef.current;
+    resolverRef.current = null;
+    setDialog(null);
+    resolver?.(value);
+  }, []);
+
+  const confirm = useCallback((options: AppDialogOptions) => new Promise<boolean>((resolve) => {
+    resolverRef.current?.(false);
+    resolverRef.current = (value) => resolve(value === true);
+    setDialog({
+      kind: "confirm",
+      title: options.title || "Are you sure?",
+      message: options.message,
+      confirmLabel: options.confirmLabel || "Continue",
+      cancelLabel: options.cancelLabel || "Cancel",
+      danger: options.danger ?? false,
+    });
+  }), []);
+
+  const prompt = useCallback((options: AppPromptOptions) => new Promise<string | null>((resolve) => {
+    resolverRef.current?.(null);
+    resolverRef.current = (value) => resolve(typeof value === "string" ? value : null);
+    setDialog({
+      kind: "prompt",
+      title: options.title || "Enter a value",
+      message: options.message,
+      confirmLabel: options.confirmLabel || "Save",
+      cancelLabel: options.cancelLabel || "Cancel",
+      danger: options.danger ?? false,
+      defaultValue: options.defaultValue || "",
+      placeholder: options.placeholder || "",
+      inputType: options.inputType || "text",
+    });
+  }), []);
+
+  useEffect(() => () => {
+    resolverRef.current?.(null);
+    resolverRef.current = null;
+  }, []);
+
+  const contextValue = useMemo(() => ({ confirm, prompt }), [confirm, prompt]);
+  return (
+    <AppDialogContext.Provider value={contextValue}>
+      {children}
+      <AppDialog dialog={dialog} onResolve={resolveDialog} />
+    </AppDialogContext.Provider>
+  );
 }
 
 function AuthScreen() {
@@ -1280,6 +1494,7 @@ function actionMode(actions: Record<string, unknown>, key: string): "ignore" | "
 }
 
 function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
+  const { confirm, prompt } = useAppDialog();
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1412,7 +1627,12 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
   }
 
   async function revokeSessions(member: AdminMember) {
-    if (!window.confirm(`Sign ${member.email} out on every device?`)) return;
+    if (!(await confirm({
+      title: "Sign out everywhere?",
+      message: `Sign ${member.email} out on every device? They will need to sign in again.`,
+      confirmLabel: "Sign out everywhere",
+      danger: true,
+    }))) return;
     setBusy(true); setError("");
     try { await apiFetch(`/api/admin/users/${member.user_id}/revoke-sessions`, { method: "POST" }); setNotice(`All sessions revoked for ${member.email}`); }
     catch (revokeError) { setError(revokeError instanceof Error ? revokeError.message : "Sessions could not be revoked"); }
@@ -1420,7 +1640,12 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
   }
 
   async function deleteMember(member: AdminMember) {
-    if (!window.confirm(`Permanently delete ${member.email} and all of this account’s mailbox data? This cannot be undone.`)) return;
+    if (!(await confirm({
+      title: "Delete this account permanently?",
+      message: `Permanently delete ${member.email} and all of this account’s mailbox data. This cannot be undone.`,
+      confirmLabel: "Delete account",
+      danger: true,
+    }))) return;
     setBusy(true); setError("");
     try { await apiFetch(`/api/admin/users/${member.user_id}`, { method: "DELETE" }); setNotice(`${member.email} was permanently deleted`); await load(); onChanged(); }
     catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Account could not be deleted"); }
@@ -1435,11 +1660,33 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
   }
 
   async function deleteMailbox(mailbox: AdminMailbox) {
-    if (!window.confirm(`Permanently delete ${mailbox.address} and all messages stored in it? This cannot be undone.`)) return;
+    if (!(await confirm({
+      title: "Delete this mailbox permanently?",
+      message: `Permanently delete ${mailbox.address} and all messages stored in it. This cannot be undone.`,
+      confirmLabel: "Delete mailbox",
+      danger: true,
+    }))) return;
     setBusy(true); setError("");
     try { await apiFetch(`/api/admin/mailboxes/${mailbox.id}`, { method: "DELETE" }); setNotice(`${mailbox.address} was deleted`); await load(); onChanged(); }
     catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Mailbox could not be deleted"); }
     finally { setBusy(false); }
+  }
+
+  async function editSendingLimit(mailbox: AdminMailbox) {
+    const value = await prompt({
+      title: "Daily sending limit",
+      message: `Set the maximum number of messages ${mailbox.address} can send per day.`,
+      defaultValue: String(mailbox.sending_limit_daily),
+      inputType: "number",
+      confirmLabel: "Save limit",
+    });
+    if (value === null || !value.trim()) return;
+    const limit = Number(value);
+    if (!Number.isFinite(limit) || limit < 0) {
+      setError("Enter a valid non-negative sending limit");
+      return;
+    }
+    await updateMailbox(mailbox, { sendingLimitDaily: limit }, "Sending limit updated");
   }
 
   async function loadDelegates(mailboxId: string) {
@@ -1504,7 +1751,12 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
   }
 
   async function deleteGroup(group: AdminGroup) {
-    if (!window.confirm(`Delete ${group.address} and its recipient list?`)) return;
+    if (!(await confirm({
+      title: "Delete this group address?",
+      message: `Delete ${group.address} and its recipient list?`,
+      confirmLabel: "Delete group",
+      danger: true,
+    }))) return;
     setBusy(true); setError("");
     try { await apiFetch(`/api/admin/groups/${group.id}`, { method: "DELETE" }); setNotice(`${group.address} was deleted`); setSelectedGroupId(""); await load(); }
     catch (groupError) { setError(groupError instanceof Error ? groupError.message : "Group address could not be deleted"); }
@@ -1546,7 +1798,6 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
         <form className="setting-card" onSubmit={(event) => void saveMailboxProfile(event)}><div className="setting-card-head"><div><h3>Edit mailbox settings</h3><p>Adjust a mailbox name, delivery switches, quota, and daily sending limit.</p></div><SlidersHorizontal size={18} aria-hidden="true" /></div><label>Mailbox<select value={editMailboxId} onChange={(event) => selectMailboxForEdit(event.target.value)}><option value="">Choose a mailbox</option>{allMailboxes.map((item) => <option key={item.id} value={item.id}>{item.address} · {item.owner.email}</option>)}</select></label><label>Display name<input required value={editMailboxName} onChange={(event) => setEditMailboxName(event.target.value)} placeholder="Mailbox name" /></label><div className="admin-form-row"><label>Quota (GB)<input type="number" min="0" step="0.5" value={editMailboxQuotaGb} onChange={(event) => setEditMailboxQuotaGb(event.target.value)} /></label><label>Daily send limit<input type="number" min="0" value={editMailboxSendingLimit} onChange={(event) => setEditMailboxSendingLimit(event.target.value)} /></label></div><div className="admin-form-row"><label className="toggle-row"><input type="checkbox" checked={editMailboxCanSend} onChange={(event) => setEditMailboxCanSend(event.target.checked)} /> Can send</label><label className="toggle-row"><input type="checkbox" checked={editMailboxCanReceive} onChange={(event) => setEditMailboxCanReceive(event.target.checked)} /> Can receive</label></div><button className="secondary-button" disabled={busy || !editMailboxId}>Save mailbox</button></form>
       </div>
       <div className="setting-card admin-groups-card"><div className="setting-card-head"><div><h3>Group addresses and distribution lists</h3><p>Route messages sent to a group address to its current recipients. Recipients may be workspace users or external addresses.</p></div><Users size={18} aria-hidden="true" /></div><form className="admin-form-row admin-group-create" onSubmit={(event) => void createGroup(event)}><label>Group name<input required value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Support team" /></label><label>Group address<input required type="email" value={newGroupAddress} onChange={(event) => setNewGroupAddress(event.target.value)} placeholder="support@your-domain.com" /></label><label>Description<input value={newGroupDescription} onChange={(event) => setNewGroupDescription(event.target.value)} placeholder="Who receives this address" /></label><button className="primary-button" disabled={busy}><Plus size={15} /> Add group</button></form>{overview.groups.map((group) => <article className={`admin-group${selectedGroupId === group.id ? " selected" : ""}`} key={group.id}><div className="admin-member-head"><div><strong>{group.name}</strong><small>{group.address} · {group.members.length} recipient{group.members.length === 1 ? "" : "s"}</small></div><div className="admin-badges"><span className={`admin-badge ${group.enabled ? "active" : "suspended"}`}>{group.enabled ? "active" : "disabled"}</span><span className="admin-badge member">{group.delivery_mode}</span></div></div><div className="admin-member-actions"><button className="text-button" onClick={() => setSelectedGroupId(selectedGroupId === group.id ? "" : group.id)}>{selectedGroupId === group.id ? "Hide recipients" : "Manage recipients"}</button><button className="text-button" onClick={() => void updateGroup(group, { enabled: !group.enabled }, group.enabled ? "Group address disabled" : "Group address enabled")} disabled={busy}>{group.enabled ? "Disable" : "Enable"}</button><button className="text-button danger-text-button" onClick={() => void deleteGroup(group)} disabled={busy}>Delete</button></div>{selectedGroupId === group.id && <div className="admin-group-members"><form className="admin-form-row" onSubmit={(event) => void addGroupMember(event)}><label>Recipient email<input required type="email" value={newGroupMember} onChange={(event) => setNewGroupMember(event.target.value)} placeholder="person@example.com" /></label><button className="secondary-button" disabled={busy}><Plus size={14} /> Add recipient</button></form>{group.members.map((member) => <div className="settings-item" key={member.id}><div><strong>{member.member_email}</strong><small>{member.member_user_id ? "Workspace member" : "External recipient"}</small></div><button className="text-button danger-text-button" onClick={() => void removeGroupMember(group.id, member.id)} disabled={busy}>Remove</button></div>)}{!group.members.length && <div className="rule-empty">No recipients yet. Messages to this address will not be delivered.</div>}</div>}</article>)}{!overview.groups.length && <div className="rule-empty">No group addresses configured.</div>}</div>
-      <div className="setting-card admin-users-card"><div className="admin-list-head"><div><h3>People and mailbox accounts</h3><p>Suspension blocks authentication and mailbox sending without deleting stored mail.</p></div><input className="admin-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search people" aria-label="Search people" /></div>{filteredMembers.map((member) => <article className="admin-member" key={member.user_id}><div className="admin-member-head"><div><strong>{member.display_name}</strong><small>{member.email} · joined {member.created_at ? new Date(member.created_at).toLocaleDateString() : "unknown"}</small></div><div className="admin-badges"><span className={`admin-badge ${member.role}`}>{member.role}</span><span className={`admin-badge ${member.status}`}>{member.status}</span>{member.require_mfa && <span className="admin-badge security">2FA required</span>}</div></div><div className="admin-member-meta"><span>{formatBytes(member.storage_used_bytes)} used</span><span>{member.last_seen_at ? `Last seen ${new Date(member.last_seen_at).toLocaleString()}` : "Not seen yet"}</span>{member.last_sign_in_at && <span>Last sign-in {new Date(member.last_sign_in_at).toLocaleString()}</span>}</div>{member.mailboxes.map((mailbox) => <div className="admin-mailbox-row" key={mailbox.id}><div><strong>{mailbox.address}</strong><small>{mailbox.display_name}{mailbox.is_default ? " · default" : ""} · {mailbox.status} · {formatBytes(mailbox.storage_used_bytes)} / {mailbox.quota_bytes ? formatBytes(mailbox.quota_bytes) : "unlimited"}</small></div><div className="admin-mailbox-actions"><button className="text-button" onClick={() => void updateMailbox(mailbox, { status: mailbox.status === "active" ? "suspended" : "active" }, mailbox.status === "active" ? "Mailbox suspended" : "Mailbox reactivated")} disabled={busy}>{mailbox.status === "active" ? "Suspend" : "Reactivate"}</button><button className="text-button" onClick={() => { const value = window.prompt("Daily sending limit", String(mailbox.sending_limit_daily)); if (value !== null) void updateMailbox(mailbox, { sendingLimitDaily: Number(value) }, "Sending limit updated"); }} disabled={busy}>Limit</button>{!mailbox.is_default && <button className="text-button danger-text-button" onClick={() => void deleteMailbox(mailbox)} disabled={busy}>Delete</button>}</div></div>)}<div className="admin-member-actions"><button className="text-button" onClick={() => void updateMember(member, { status: member.status === "active" ? "suspended" : "active" }, member.status === "active" ? "Account suspended" : "Account reactivated")} disabled={busy || member.role === "owner"}>{member.status === "active" ? "Suspend account" : "Reactivate account"}</button>{member.role !== "owner" && <button className="text-button" onClick={() => void updateMember(member, { role: member.role === "admin" ? "member" : "admin" }, "Role updated")} disabled={busy}>{member.role === "admin" ? "Make member" : "Make admin"}</button>}<button className="text-button" onClick={() => void updateMember(member, { requireMfa: !member.require_mfa }, member.require_mfa ? "2FA requirement removed" : "2FA requirement enabled")} disabled={busy}> {member.require_mfa ? "Allow password-only" : "Require 2FA"}</button><button className="text-button" onClick={() => void resetPassword(member)} disabled={busy}>Reset password</button><button className="text-button" onClick={() => void revokeSessions(member)} disabled={busy}>Revoke sessions</button>{member.role !== "owner" && <button className="text-button danger-text-button" onClick={() => void deleteMember(member)} disabled={busy}>Delete account</button>}</div></article>)}{!filteredMembers.length && <div className="rule-empty">No matching accounts.</div>}</div>
       <div className="setting-card admin-access-card"><div><h3>Shared mailbox access</h3><p>Grant precise read, send-as, send-on-behalf, or management permissions.</p></div><div className="admin-form-row"><label>Mailbox<select value={selectedMailboxId} onChange={(event) => void loadDelegates(event.target.value)}><option value="">Choose a mailbox</option>{allMailboxes.map((item) => <option key={item.id} value={item.id}>{item.address} · {item.owner.email}</option>)}</select></label><label>Person<select value={selectedDelegateId} onChange={(event) => setSelectedDelegateId(event.target.value)}><option value="">Choose a person</option>{overview.members.filter((member) => member.user_id !== activeMailbox?.owner_id).map((member) => <option key={member.user_id} value={member.user_id}>{member.display_name} · {member.email}</option>)}</select></label></div><form className="admin-permission-form" onSubmit={(event) => void saveDelegate(event)}><label className="toggle-row"><input type="checkbox" checked={canRead} onChange={(event) => setCanRead(event.target.checked)} /> Read messages</label><label className="toggle-row"><input type="checkbox" checked={canSendAs} onChange={(event) => setCanSendAs(event.target.checked)} /> Send as mailbox</label><label className="toggle-row"><input type="checkbox" checked={canSendOnBehalf} onChange={(event) => setCanSendOnBehalf(event.target.checked)} /> Send on behalf</label><label className="toggle-row"><input type="checkbox" checked={canManage} onChange={(event) => setCanManage(event.target.checked)} /> Manage members</label><button className="primary-button" disabled={busy || !selectedMailboxId || !selectedDelegateId}>Save access</button></form>{selectedMailboxId && <div className="admin-delegates">{delegates.map((delegate) => <div className="settings-item" key={delegate.member_id}><div><strong>{delegate.display_name || delegate.email}</strong><small>{delegate.email} · {delegate.can_read ? "read" : "no read"}{delegate.can_send_as ? " · send as" : ""}{delegate.can_send_on_behalf ? " · on behalf" : ""}{delegate.can_manage ? " · manage" : ""}</small></div><button className="text-button danger-text-button" onClick={() => void removeDelegate(delegate.member_id)} disabled={busy}>Remove</button></div>)}{!delegates.length && <div className="rule-empty">No delegated access yet.</div>}</div>}</div>
       <div className="setting-card admin-activity-card"><div className="setting-card-head"><div><h3>Security and activity history</h3><p>Sign-ins, suspicious access, resets, and session revocations are retained here.</p></div><History size={18} aria-hidden="true" /></div>{overview.activity.slice(0, 20).map((event) => <div className="settings-item" key={event.id}><div><strong>{event.email || event.subject_user_id}</strong><small>{event.event_type.replace(/_/g, " ")} · {new Date(event.created_at).toLocaleString()}</small></div>{event.is_suspicious && <span className="admin-badge security"><ShieldAlert size={12} /> Review</span>}</div>)}{!overview.activity.length && <div className="rule-empty">No account activity recorded yet.</div>}</div>
     </div>
@@ -1588,6 +1839,7 @@ function SettingsPanel({
   loadRemoteImages: boolean;
   onLoadRemoteImagesChange: (value: boolean) => void;
 }) {
+  const { confirm, prompt } = useAppDialog();
   const [tab, setTab] = useState<
     | "appearance"
     | "security"
@@ -1760,7 +2012,11 @@ function SettingsPanel({
     }
   }
   async function applyPolicyToExisting(policy: SenderPolicy) {
-    if (!window.confirm(`Apply this decision to matching messages already in Postveil? Up to 500 messages will be reviewed.`)) return;
+    if (!(await confirm({
+      title: "Apply this decision to existing mail?",
+      message: "Matching messages already in Postveil will be reviewed, up to 500 messages.",
+      confirmLabel: "Apply decision",
+    }))) return;
     try {
       const result = await apiFetch<{ matched: number; changed: number; capped?: boolean }>(`/api/sender-policies/${policy.id}/apply-existing`, { method: "POST", body: JSON.stringify({ confirm: true }) });
       setNotice(`${result.changed} existing message${result.changed === 1 ? "" : "s"} updated${result.capped ? " · limited to 500" : ""}`);
@@ -1797,7 +2053,12 @@ function SettingsPanel({
     }
   }
   async function deleteSenderPolicy(policy: SenderPolicy) {
-    if (!window.confirm(`Remove this sender decision for ${policy.match_value}?`)) return;
+    if (!(await confirm({
+      title: "Remove this sender decision?",
+      message: `Remove the decision for ${policy.match_value}? New messages from this sender will follow the default screening rules.`,
+      confirmLabel: "Remove decision",
+      danger: true,
+    }))) return;
     try {
       await apiFetch(`/api/sender-policies/${policy.id}`, { method: "DELETE" });
       setNotice("Sender policy removed");
@@ -1917,7 +2178,12 @@ function SettingsPanel({
     }
   }
   async function deleteRule(rule: Rule) {
-    if (!window.confirm(`Delete the rule “${rule.name}”?`)) return;
+    if (!(await confirm({
+      title: "Delete this rule?",
+      message: `Delete the rule “${rule.name}”? Existing messages will not be changed.`,
+      confirmLabel: "Delete rule",
+      danger: true,
+    }))) return;
     try {
       await apiFetch(`/api/rules/${rule.id}`, { method: "DELETE" });
       if (editingRuleId === rule.id) resetRuleEditor();
@@ -2097,7 +2363,13 @@ function SettingsPanel({
     finally { setPasskeyBusy(false); }
   }
   async function renamePasskey(passkey: Passkey) {
-    const friendlyName = window.prompt("Name this passkey", passkey.friendly_name || "Passkey")?.trim();
+    const friendlyName = (await prompt({
+      title: "Name this passkey",
+      message: "Choose a name you will recognize when signing in on this device.",
+      defaultValue: passkey.friendly_name || "Passkey",
+      placeholder: "e.g. Work laptop",
+      confirmLabel: "Save name",
+    }))?.trim();
     if (!friendlyName || friendlyName === passkey.friendly_name) return;
     setPasskeyBusy(true); setSecurityError("");
     try { const result = await requireSupabase().auth.passkey.update({ passkeyId: passkey.id, friendlyName }); if (result.error) throw result.error; setNotice("Passkey renamed"); await loadSecurity(); }
@@ -2105,7 +2377,12 @@ function SettingsPanel({
     finally { setPasskeyBusy(false); }
   }
   async function removePasskey(passkey: Passkey) {
-    if (!window.confirm(`Remove ${passkey.friendly_name || "this passkey"}?`)) return;
+    if (!(await confirm({
+      title: "Remove this passkey?",
+      message: `Remove ${passkey.friendly_name || "this passkey"}? You will no longer be able to use it to sign in.`,
+      confirmLabel: "Remove passkey",
+      danger: true,
+    }))) return;
     setPasskeyBusy(true); setSecurityError("");
     try { const result = await requireSupabase().auth.passkey.delete({ passkeyId: passkey.id }); if (result.error) throw result.error; setNotice("Passkey removed"); await loadSecurity(); }
     catch (passkeyError) { setSecurityError(passkeyError instanceof Error ? passkeyError.message : "Could not remove that passkey"); }
@@ -2118,7 +2395,12 @@ function SettingsPanel({
     finally { setSecurityBusy(false); }
   }
   async function generateRecoveryCodes() {
-    if (!window.confirm("Generate a new set of recovery codes? Any previous unused codes will stop working.")) return;
+    if (!(await confirm({
+      title: "Generate new recovery codes?",
+      message: "Any previous unused recovery codes will stop working. Save the new set somewhere private.",
+      confirmLabel: "Generate codes",
+      danger: true,
+    }))) return;
     setSecurityBusy(true); setSecurityError("");
     try { const result = await apiFetch<{ codes: string[]; remaining: number }>("/api/recovery-codes", { method: "POST" }); setGeneratedRecoveryCodes(result.codes); setRecoveryCodeCount(result.remaining); setNotice("New recovery codes generated. Save them somewhere private."); }
     catch (codeError) { setSecurityError(codeError instanceof Error ? codeError.message : "Recovery codes could not be generated"); }
@@ -2171,7 +2453,12 @@ function SettingsPanel({
     }
   }
   async function removeRecoveryEmail(method: RecoveryMethod) {
-    if (!window.confirm(`Remove ${method.email_masked} as a recovery email?`)) return;
+    if (!(await confirm({
+      title: "Remove this recovery email?",
+      message: `Remove ${method.email_masked} as a recovery email? It will no longer help recover this account.`,
+      confirmLabel: "Remove email",
+      danger: true,
+    }))) return;
     setSecurityBusy(true);
     try {
       await apiFetch(`/api/recovery-methods/${method.id}`, { method: "DELETE" });
@@ -2277,7 +2564,12 @@ function SettingsPanel({
     }
   }
   async function removeMfaFactor(factor: MfaFactor) {
-    if (!window.confirm(`Remove ${factor.friendly_name || "this authenticator"}? You will need to set up 2FA again to protect the account.`)) return;
+    if (!(await confirm({
+      title: "Remove this authenticator?",
+      message: `Remove ${factor.friendly_name || "this authenticator"}? You will need to set up two-step verification again to protect the account.`,
+      confirmLabel: "Remove authenticator",
+      danger: true,
+    }))) return;
     setSecurityBusy(true);
     try {
       const result = await requireSupabase().auth.mfa.unenroll({ factorId: factor.id });
@@ -3018,7 +3310,7 @@ function SettingsPanel({
                 ) : <div className="rule-empty">No existing messages match this rule.</div>}
                 <div className="rule-lab-actions">
                   <button className="secondary-button" onClick={() => void runRuleLab(ruleLab.rule, "dry-run")} disabled={ruleLabBusy}><History size={14} /> Dry-run</button>
-                  {ruleLab.result.mode !== "apply" ? <button className="primary-button" onClick={() => { if (window.confirm(`Apply “${ruleLab.rule.name}” to ${ruleLab.result.matchedCount} existing message${ruleLab.result.matchedCount === 1 ? "" : "s"}?`)) void applyRuleLab(); }} disabled={ruleLabBusy || !ruleLab.result.matchedCount || (ruleLab.result.conflicts || []).some((conflict) => conflict.severity === "error")}><Check size={14} /> Apply changes</button> : ruleLab.result.undoable ? <button className="secondary-button" onClick={() => void undoRuleLab()} disabled={ruleLabBusy}><RotateCcw size={14} /> Undo changes</button> : null}
+                  {ruleLab.result.mode !== "apply" ? <button className="primary-button" onClick={() => void (async () => { if (await confirm({ title: "Apply this rule to existing mail?", message: `Apply “${ruleLab.rule.name}” to ${ruleLab.result.matchedCount} existing message${ruleLab.result.matchedCount === 1 ? "" : "s"}?`, confirmLabel: "Apply changes" })) void applyRuleLab(); })()} disabled={ruleLabBusy || !ruleLab.result.matchedCount || (ruleLab.result.conflicts || []).some((conflict) => conflict.severity === "error")}><Check size={14} /> Apply changes</button> : ruleLab.result.undoable ? <button className="secondary-button" onClick={() => void undoRuleLab()} disabled={ruleLabBusy}><RotateCcw size={14} /> Undo changes</button> : null}
                 </div>
               </div>
             )}
@@ -3377,6 +3669,7 @@ function Workspace({
 }
 
 function MailboxApp({ session }: { session: Session }) {
+  const { confirm, prompt } = useAppDialog();
   const imagePreferenceKey = `postveil.load_remote_images:${session.user.id}`;
   const [view, setView] = useState<"mail" | "calendar" | "tasks">("mail");
   const [folder, setFolder] = useState<ViewKey>("inbox");
@@ -3633,7 +3926,13 @@ function MailboxApp({ session }: { session: Session }) {
     }
   }
   async function renameSavedSearch(saved: SavedSearch) {
-    const name = window.prompt("Rename saved search", saved.name)?.trim();
+    const name = (await prompt({
+      title: "Rename saved search",
+      message: "Choose a short name that will help you find this search later.",
+      defaultValue: saved.name,
+      placeholder: "Search name",
+      confirmLabel: "Save name",
+    }))?.trim();
     if (!name || name === saved.name) return;
     try {
       const updated = await apiFetch<SavedSearch>(`/api/saved-searches/${saved.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
@@ -3643,7 +3942,12 @@ function MailboxApp({ session }: { session: Session }) {
     }
   }
   async function deleteSavedSearch(saved: SavedSearch) {
-    if (!window.confirm(`Delete saved search “${saved.name}”? Your messages will not be changed.`)) return;
+    if (!(await confirm({
+      title: "Delete this saved search?",
+      message: `Delete saved search “${saved.name}”? Your messages will not be changed.`,
+      confirmLabel: "Delete search",
+      danger: true,
+    }))) return;
     try {
       await apiFetch(`/api/saved-searches/${saved.id}`, { method: "DELETE" });
       setSavedSearches((current) => current.filter((item) => item.id !== saved.id));
@@ -3725,7 +4029,12 @@ function MailboxApp({ session }: { session: Session }) {
     const visibleSelection = allResults ? messages.map((message) => message.id) : [...selectedIds];
     if (!visibleSelection.length && !allResults) { setError("Select at least one message"); return; }
     const countLabel = allResults ? `${resultTotal ?? "all"} matching messages` : `${visibleSelection.length} message${visibleSelection.length === 1 ? "" : "s"}`;
-    if (bulkAction === "trash" && !window.confirm(`Move ${countLabel} to Trash? You can restore them later.`)) return;
+    if (bulkAction === "trash" && !(await confirm({
+      title: "Move messages to Trash?",
+      message: `Move ${countLabel} to Trash? You can restore them later.`,
+      confirmLabel: "Move to Trash",
+      danger: true,
+    }))) return;
     setBulkBusy(true);
     setError("");
     setBulkNotice("");
@@ -3754,7 +4063,7 @@ function MailboxApp({ session }: { session: Session }) {
     try {
       const payload = await apiFetch<{ requestId: string; changedIds: string[]; exported?: JsonSettings[]; failures: Array<{ id: string; error: string }>; undoable: boolean; truncated?: boolean }>("/api/mail/bulk", {
         method: "POST",
-        body: JSON.stringify({ messageIds: visibleSelection, scope: allResults ? "all_results" : "selected", query: query.trim(), folder, action, idempotencyKey }),
+        body: JSON.stringify({ messageIds: allResults ? [] : visibleSelection, scope: allResults ? "all_results" : "selected", query: query.trim(), folder, action, idempotencyKey }),
       });
       const movedOut = ["archive", "move", "trash", "spam", "restore", "snooze"].includes(bulkAction);
       const selectedSet = new Set(payload.changedIds);
@@ -4023,7 +4332,12 @@ function MailboxApp({ session }: { session: Session }) {
   }
   async function permanentlyDeleteSelected() {
     if (!selected || selected.folder !== "trash") return;
-    if (!window.confirm("Delete this message permanently? This cannot be undone.")) return;
+    if (!(await confirm({
+      title: "Delete this message permanently?",
+      message: "This message and its attachments cannot be recovered after permanent deletion.",
+      confirmLabel: "Delete permanently",
+      danger: true,
+    }))) return;
     setTrashBusy(true);
     setError("");
     try {
@@ -4040,15 +4354,23 @@ function MailboxApp({ session }: { session: Session }) {
     }
   }
   async function emptyTrash() {
-    if (!window.confirm("Empty Trash permanently? Messages and attachments in Trash cannot be recovered.")) return;
+    if (!(await confirm({
+      title: "Empty Trash permanently?",
+      message: "Messages and attachments in Trash cannot be recovered after this action.",
+      confirmLabel: "Empty Trash",
+      danger: true,
+    }))) return;
     setTrashBusy(true);
     setError("");
     try {
-      await apiFetch<{ ok: boolean; deleted: number }>("/api/trash/empty", {
+      const result = await apiFetch<{ ok: boolean; deleted: number; storageCleanupFailed?: number }>("/api/trash/empty", {
         method: "POST",
       });
       clearMessageSelection();
       await loadMessages("trash", false);
+      if (result.storageCleanupFailed) {
+        setError(`Trash emptied, but ${result.storageCleanupFailed} stored file${result.storageCleanupFailed === 1 ? "" : "s"} could not be removed.`);
+      }
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Trash could not be emptied");
     } finally {
@@ -5248,7 +5570,7 @@ function MailboxApp({ session }: { session: Session }) {
   );
 }
 
-export default function App() {
+function AppContent() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
   const [recovering, setRecovering] = useState(false);
@@ -5306,4 +5628,12 @@ export default function App() {
   if (!session) return <AuthScreen />;
   if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
   return <MailboxApp session={session} />;
+}
+
+export default function App() {
+  return (
+    <AppDialogProvider>
+      <AppContent />
+    </AppDialogProvider>
+  );
 }

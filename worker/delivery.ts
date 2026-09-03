@@ -139,7 +139,7 @@ async function sendMailgun(env: DeliveryEnvironment, input: DeliveryInput, confi
   if (input.idempotencyKey) form.set("v:postveil-idempotency-key", input.idempotencyKey);
   form.set("o:tracking-opens", input.openTrackingEnabled ? "yes" : "no");
   form.set("o:tracking-clicks", input.clickTrackingEnabled ? "yes" : "no");
-  for (const attachment of input.attachments || []) form.append("attachment", new File([attachment.bytes], attachment.filename, { type: attachment.contentType }));
+  for (const attachment of input.attachments || []) form.append("attachment", new File([attachment.bytes.slice().buffer as ArrayBuffer], attachment.filename, { type: attachment.contentType }));
   const started = Date.now();
   const response = await fetch(`${baseUrl}/${encodeURIComponent(domain)}/messages`, { method: "POST", headers: { authorization: `Basic ${btoa(`api:${env.MAILGUN_API_KEY!}`)}` }, body: form });
   const body = await responseJson(response);

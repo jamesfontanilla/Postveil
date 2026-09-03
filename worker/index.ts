@@ -1,7 +1,12 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createClient } from "@supabase/supabase-js";
 import PostalMime from "postal-mime";
+import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
+
+if (typeof globalThis.DOMParser === "undefined") {
+  (globalThis as typeof globalThis & { DOMParser: typeof XmlDomParser }).DOMParser = XmlDomParser;
+}
 import {
   buildWorkStatePatch,
   evaluateRule,
@@ -400,7 +405,14 @@ async function getUser(request: Request, env: Env): Promise<User | null> {
 }
 
 function storageClient(env: Env): S3Client {
-  return new S3Client({ region: env.B2_REGION, endpoint: env.B2_ENDPOINT, forcePathStyle: false, credentials: { accessKeyId: env.B2_KEY_ID, secretAccessKey: env.B2_APPLICATION_KEY } });
+  return new S3Client({
+    region: env.B2_REGION,
+    endpoint: env.B2_ENDPOINT,
+    forcePathStyle: false,
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
+    credentials: { accessKeyId: env.B2_KEY_ID, secretAccessKey: env.B2_APPLICATION_KEY },
+  });
 }
 
 async function putObject(env: Env, key: string, body: Uint8Array | string, contentType: string): Promise<void> {
@@ -408,7 +420,7 @@ async function putObject(env: Env, key: string, body: Uint8Array | string, conte
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digest = await crypto.subtle.digest("SHA-256", bytes.slice().buffer as ArrayBuffer);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
@@ -422,6 +434,32 @@ async function readObject(env: Env, key: string): Promise<Uint8Array> {
 
 async function deleteObject(env: Env, key: string): Promise<void> {
   await storageClient(env).send(new DeleteObjectCommand({ Bucket: env.B2_BUCKET, Key: key }));
+}
+
+async function deleteObjects(env: Env, keys: string[]): Promise<number> {
+  const normalizedKeys = [...new Set(keys.map((key) => key.trim()).filter(Boolean))];
+  let failed = 0;
+  for (let offset = 0; offset < normalizedKeys.length; offset += 1000) {
+    const batch = normalizedKeys.slice(offset, offset + 1000);
+    try {
+      const result = await storageClient(env).send(new DeleteObjectsCommand({
+        Bucket: env.B2_BUCKET,
+        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+        ChecksumAlgorithm: "MD5",
+      }));
+      failed += result.Errors?.length ?? 0;
+    } catch (storageError) {
+      console.error("B2 multi-object delete failed", {
+        name: storageError instanceof Error ? storageError.name : "UnknownError",
+        message: storageError instanceof Error ? storageError.message.slice(0, 240) : String(storageError).slice(0, 240),
+        statusCode: typeof storageError === "object" && storageError !== null && "$metadata" in storageError
+          ? ((storageError as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode ?? null)
+          : null,
+      });
+      failed += batch.length;
+    }
+  }
+  return failed;
 }
 
 async function signedObjectUrl(env: Env, key: string): Promise<string> {
@@ -2354,13 +2392,14 @@ async function relatedSearchIds(env: Env, ownerId: string, filters: SearchFilter
   return { include: include ? [...include] : null, exclude: [...exclude] };
 }
 
-type MailQueryOptions = { folder: string; query?: string; filter?: string; sort?: string; page?: number; pageSize?: number; mailboxIds?: string[] };
+type MailQueryOptions = { folder: string; query?: string; filter?: string; sort?: string; page?: number; pageSize?: number; maxPageSize?: number; mailboxIds?: string[] };
 
 async function buildMailQuery(env: Env, ownerId: string, options: MailQueryOptions): Promise<{ path: string; parsed?: ParsedSearch; page: number; pageSize: number; searchActive: boolean }> {
   const query = options.query?.trim() || "";
   const parsed = query ? parseSearchQuery(query) : undefined;
-  const page = Math.max(1, Math.min(100, Number(options.page || 1)));
-  const pageSize = Math.max(10, Math.min(100, Number(options.pageSize || 80)));
+  const page = Math.max(1, Math.min(100000, Number(options.page || 1)));
+  const maxPageSize = Math.max(100, Math.min(5000, Number(options.maxPageSize || 100)));
+  const pageSize = Math.max(10, Math.min(maxPageSize, Number(options.pageSize || 80)));
   const parts = [messageScopeFilter(ownerId, options.mailboxIds || []), "select=id,thread_id,mailbox_id,owner_id,direction,folder,status,custom_folder_id,previous_folder,from_name,from_address,to_addresses,cc_addresses,subject,snippet,message_id_header,is_read,is_starred,is_pinned,is_flagged,is_important,is_muted,is_ignored,priority,has_attachment,spam_score,spam_reasons,link_count,auth_spf,auth_dkim,auth_dmarc,auth_arc,auth_tls,trust_score,trust_reasons,screening_status,focused_score,focused_category,delivery_status,delivery_error_code,delivery_error,provider,provider_message_id,open_tracking_enabled,click_tracking_enabled,message_size_bytes,scheduled_at,next_delivery_at,snoozed_until,work_state,follow_up_at,work_note,reminder_at,reminder_note,unsubscribe_url,retention_expires_at,legal_hold,received_at,sent_at,created_at"];
   const explicitFolders = parsed?.filters.filter((filter): filter is Extract<SearchFilter, { kind: "folder" }> => filter.kind === "folder") || [];
   if (!parsed) {
@@ -2524,74 +2563,6 @@ function bulkBeforeState(message: JsonRecord): JsonRecord {
     priority: typeof message.priority === "number" ? message.priority : 0,
     work_state: message.work_state || "none", follow_up_at: message.follow_up_at || null, reminder_at: message.reminder_at || null, reminder_note: message.reminder_note || null, snoozed_until: message.snoozed_until || null,
   };
-}
-
-async function applyBulkMessageAction(env: Env, ownerId: string, message: JsonRecord, action: JsonRecord, requestId: string): Promise<{ changed: boolean; exportRow?: JsonRecord }> {
-  const type = String(action.type || "");
-  const before = bulkBeforeState(message);
-  if (type === "export") return { changed: false, exportRow: { id: message.id, subject: message.subject || "", from_address: message.from_address || "", to_addresses: message.to_addresses || [], text_body: message.text_body || message.snippet || "" } };
-  if (type === "create_task") {
-    await dbRequest(env, "tasks", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ owner_id: ownerId, title: String(message.subject || "(no subject)"), notes: String(message.snippet || ""), source_message_id: message.id }) });
-    await writeMessageAudit(env, ownerId, requestId, `bulk_${type}`, message, before, before);
-    return { changed: true };
-  }
-  if (type === "label") {
-    const labelId = String(action.labelId || "");
-    const labels = await dbRequest<Array<{ id: string }>>(env, `labels?id=eq.${encodeURIComponent(labelId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
-    if (!labels[0]) throw new Error("Label not found");
-    await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: message.id, label_id: labelId }) });
-    await writeMessageAudit(env, ownerId, requestId, `bulk_${type}`, message, before, { label_id: labelId });
-    return { changed: true };
-  }
-  if (type === "restore") {
-    if (message.folder !== "trash") throw new Error("Only messages in Trash can be restored");
-    const target = trashRestoreTarget(message);
-    const rows = target.folder === "custom" ? await dbRequest<JsonRecord[]>(env, `mail_folders?id=eq.${encodeURIComponent(target.custom_folder_id || "")}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`) : [{ id: "system" }];
-    const restore = rows[0] ? target : { folder: "inbox", custom_folder_id: null };
-    const patch = { folder: restore.folder, custom_folder_id: restore.custom_folder_id, previous_folder: null };
-    await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}&owner_id=eq.${encodeURIComponent(ownerId)}&folder=eq.trash`, { method: "PATCH", body: JSON.stringify(patch) });
-    await writeMessageAudit(env, ownerId, requestId, `bulk_${type}`, message, before, patch);
-    return { changed: true };
-  }
-  const patch: JsonRecord = {};
-  if (type === "archive") { patch.folder = "archive"; patch.custom_folder_id = null; }
-  else if (type === "trash") {
-    patch.folder = "trash";
-    patch.custom_folder_id = null;
-    patch.previous_folder = message.folder === "trash"
-      ? (message.previous_folder || "inbox")
-      : (message.folder === "custom" && message.custom_folder_id ? `custom:${message.custom_folder_id}` : (message.folder || "inbox"));
-  }
-  else if (type === "spam") { patch.folder = "spam"; patch.custom_folder_id = null; }
-  else if (type === "move") {
-    const folder = String(action.folder || "");
-    if (folder === "custom") {
-      const customFolderId = String(action.customFolderId || "");
-      const customFolders = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(customFolderId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
-      if (!customFolders[0]) throw new Error("Choose a valid destination folder");
-      patch.folder = "custom";
-      patch.custom_folder_id = customFolderId;
-    } else {
-      if (!SYSTEM_FOLDERS.includes(folder as typeof SYSTEM_FOLDERS[number])) throw new Error("Choose a valid destination folder");
-      patch.folder = folder;
-      patch.custom_folder_id = null;
-    }
-    patch.previous_folder = null;
-  } else if (type === "mark_read" || type === "mark_unread") patch.is_read = type === "mark_read";
-  else if (type === "star" || type === "unstar") patch.is_starred = type === "star";
-  else if (type === "pin" || type === "unpin") patch.is_pinned = type === "pin";
-  else if (type === "flag" || type === "unflag") patch.is_flagged = type === "flag";
-  else if (type === "important" || type === "not_important") patch.is_important = type === "important";
-  else if (type === "mute" || type === "unmute") patch.is_muted = type === "mute";
-  else if (type === "ignore" || type === "unignore") patch.is_ignored = type === "ignore";
-  else if (type === "priority") patch.priority = Math.max(0, Math.min(2, Number(action.priority || 0)));
-  else if (type === "snooze") { patch.previous_folder = message.folder; patch.snoozed_until = String(action.snoozedUntil || new Date(Date.now() + 60 * 60 * 1000).toISOString()); patch.folder = "archive"; }
-  else if (type === "reminder") { patch.reminder_at = String(action.reminderAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()); patch.reminder_note = String(action.reminderNote || "Follow up on this message").slice(0, 240); }
-  else if (["reply_later", "waiting_on", "i_owe"].includes(type)) { patch.work_state = type; patch.follow_up_at = String(action.followUpAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()); }
-  else throw new Error(`Unsupported bulk action "${type}"`);
-  await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify(patch) });
-  await writeMessageAudit(env, ownerId, requestId, `bulk_${type}`, message, before, patch);
-  return { changed: true };
 }
 
 async function detectDelayedMessages(env: Env): Promise<void> {
@@ -2890,20 +2861,19 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "PATCH" && mailboxMatch) { const body = (await request.json()) as JsonRecord; const patch: JsonRecord = {}; for (const key of ["display_name", "can_send", "can_receive", "is_default", "reply_to", "settings"]) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || null); }
 
   if (request.method === "POST" && url.pathname === "/api/trash/empty") {
-    let deleted = 0;
-    while (true) {
-      const rows = await dbRequest<Array<{ id: string }>>(
-        env,
-        `messages?owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.trash&select=id&limit=100`,
-      );
-      if (!rows.length) break;
-      for (const row of rows) {
-        await permanentlyDeleteMessage(env, user.id, row.id);
-        deleted += 1;
-      }
-      if (rows.length < 100) break;
-    }
-    return json({ ok: true, deleted });
+    const result = await dbRequest<JsonRecord>(env, "rpc/empty_trash", {
+      method: "POST",
+      body: "{}",
+    }, user.accessToken);
+    const objectKeys = Array.isArray(result.object_keys)
+      ? result.object_keys.filter((key): key is string => typeof key === "string")
+      : [];
+    const storageCleanupFailed = await deleteObjects(env, objectKeys);
+    return json({
+      ok: result.ok !== false,
+      deleted: Number(result.deleted_count || 0),
+      storageCleanupFailed,
+    });
   }
 
   if (request.method === "GET" && url.pathname === "/api/search/parse") {
@@ -3034,30 +3004,21 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const body = (await request.json()) as JsonRecord;
     const requestId = String(body.requestId || "").trim();
     if (!requestId || requestId.length > 100) return error("Undo request is invalid");
-    const cutoff = new Date(Date.now() - 30_000).toISOString();
-    const audits = await dbRequest<Array<{ message_id?: string; action_type?: string; before_state?: JsonRecord; created_at?: string }>>(
-      env,
-      `message_audit_log?owner_id=eq.${encodeURIComponent(user.id)}&request_id=eq.${encodeURIComponent(requestId)}&created_at=gte.${encodeURIComponent(cutoff)}&select=message_id,action_type,before_state,created_at&limit=500`,
-    );
-    const actionable = audits.filter((audit) => audit.action_type?.startsWith("bulk_") && audit.action_type !== "bulk_undo" && audit.message_id);
-    if (!actionable.length) return error("This action can no longer be undone", 410);
-    if (actionable.some((audit) => audit.action_type === "bulk_label" || audit.action_type === "bulk_create_task")) return error("This action cannot be undone", 409);
-    const undoneIds: string[] = [];
-    const failures: Array<{ id: string; error: string }> = [];
-    for (const audit of actionable) {
-      const id = String(audit.message_id);
-      try {
-        const before = objectValue(audit.before_state);
-        const patch: JsonRecord = {};
-        for (const key of ["folder", "custom_folder_id", "previous_folder", "is_read", "is_starred", "is_pinned", "is_flagged", "is_important", "is_muted", "is_ignored", "priority", "work_state", "follow_up_at", "reminder_at", "reminder_note", "snoozed_until"]) if (key in before) patch[key] = before[key];
-        await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify(patch) });
-        await dbRequest(env, "message_audit_log", { method: "POST", body: JSON.stringify({ owner_id: user.id, actor_id: user.id, message_id: id, action_type: "bulk_undo", target_type: "message", target_id: id, before_state: {}, after_state: patch, request_id: requestId }) });
-        undoneIds.push(id);
-      } catch (undoError) {
-        failures.push({ id, error: undoError instanceof Error ? undoError.message : "Undo failed" });
-      }
+    try {
+      const result = await dbRequest<JsonRecord>(env, "rpc/undo_bulk_message_action", {
+        method: "POST",
+        body: JSON.stringify({ p_request_id: requestId }),
+      }, user.accessToken);
+      return json({
+        ok: result.ok !== false,
+        undoneIds: Array.isArray(result.undone_ids) ? result.undone_ids.map(String) : [],
+        failures: Array.isArray(result.failures) ? result.failures : [],
+      });
+    } catch (undoError) {
+      const message = undoError instanceof Error ? undoError.message : "Undo failed";
+      const status = message.includes("no longer") ? 410 : message.includes("cannot") ? 409 : 400;
+      return error(message, status);
     }
-    return json({ ok: failures.length === 0, undoneIds, failures });
   }
 
   if (request.method === "POST" && url.pathname === "/api/mail/bulk") {
@@ -3067,38 +3028,54 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const allowedActions = new Set(["archive", "move", "label", "mark_read", "mark_unread", "star", "unstar", "pin", "unpin", "flag", "unflag", "important", "not_important", "mute", "unmute", "ignore", "unignore", "reminder", "priority", "snooze", "reply_later", "waiting_on", "i_owe", "spam", "trash", "restore", "export", "create_task"]);
     if (!allowedActions.has(actionType)) return error(`Unsupported bulk action "${actionType}"`);
     const requestId = String(body.idempotencyKey || crypto.randomUUID()).trim().slice(0, 100);
-    const replay = await dbRequest<Array<{ message_id?: string }>>(env, `message_audit_log?owner_id=eq.${encodeURIComponent(user.id)}&request_id=eq.${encodeURIComponent(requestId)}&action_type=like.bulk_*&select=message_id&limit=500`).catch(() => []);
-    if (replay.length) return json({ ok: true, replayed: true, requestId, changedIds: [...new Set(replay.map((row) => String(row.message_id || "")).filter(Boolean))], failures: [] });
     const scope = body.scope === "all_results" ? "all_results" : "selected";
     const failures: Array<{ id: string; error: string }> = [];
-    let rows: JsonRecord[] = [];
+    let messageIds: string[] = [];
     let truncated = false;
     if (scope === "selected") {
-      const requested = Array.isArray(body.messageIds) ? [...new Set(body.messageIds.map(String).filter(Boolean))].slice(0, 100) : [];
+      const requested = Array.isArray(body.messageIds) ? [...new Set(body.messageIds.map(String).filter(Boolean))] : [];
       const ids = requested.filter((id) => /^[0-9a-f-]{36}$/i.test(id));
       requested.filter((id) => !ids.includes(id)).forEach((id) => failures.push({ id, error: "Invalid message id" }));
       if (!ids.length) return error("Select at least one message");
-      rows = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(user.id)}&id=${encodeURIComponent(`in.(${ids.join(",")})`)}&select=id,thread_id,mailbox_id,folder,custom_folder_id,previous_folder,is_read,is_starred,is_pinned,is_flagged,is_important,is_muted,is_ignored,priority,work_state,follow_up_at,reminder_at,reminder_note,snoozed_until,subject,from_address,to_addresses,snippet,text_body&limit=100`);
-      const found = new Set(rows.map((row) => String(row.id)));
-      ids.filter((id) => !found.has(id)).forEach((id) => failures.push({ id, error: "Message not found or not owned" }));
+      messageIds = ids;
     } else {
-      const query = await buildMailQuery(env, user.id, { folder: String(body.folder || "all"), query: String(body.query || ""), filter: "all", sort: "newest", page: 1, pageSize: 500 });
-      const result = await dbRequest<JsonRecord[]>(env, query.path);
-      truncated = result.length > 500;
-      rows = truncated ? result.slice(0, 500) : result;
-    }
-    const changedIds: string[] = [];
-    const exportRows: JsonRecord[] = [];
-    for (const row of rows) {
-      try {
-        const result = await applyBulkMessageAction(env, user.id, row, action, requestId);
-        if (result.changed) changedIds.push(String(row.id));
-        if (result.exportRow) exportRows.push(result.exportRow);
-      } catch (actionError) {
-        failures.push({ id: String(row.id), error: actionError instanceof Error ? actionError.message : "Action failed" });
+      const pageSize = 5000;
+      const firstQuery = await buildMailQuery(env, user.id, { folder: String(body.folder || "all"), query: String(body.query || ""), filter: "all", sort: "newest", page: 1, pageSize, maxPageSize: pageSize });
+      let pageNumber = 1;
+      let nextPath = firstQuery.path;
+      while (true) {
+        const result = await dbRequest<JsonRecord[]>(env, nextPath);
+        const pageItems = result.length > pageSize ? result.slice(0, pageSize) : result;
+        messageIds.push(...pageItems.map((row) => String(row.id)));
+        if (result.length <= pageSize) break;
+        pageNumber += 1;
+        nextPath = firstQuery.path.replace(/offset=\d+/, `offset=${(pageNumber - 1) * pageSize}`).replace(/limit=\d+$/, `limit=${pageSize + 1}`);
       }
+      messageIds = [...new Set(messageIds)];
     }
-    return json({ ok: failures.length === 0, requestId, scope, requestedCount: scope === "all_results" ? rows.length : (Array.isArray(body.messageIds) ? body.messageIds.length : 0), changedIds, exported: exportRows, failures, truncated, undoable: ["archive", "move", "mark_read", "mark_unread", "star", "unstar", "pin", "unpin", "flag", "unflag", "important", "not_important", "mute", "unmute", "ignore", "unignore", "reminder", "priority", "snooze", "reply_later", "waiting_on", "i_owe", "spam", "trash", "restore"].includes(actionType) });
+    if (!messageIds.length) return error("Select at least one message");
+    try {
+      const result = await dbRequest<JsonRecord>(env, "rpc/execute_bulk_message_action", {
+        method: "POST",
+        body: JSON.stringify({ p_request_id: requestId, p_message_ids: messageIds, p_action: action }),
+      }, user.accessToken);
+      const rpcFailures = Array.isArray(result.failures) ? result.failures as Array<{ id: string; error: string }> : [];
+      const mergedFailures = [...failures, ...rpcFailures];
+      return json({
+        ok: result.ok !== false && mergedFailures.length === 0,
+        replayed: result.replayed === true,
+        requestId,
+        scope,
+        requestedCount: scope === "all_results" ? messageIds.length : (Array.isArray(body.messageIds) ? body.messageIds.length : 0),
+        changedIds: Array.isArray(result.changed_ids) ? result.changed_ids.map(String) : [],
+        exported: Array.isArray(result.exported) ? result.exported : [],
+        failures: mergedFailures,
+        truncated: truncated || result.truncated === true,
+        undoable: result.undoable === true,
+      });
+    } catch (actionError) {
+      return error(actionError instanceof Error ? actionError.message : "Bulk action failed", 400);
+    }
   }
 
   if (request.method === "GET" && url.pathname === "/api/work") {
@@ -3668,7 +3645,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
       for (const row of rows) entries.push({ filename: row.filename, data: await readObject(env, row.object_key) });
       const archive = buildZip(entries);
       const archiveName = `${String(messageRows[0].subject || "attachments").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "attachments"}.zip`;
-      return new Response(archive, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${archiveName}"`, "cache-control": "no-store" } });
+      return new Response(archive.buffer as ArrayBuffer, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${archiveName}"`, "cache-control": "no-store" } });
     }
     const attachmentId = (sharedAttachmentPreview?.[1] || url.pathname.split("/").pop() || "");
     const rows = await dbRequest<Array<{ object_key: string; filename: string; content_type: string; detected_content_type?: string | null; byte_size: number; preview_state: string; safety_status: string; message_id: string }>>(env, `attachments?id=eq.${encodeURIComponent(attachmentId)}&limit=1`);
@@ -3686,7 +3663,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     return url.searchParams.get("json") === "true" ? json({ url: signedUrl }) : Response.redirect(signedUrl, 302);
   }
   const downloadAllMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/attachments\/download$/);
-  if (request.method === "GET" && downloadAllMatch) { const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!messageRows[0]) return error("Message not found", 404); const rows = await dbRequest<Array<{ filename: string; object_key: string; byte_size: number }>>(env, `attachments?message_id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc&limit=10`); if (!rows.length) return error("There are no attachments to download", 404); const totalBytes = rows.reduce((sum, row) => sum + Number(row.byte_size || 0), 0); if (totalBytes > 25 * 1024 * 1024) return error("The download is limited to 25 MB", 413); const entries: Array<{ filename: string; data: Uint8Array }> = []; for (const row of rows) entries.push({ filename: row.filename, data: await readObject(env, row.object_key) }); const archive = buildZip(entries); const archiveName = `${String(messageRows[0].subject || "attachments").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "attachments"}.zip`; return new Response(archive, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${archiveName}"`, "cache-control": "no-store" } }); }
+  if (request.method === "GET" && downloadAllMatch) { const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!messageRows[0]) return error("Message not found", 404); const rows = await dbRequest<Array<{ filename: string; object_key: string; byte_size: number }>>(env, `attachments?message_id=eq.${encodeURIComponent(downloadAllMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc&limit=10`); if (!rows.length) return error("There are no attachments to download", 404); const totalBytes = rows.reduce((sum, row) => sum + Number(row.byte_size || 0), 0); if (totalBytes > 25 * 1024 * 1024) return error("The download is limited to 25 MB", 413); const entries: Array<{ filename: string; data: Uint8Array }> = []; for (const row of rows) entries.push({ filename: row.filename, data: await readObject(env, row.object_key) }); const archive = buildZip(entries); const archiveName = `${String(messageRows[0].subject || "attachments").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || "attachments"}.zip`; return new Response(archive.buffer as ArrayBuffer, { headers: { "content-type": "application/zip", "content-disposition": `attachment; filename="${archiveName}"`, "cache-control": "no-store" } }); }
   const previewMatch = url.pathname.match(/^\/api\/attachments\/([^/]+)\/preview$/);
   if (request.method === "GET" && previewMatch) { const rows = await dbRequest<Array<{ object_key: string; filename: string; content_type: string; detected_content_type?: string | null; byte_size: number; preview_state: string; safety_status: string }>>(env, `attachments?id=eq.${encodeURIComponent(previewMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); const attachment = rows[0]; if (!attachment) return error("Attachment not found", 404); const contentType = attachment.detected_content_type || attachment.content_type; if (attachment.safety_status === "blocked" || attachment.safety_status === "infected") return error("This attachment is blocked from preview", 409); if (attachment.preview_state !== "ready" || (!contentType.startsWith("image/") && contentType !== "application/pdf") || Number(attachment.byte_size || 0) > 5 * 1024 * 1024) return error("This file is not eligible for safe preview", 415); return json({ url: await signedObjectUrl(env, attachment.object_key), filename: attachment.filename, contentType, previewState: attachment.preview_state }); }
   if (request.method === "GET" && url.pathname.startsWith("/api/attachments/")) { const id = url.pathname.split("/").pop() || ""; const rows = await dbRequest<Array<{ object_key: string }>>(env, `attachments?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); if (!rows[0]) return error("Attachment not found", 404); const signedUrl = await signedObjectUrl(env, rows[0].object_key); return url.searchParams.get("json") === "true" ? json({ url: signedUrl }) : Response.redirect(signedUrl, 302); }
