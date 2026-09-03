@@ -1163,3 +1163,123 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .search-help-grid { grid-template-columns: 1fr; gap: 4px; }
   .search-help-grid span { padding-left: 8px; margin-bottom: 3px; }
 }
+
+/* Postveil-owned warnings and value prompts */
+.app-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(23, 33, 31, .48);
+  backdrop-filter: blur(5px);
+  animation: app-dialog-fade-in 150ms ease-out;
+}
+.app-dialog {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 14px;
+  width: min(100%, 470px);
+  padding: 23px 24px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 24px 70px rgba(12, 28, 24, .24), 0 3px 12px rgba(12, 28, 24, .12);
+  animation: app-dialog-rise-in 180ms ease-out;
+}
+.app-dialog-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.app-dialog-danger .app-dialog-icon {
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
+  background: color-mix(in srgb, var(--danger) 11%, var(--surface));
+  color: var(--danger);
+}
+.app-dialog-copy { min-width: 0; }
+.app-dialog-kicker {
+  margin: 1px 0 6px;
+  color: var(--muted);
+  font: 10px/1.2 "IBM Plex Mono", monospace;
+  letter-spacing: .12em;
+}
+.app-dialog h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.2;
+}
+.app-dialog-copy > p:not(.app-dialog-kicker) {
+  margin: 9px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.app-dialog-input {
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font: inherit;
+  outline: 0;
+}
+.app-dialog-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.app-dialog-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+.app-dialog-actions button { min-height: 36px; }
+.app-dialog-danger-button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  background: var(--danger);
+  color: #fff;
+  font: 700 12px/1 "IBM Plex Sans", sans-serif;
+  cursor: pointer;
+}
+.app-dialog-danger-button:hover { filter: brightness(.92); }
+.app-dialog button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 36%, transparent);
+  outline-offset: 2px;
+}
+.theme-dark-dialog .app-dialog {
+  border-color: #47564d;
+  background: #1d2421;
+  color: #eef3ee;
+}
+.theme-dark-dialog .app-dialog h2 { color: #eef3ee; }
+.theme-dark-dialog .app-dialog-copy > p:not(.app-dialog-kicker) { color: #c2cdc5; }
+.theme-dark-dialog .app-dialog-input { border-color: #47564d; background: #202925; color: #eef3ee; }
+.theme-dark-dialog .app-dialog-danger .app-dialog-icon { background: #382321; }
+@keyframes app-dialog-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes app-dialog-rise-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+@media (max-width: 520px) {
+  .app-dialog-backdrop { align-items: end; padding: 12px; }
+  .app-dialog { width: 100%; padding: 20px 18px 16px; border-radius: 12px; }
+  .app-dialog-actions { margin-top: 19px; }
+  .app-dialog-actions button { flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-dialog-backdrop, .app-dialog { animation: none; }
+}
