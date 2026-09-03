@@ -24,6 +24,25 @@ This repository is a self-hosted reference implementation. It is currently desig
 - The public health endpoint intentionally returns only a generic liveness response.
 - Production deployments should enable provider 2FA, backups, rate limits, quotas, monitoring, and a malware-scanning workflow.
 
+### Security and privacy center
+
+The Settings security center provides passkey/TOTP setup, recovery-code rotation,
+session revocation, login activity, security events, privacy controls, a
+machine-readable account export, and a guarded account-deletion flow. OAuth
+buttons for Google, Microsoft, and GitHub, plus an organization SSO entry point,
+are included in the sign-in experience; the corresponding providers must be
+enabled in Supabase Auth. SAML and custom OIDC are organization configuration,
+not credentials embedded in this repository.
+
+Remote images are blocked by default, AI processing is opt-in, and the UI
+discloses when provider setup or additional cryptographic architecture is still
+required. The protected-message portal encrypts its payload at rest and can
+expire or password-protect access, but it is not universal end-to-end
+encryption. Client-side E2EE, PGP interoperability, recipient-key
+verification, key transparency, user-held encryption keys, and encrypted
+backups require a separate audited key-management design before they should be
+advertised as available features. Ordinary SMTP cannot provide universal E2EE.
+
 ## Local development
 
 1. Copy `.env.example` to `.env.local`.
@@ -157,6 +176,10 @@ Do not deploy the example domain or example credentials. Do not reuse another de
 - `/api/admin/mailboxes/:id` — mailbox lifecycle, quotas, and sending limits
 - `/api/admin/mailboxes/:id/delegates/:memberId` — shared mailbox permissions
 - `/api/admin/groups` — distribution lists and group addresses
+- `/api/security/overview` — privacy settings and owner-scoped security activity
+- `/api/privacy-settings` — privacy and processing controls
+- `/api/account/export` — owner-scoped JSON account export
+- `/api/account/delete` — guarded account deletion and tracked object cleanup
 - `/share/:token` — public protected-message portal for confidential delivery
 - `/api/share/:token/unlock` — one-time/password-checked protected-message access
 

@@ -318,6 +318,28 @@ type AppSettings = {
   desktop_notifications?: boolean;
   send_undo_seconds?: 0 | 10 | 20 | 30;
 };
+type PrivacySettings = {
+  owner_id: string;
+  ai_processing_enabled: boolean;
+  login_alerts_enabled: boolean;
+  remote_images_enabled: boolean;
+  privacy_analytics_enabled: boolean;
+  metadata_minimization_enabled: boolean;
+  external_portal_enabled: boolean;
+  storage_region: string;
+  no_training_ai_policy_acknowledged: boolean;
+};
+type SecurityActivity = {
+  id: string;
+  eventType: string;
+  sessionId?: string | null;
+  ipFingerprint?: string | null;
+  userAgent?: string | null;
+  suspicious: boolean;
+  details?: Record<string, unknown>;
+  createdAt: string;
+};
+type SecurityOverview = { privacy: PrivacySettings; activity: SecurityActivity[] };
 type AdminMailbox = Mailbox & {
   owner_id: string;
   status: "active" | "suspended" | "archived" | string;
@@ -630,7 +652,7 @@ type AppDialogOptions = {
 type AppPromptOptions = AppDialogOptions & {
   defaultValue?: string;
   placeholder?: string;
-  inputType?: "text" | "number";
+  inputType?: "text" | "number" | "email";
 };
 
 type AppDialogRequest =
@@ -651,7 +673,7 @@ type AppDialogRequest =
       danger: boolean;
       defaultValue: string;
       placeholder: string;
-      inputType: "text" | "number";
+      inputType: "text" | "number" | "email";
     };
 
 type AppDialogResult = boolean | string | null;
@@ -834,9 +856,36 @@ function AuthScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
+  const [ssoDomain, setSsoDomain] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  async function startSocialLogin(provider: "google" | "azure" | "github") {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await requireSupabase().auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } });
+      if (result.error) throw result.error;
+      if (result.data?.url) window.location.assign(result.data.url);
+    } catch (oauthError) {
+      setError(oauthError instanceof Error ? oauthError.message : "That sign-in provider is not available");
+      setBusy(false);
+    }
+  }
+  async function startOrganizationSso() {
+    const domain = ssoDomain.trim().toLowerCase().replace(/^@/, "");
+    if (!domain || !domain.includes(".")) { setError("Enter your organization email domain, such as company.com"); return; }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await requireSupabase().auth.signInWithSSO({ domain });
+      if (result.error) throw result.error;
+      if (result.data?.url) window.location.assign(result.data.url);
+    } catch (ssoError) {
+      setError(ssoError instanceof Error ? ssoError.message : "Organization SSO is not configured for that domain");
+      setBusy(false);
+    }
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -921,6 +970,21 @@ function AuthScreen() {
             {busy ? "Working…" : mode === "forgot" ? "Send reset link" : mode === "recovery" ? "Request recovery link" : mode === "signin" ? "Open mailbox" : "Create account"}
           </button>
         </form>
+        {mode === "signin" && (
+          <div className="auth-sso" aria-label="Single sign-on options">
+            <div className="auth-divider"><span>OR CONTINUE WITH</span></div>
+            <div className="auth-provider-grid">
+              <button type="button" className="secondary-button" onClick={() => void startSocialLogin("google")} disabled={busy}>Google</button>
+              <button type="button" className="secondary-button" onClick={() => void startSocialLogin("azure")} disabled={busy}>Microsoft</button>
+              <button type="button" className="secondary-button" onClick={() => void startSocialLogin("github")} disabled={busy}>GitHub</button>
+            </div>
+            <div className="auth-sso-domain">
+              <label>Organization SSO domain<input value={ssoDomain} onChange={(event) => setSsoDomain(event.target.value)} placeholder="company.com" autoComplete="organization" /></label>
+              <button type="button" className="text-button" onClick={() => void startOrganizationSso()} disabled={busy || !ssoDomain.trim()}>Use SAML / custom OIDC SSO</button>
+            </div>
+            <small className="auth-sso-note">Providers must be enabled in the project’s Supabase Auth settings. Postveil never receives provider passwords.</small>
+          </div>
+        )}
         {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("forgot"); setError(""); setNotice(""); }}>Forgot your password?</button>}
         {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("recovery"); setError(""); setNotice(""); }}>Use a recovery code</button>}
         {mode !== "forgot" && mode !== "recovery" && <button className="text-button" onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setNotice(""); }}>
@@ -2104,6 +2168,7 @@ function SettingsPanel({
   const [tab, setTab] = useState<
     | "appearance"
     | "security"
+    | "privacy"
     | "organize"
     | "contacts"
     | "spam"
@@ -2173,6 +2238,10 @@ function SettingsPanel({
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [recoveryCodeCount, setRecoveryCodeCount] = useState(0);
   const [generatedRecoveryCodes, setGeneratedRecoveryCodes] = useState<string[]>([]);
+  const [securityOverview, setSecurityOverview] = useState<SecurityOverview | null>(null);
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [accountExportBusy, setAccountExportBusy] = useState(false);
   const [retentionPolicies, setRetentionPolicies] = useState<RetentionPolicy[]>([]);
   const [retentionName, setRetentionName] = useState("");
   const [retentionScope, setRetentionScope] = useState<RetentionPolicy["scope"]>("all");
@@ -2609,8 +2678,63 @@ function SettingsPanel({
       setPasskeys((passkeyResult.data || []) as Passkey[]);
       const recoveryCodeStatus = await apiFetch<{ remaining: number }>("/api/recovery-codes/status");
       setRecoveryCodeCount(recoveryCodeStatus.remaining);
+      const overview = await apiFetch<SecurityOverview>("/api/security/overview");
+      setSecurityOverview(overview);
+      setPrivacySettings(overview.privacy);
+      onLoadRemoteImagesChange(overview.privacy.remote_images_enabled);
     } catch (loadError) {
       setSecurityError(loadError instanceof Error ? loadError.message : "Security settings unavailable");
+    }
+  }
+  async function updatePrivacy(patch: Partial<PrivacySettings>) {
+    setPrivacyBusy(true);
+    setSecurityError("");
+    try {
+      const next = await apiFetch<PrivacySettings>("/api/privacy-settings", { method: "PATCH", body: JSON.stringify(patch) });
+      setPrivacySettings(next);
+      if ("remote_images_enabled" in patch) onLoadRemoteImagesChange(next.remote_images_enabled);
+      setNotice("Privacy preferences saved");
+      const overview = await apiFetch<SecurityOverview>("/api/security/overview");
+      setSecurityOverview(overview);
+    } catch (privacyError) {
+      setSecurityError(privacyError instanceof Error ? privacyError.message : "Privacy preferences could not be saved");
+    } finally {
+      setPrivacyBusy(false);
+    }
+  }
+  async function exportAccountData() {
+    setAccountExportBusy(true);
+    setSecurityError("");
+    try {
+      const authSession = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch("/api/account/export", { headers: authSession?.access_token ? { authorization: `Bearer ${authSession.access_token}` } : {} });
+      if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || `Export failed (${response.status})`); }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a"); link.href = url; link.download = `postveil-account-export-${new Date().toISOString().slice(0, 10)}.json`; link.click(); URL.revokeObjectURL(url);
+      setNotice("Account export downloaded");
+      const overview = await apiFetch<SecurityOverview>("/api/security/overview"); setSecurityOverview(overview);
+    } catch (exportError) {
+      setSecurityError(exportError instanceof Error ? exportError.message : "Account export could not be downloaded");
+    } finally {
+      setAccountExportBusy(false);
+    }
+  }
+  async function deleteAccount() {
+    const email = await prompt({ title: "Delete your Postveil account?", message: "This permanently removes your mailbox data and cannot be undone. Enter your sign-in email to continue.", placeholder: session.user.email || "you@example.com", inputType: "email", confirmLabel: "Continue", danger: true });
+    if (!email || email.trim().toLowerCase() !== (session.user.email || "").toLowerCase()) { if (email) setSecurityError("The sign-in email did not match."); return; }
+    const phrase = await prompt({ title: "Confirm permanent deletion", message: "Type DELETE MY ACCOUNT exactly. Your mailbox and tracked storage objects will be removed.", placeholder: "DELETE MY ACCOUNT", confirmLabel: "Delete account", danger: true });
+    if (phrase !== "DELETE MY ACCOUNT") { if (phrase !== null) setSecurityError("The confirmation phrase did not match."); return; }
+    setSecurityBusy(true);
+    setSecurityError("");
+    try {
+      await apiFetch("/api/account/delete", { method: "POST", body: JSON.stringify({ email, confirmation: phrase }) });
+      await requireSupabase().auth.signOut({ scope: "global" });
+      window.location.reload();
+    } catch (deleteError) {
+      setSecurityError(deleteError instanceof Error ? deleteError.message : "The account could not be deleted");
+    } finally {
+      setSecurityBusy(false);
     }
   }
   async function registerPasskey() {
@@ -2859,7 +2983,7 @@ function SettingsPanel({
       );
   }, [tab]);
   useEffect(() => {
-    if (tab === "security") void loadSecurity();
+    if (tab === "security" || tab === "privacy") void loadSecurity();
     if (tab === "spam") void loadScreeningQueue();
     if (tab === "organize") void loadRetentionPolicies();
   }, [tab]);
@@ -2875,6 +2999,28 @@ function SettingsPanel({
       document.body.style.overflow = previousOverflow;
     };
   }, [onClose]);
+  const activePrivacy: PrivacySettings = privacySettings || {
+    owner_id: session.user.id,
+    ai_processing_enabled: false,
+    login_alerts_enabled: true,
+    remote_images_enabled: loadRemoteImages,
+    privacy_analytics_enabled: false,
+    metadata_minimization_enabled: true,
+    external_portal_enabled: true,
+    storage_region: "default",
+    no_training_ai_policy_acknowledged: false,
+  };
+  const securityChecks = [
+    { label: "Passkey or hardware security key", enabled: passkeys.length > 0 },
+    { label: "Authenticator app (TOTP)", enabled: mfaFactors.length > 0 },
+    { label: "Recovery codes saved", enabled: recoveryCodeCount > 0 },
+    { label: "Verified recovery email", enabled: recoveryMethods.some((method) => Boolean(method.verified_at)) },
+    { label: "Login alerts", enabled: activePrivacy.login_alerts_enabled },
+    { label: "Remote images blocked", enabled: !activePrivacy.remote_images_enabled },
+    { label: "Metadata minimization", enabled: activePrivacy.metadata_minimization_enabled },
+    { label: "AI processing off by default", enabled: !activePrivacy.ai_processing_enabled },
+  ];
+  const securityScore = Math.round((securityChecks.filter((check) => check.enabled).length / securityChecks.length) * 100);
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -2896,6 +3042,7 @@ function SettingsPanel({
             [
               ["appearance", "Appearance"],
               ["security", "Security & access"],
+              ["privacy", "Privacy & encryption"],
               ["organize", "Folders & labels"],
               ["contacts", "Contacts"],
               ["spam", "Spam & trust"],
@@ -2984,6 +3131,55 @@ function SettingsPanel({
               <p>Postveil keeps your recovery addresses separate from your sign-in email. A recovery request never reveals whether an account exists, and every reset link is one-time.</p>
               <small className="field-help">Keep at least one recovery address available and store your authenticator app on a device you control. Recovery email can reset access; it cannot bypass an enabled authenticator challenge.</small>
             </div>
+          </div>
+        )}
+        {tab === "privacy" && (
+          <div className="privacy-center">
+            <div className="privacy-hero">
+              <div>
+                <p className="eyebrow">SECURITY CHECKLIST</p>
+                <h3>Your account protection</h3>
+                <p>Review the controls that protect sign-in, mailbox content, and external sharing.</p>
+              </div>
+              <div className={`security-score security-score-${securityScore >= 80 ? "good" : securityScore >= 50 ? "fair" : "low"}`} aria-label={`Security score ${securityScore} out of 100`}><strong>{securityScore}</strong><span>/ 100</span><small>security score</small></div>
+            </div>
+            <div className="setting-card privacy-checklist-card">
+              <div className="setting-card-head"><div><h3>Checklist</h3><p>Complete the high-value controls first. Hardware keys are supported through passkeys.</p></div><ShieldAlert size={18} aria-hidden="true" /></div>
+              <div className="security-checklist">{securityChecks.map((check) => <div className={`security-check ${check.enabled ? "is-complete" : ""}`} key={check.label}><span aria-hidden="true">{check.enabled ? "✓" : "·"}</span><strong>{check.label}</strong><small>{check.enabled ? "Protected" : "Recommended"}</small></div>)}</div>
+            </div>
+            <div className="setting-card privacy-controls-card">
+              <div className="setting-card-head"><div><h3>Privacy controls</h3><p>These choices are stored per account. Postveil does not use mailbox content for analytics.</p></div><ShieldAlert size={18} aria-hidden="true" /></div>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.login_alerts_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ login_alerts_enabled: event.target.checked })} /><span><strong>Login alerts</strong><small>Notify this mailbox when a new sign-in looks unfamiliar.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={!activePrivacy.remote_images_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ remote_images_enabled: !event.target.checked })} /><span><strong>Block remote images by default</strong><small>Inline images still work. Remote images load only through the privacy proxy after you allow them.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.metadata_minimization_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ metadata_minimization_enabled: event.target.checked })} /><span><strong>Minimize metadata</strong><small>Keep diagnostic details limited to what is needed for delivery, abuse prevention, and your security history.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.privacy_analytics_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ privacy_analytics_enabled: event.target.checked })} /><span><strong>Privacy-preserving product analytics</strong><small>Off by default. Only aggregate, non-message interaction counts may be collected when enabled.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.no_training_ai_policy_acknowledged} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ no_training_ai_policy_acknowledged: event.target.checked })} /><span><strong>Acknowledge the no-training AI policy</strong><small>AI providers must be configured with a no-training setting before mailbox text can be sent to them.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.ai_processing_enabled} disabled={privacyBusy || !activePrivacy.no_training_ai_policy_acknowledged} onChange={(event) => void updatePrivacy({ ai_processing_enabled: event.target.checked })} /><span><strong>Allow AI processing</strong><small>Disabled by default. When enabled, only the minimum requested text should be sent for an on-demand feature.</small></span></label>
+              <label className="privacy-select-row"><span><strong>Storage region preference</strong><small>This preference is saved now; actual routing requires a matching storage deployment.</small></span><select value={activePrivacy.storage_region} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ storage_region: event.target.value })}><option value="default">Deployment default</option><option value="ap-southeast-1">Asia Pacific</option><option value="us-east-1">United States</option><option value="eu-west-1">European Union</option><option value="custom">Custom organization region</option></select></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.external_portal_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ external_portal_enabled: event.target.checked })} /><span><strong>Protected external-message portal</strong><small>Allow expiring, optionally password-protected links for recipients outside Postveil.</small></span></label>
+            </div>
+            <div className="setting-card encryption-boundary-card">
+              <div className="setting-card-head"><div><h3>Encryption boundary</h3><p>These labels describe what is actually protected in the current deployment.</p></div><ShieldAlert size={18} aria-hidden="true" /></div>
+              <div className="capability-row"><div><strong>Transport encryption</strong><small>TLS is required for the application and provider callbacks.</small></div><span className="capability-status ready">Active</span></div>
+              <div className="capability-row"><div><strong>Protected message portal</strong><small>Payloads are encrypted at rest with a Worker secret and expire automatically.</small></div><span className="capability-status ready">Active</span></div>
+              <div className="capability-row"><div><strong>Client-side E2EE, PGP, key transparency, and user-held keys</strong><small>Not active. Ordinary SMTP cannot provide universal E2EE, and this server-side mailbox path still handles plaintext for delivery.</small></div><span className="capability-status pending">Not enabled</span></div>
+              <div className="capability-row"><div><strong>Encrypted attachments, encrypted backups, key escrow, and automatic rotation</strong><small>Requires a dedicated envelope-key service and migration of existing stored objects before it can be enabled safely.</small></div><span className="capability-status pending">Architecture required</span></div>
+            </div>
+            <div className="setting-card enterprise-identity-card">
+              <div className="setting-card-head"><div><h3>Identity providers</h3><p>Social OAuth buttons and domain-based SAML/custom OIDC sign-in are available on the login screen when enabled in Supabase Auth.</p></div><Users size={18} aria-hidden="true" /></div>
+              <div className="capability-row"><div><strong>Google, Microsoft, and GitHub</strong><small>OAuth credentials and redirect URLs must be configured in Supabase before users can sign in.</small></div><span className="capability-status setup">Project setup</span></div>
+              <div className="capability-row"><div><strong>SAML 2.0 and custom OIDC</strong><small>Organization domain-based SSO is supported by Supabase Auth. Register the provider and domain before advertising it to members.</small></div><span className="capability-status setup">Organization setup</span></div>
+            </div>
+            <div className="setting-card data-rights-card">
+              <div className="setting-card-head"><div><h3>Your data</h3><p>Export your mailbox data or permanently remove the account. Exported JSON includes message content and attachment metadata, not binary object-storage files.</p></div><Download size={18} aria-hidden="true" /></div>
+              <div className="security-actions"><button className="secondary-button" onClick={() => void exportAccountData()} disabled={accountExportBusy}>{accountExportBusy ? "Preparing export…" : "Export my data"}</button><button className="danger-outline-button" onClick={() => void deleteAccount()} disabled={securityBusy}>Delete account</button></div>
+            </div>
+            <div className="setting-card security-activity-card">
+              <div className="setting-card-head"><div><h3>Recent security activity</h3><p>IP addresses are shown as short fingerprints rather than stored in readable form.</p></div><History size={18} aria-hidden="true" /></div>
+              {(securityOverview?.activity || []).slice(0, 12).map((event) => <div className="settings-item" key={event.id}><div><strong>{event.eventType.replace(/_/g, " ")}</strong><small>{new Date(event.createdAt).toLocaleString()} · {event.ipFingerprint || "no IP fingerprint"}</small></div>{event.suspicious && <span className="admin-badge security"><ShieldAlert size={12} /> Review</span>}</div>)}
+              {!securityOverview?.activity.length && <div className="rule-empty">No security events recorded yet.</div>}
+            </div>
+            <div className="privacy-disclosure"><strong>Important:</strong> Postveil does not claim universal end-to-end encryption. Use the protected portal or compatible PGP clients for recipients who cannot receive encrypted mail directly.</div>
           </div>
         )}
         {tab === "appearance" && (
