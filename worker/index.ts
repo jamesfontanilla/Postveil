@@ -1064,6 +1064,38 @@ async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor
     const rows = await dbRequest<Organization[]>(env, `organizations?id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ name, settings: nextSettings, updated_at: new Date().toISOString() }) });
     return json(rows[0] || { ...organization, name, settings: nextSettings });
   }
+  if (request.method === "GET" && url.pathname === "/api/admin/organization-blocklist") {
+    return json(await dbRequest<JsonRecord[]>(env, `organization_sender_blocks?organization_id=eq.${encodeURIComponent(organization.id)}&order=match_type.asc,match_value.asc`).catch(() => []));
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/organization-blocklist") {
+    const body = (await request.json()) as JsonRecord;
+    const matchType = body.matchType === "domain" ? "domain" : body.matchType === "address" ? "address" : "";
+    if (!matchType) return error("Choose a sender or domain");
+    let matchValue = "";
+    try { matchValue = normalizeSenderPolicyValue(matchType, body.matchValue); } catch (blockError) { return error(blockError instanceof Error ? blockError.message : "Blocklist value is invalid"); }
+    try {
+      const rows = await dbRequest<JsonRecord[]>(env, "organization_sender_blocks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ organization_id: organization.id, created_by: actor.id, match_type: matchType, match_value: matchValue, enabled: true }) });
+      return json(rows[0], 201);
+    } catch (blockError) {
+      return error(blockError instanceof Error ? blockError.message : "That organization block already exists", 409);
+    }
+  }
+  const organizationBlockMatch = url.pathname.match(/^\/api\/admin\/organization-blocklist\/([^/]+)$/);
+  if (organizationBlockMatch && request.method === "PATCH") {
+    const id = decodeURIComponent(organizationBlockMatch[1]);
+    const existing = await dbRequest<JsonRecord[]>(env, `organization_sender_blocks?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}&limit=1`);
+    if (!existing[0]) return error("Organization block not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+    const rows = await dbRequest<JsonRecord[]>(env, `organization_sender_blocks?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || { ...existing[0], ...patch });
+  }
+  if (organizationBlockMatch && request.method === "DELETE") {
+    const id = decodeURIComponent(organizationBlockMatch[1]);
+    await dbRequest(env, `organization_sender_blocks?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "DELETE" });
+    return json({ ok: true });
+  }
   if (request.method === "GET" && url.pathname === "/api/admin/groups") return json(await groupList(env, organization.id));
   if (request.method === "POST" && url.pathname === "/api/admin/groups") {
     const body = (await request.json()) as JsonRecord;
@@ -1496,7 +1528,7 @@ async function saveAttachments(env: Env, ownerId: string, messageId: string, att
   return { stored, blocked };
 }
 
-async function assessInbound(env: Env, ownerId: string, mailboxId: string, envelopeFrom: string, headerFrom: string, subject: string, textBody: string, htmlBody: string, parsed: { headers?: Array<{ key: string; value: string }>; attachments?: Array<{ filename?: string | null; mimeType?: string }> }): Promise<{ score: number; reasons: string[]; focusedScore: number; focusedCategory: string; authResults: TrustAuthResults; trustScore: number; trustReasons: string[]; trustEvidence: JsonRecord; receivedAuthAt: string | null; senderFirstSeen: boolean; knownContact: boolean; replyToMismatch: boolean; linkCount: number; trackingPixelCount: number; policyId: string | null; policyAction: string | null; policyTargetFolderId: string | null }> {
+async function assessInbound(env: Env, ownerId: string, mailboxId: string, envelopeFrom: string, headerFrom: string, subject: string, textBody: string, htmlBody: string, parsed: { headers?: Array<{ key: string; value: string }>; attachments?: Array<{ filename?: string | null; mimeType?: string }> }, fromName = "", mailboxAddress = ""): Promise<{ score: number; reasons: string[]; focusedScore: number; focusedCategory: string; authResults: TrustAuthResults; trustScore: number; trustReasons: string[]; trustEvidence: JsonRecord; receivedAuthAt: string | null; senderFirstSeen: boolean; knownContact: boolean; replyToMismatch: boolean; linkCount: number; trackingPixelCount: number; policyId: string | null; policyAction: string | null; policyTargetFolderId: string | null }> {
   let score = 0;
   let focusedScore = 0.5;
   const reasons: string[] = [];
@@ -1507,6 +1539,8 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   const dmarc = authResults.dmarc;
   const authFailures = [spf, dkim, dmarc].filter((status) => status === "fail" || status === "softfail" || status === "permerror" || status === "temperror");
   if (dmarc === "fail") { score += 0.18; reasons.push("DMARC failure"); }
+  if (spf === "fail" || spf === "softfail" || spf === "permerror" || spf === "temperror") reasons.push("SPF failure");
+  if (dkim === "fail" || dkim === "softfail" || dkim === "permerror" || dkim === "temperror") reasons.push("DKIM failure");
   if (authFailures.length) { score += 0.18 + Math.min(0.12, (authFailures.length - 1) * 0.06); reasons.push("authentication failure"); }
   if ([spf, dkim, dmarc].filter(Boolean).length >= 2 && authFailures.length === 0 && [spf, dkim, dmarc].every((status) => !status || status === "pass")) { score -= 0.08; reasons.push("authentication passed"); }
   if (envelopeFrom && headerFrom && cleanAddress(envelopeFrom) !== cleanAddress(headerFrom)) { score += 0.12; reasons.push("envelope/header sender mismatch"); }
@@ -1517,13 +1551,18 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   });
   const sender = cleanAddress(headerFrom || envelopeFrom);
   const replyTo = cleanAddress(headerValue(parsed, "reply-to") || headerFrom);
-  const linkEvidence = extractTrustEvidence({ sender, replyTo, subject, textBody, htmlBody, authentication: authResults });
+  const linkEvidence = extractTrustEvidence({ sender, replyTo, fromName, mailboxAddress, subject, textBody, htmlBody, authentication: authResults, attachments: parsed.attachments });
   if (linkEvidence.reply_to_mismatch) { score += 0.10; reasons.push("reply-to mismatch"); }
   const content = `${subject} ${textBody} ${stripHtml(htmlBody)}`;
   const urls = content.match(/https?:\/\/[^\s"'<>]+/gi) || [];
   if (urls.length >= 5) { score += 0.10; reasons.push("many links"); }
   if (urls.some((url) => /(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|cutt\.ly)\//i.test(url))) { score += 0.08; reasons.push("shortened link"); }
   if (urls.some((url) => /^(?:https?:\/\/)?(?:[^/]+@)?(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:[/?#]|$)/i.test(url) || urlHost(url).startsWith("xn--"))) { score += 0.08; reasons.push("suspicious link host"); }
+  if (linkEvidence.lookalike_domain) { score += 0.16; reasons.push(`lookalike ${linkEvidence.lookalike_domain} domain`); }
+  if (linkEvidence.display_name_spoof) { score += 0.14; reasons.push("display-name spoofing signal"); }
+  if (linkEvidence.suspicious_reply_to) { score += 0.12; reasons.push("suspicious reply-to domain"); }
+  if (linkEvidence.qr_code_count) { score += 0.08; reasons.push("QR-code candidate"); }
+  if (linkEvidence.link_reputation.some((item) => item.reputation === "suspicious")) { score += 0.10; reasons.push("link reputation warning"); }
   if (hasDeceptiveLink(htmlBody)) { score += 0.16; reasons.push("deceptive link text"); }
   if (linkEvidence.tracking_pixel_count) { score += Math.min(0.10, 0.04 + linkEvidence.tracking_pixel_count * 0.02); reasons.push("tracking pixel"); }
   const credentialRequest = /(?:verify|confirm|unlock|suspend|password|login|sign[ -]?in|security code|one[- ]?time code|account)/i.test(content);
@@ -1534,6 +1573,7 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   const suspicious = (parsed.attachments || []).filter((item) => isSuspiciousAttachment(String(item.filename || ""), String(item.mimeType || "")));
   if (blocked.length) { score = Math.max(score, 0.90); reasons.push("dangerous attachment"); }
   if (suspicious.length && !blocked.length) { score += 0.16; reasons.push("suspicious attachment type"); }
+  if ((linkEvidence.attachment_reputation || []).some((item) => item.status === "suspicious")) reasons.push("attachment reputation warning");
   if (!textBody.trim() && htmlBody) { score += 0.04; reasons.push("HTML-only message"); }
   const knownContact = await dbRequest<Array<{ id: string }>>(env, `contacts?owner_id=eq.${encodeURIComponent(ownerId)}&email=eq.${encodeURIComponent(sender)}&limit=1`).catch(() => []);
   const previous = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&from_address=eq.${encodeURIComponent(sender)}&select=id&order=created_at.desc&limit=25`).catch(() => []);
@@ -1559,7 +1599,7 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   score = Math.max(0, Math.min(1, score));
   focusedScore = Math.max(0, Math.min(1, focusedScore - score * 0.35));
   const trustScore = Math.max(0, Math.min(1, 1 - score));
-  const trustEvidence = extractTrustEvidence({ sender, replyTo, subject, textBody, htmlBody, authentication: authResults, firstSeenSender: !previous[0], knownContact: Boolean(knownContact[0]), policyAction: senderPolicy?.action || null, policyId: senderPolicy?.id || null });
+  const trustEvidence = extractTrustEvidence({ sender, replyTo, fromName, mailboxAddress, subject, textBody, htmlBody, authentication: authResults, attachments: parsed.attachments, firstSeenSender: !previous[0], knownContact: Boolean(knownContact[0]), policyAction: senderPolicy?.action || null, policyId: senderPolicy?.id || null });
   return {
     score,
     reasons,
@@ -1942,25 +1982,31 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
 
   const finishInbound = async (): Promise<void> => {
     try {
-      const assessment = await assessInbound(env, ownerId, mailbox.id, envelopeFrom, headerFrom, subject, textBody, htmlBody, parsed);
+      const assessment = await assessInbound(env, ownerId, mailbox.id, envelopeFrom, headerFrom, subject, textBody, htmlBody, parsed, fromName, destination);
       const rawKey = `raw/${ownerId}/${messageId}.eml`;
       await putObject(env, rawKey, new Uint8Array(raw), "message/rfc822");
       const attachmentResult = await saveAttachments(env, ownerId, messageId, parsed.attachments ?? []);
+      const mailboxSettings = await getMailboxAdminSettings(env, mailbox);
+      const organizationId = mailboxSettings?.organization_id || null;
       const [blockedAddressRows, blockedDomainRows] = await Promise.all([
         dbRequest<JsonRecord[]>(env, `sender_blocks?owner_id=eq.${encodeURIComponent(ownerId)}&match_type=eq.address&match_value=eq.${encodeURIComponent(headerFrom)}&enabled=eq.true&limit=1`).catch(() => []),
         dbRequest<JsonRecord[]>(env, `sender_blocks?owner_id=eq.${encodeURIComponent(ownerId)}&match_type=eq.domain&match_value=eq.${encodeURIComponent(domainOf(headerFrom))}&enabled=eq.true&limit=1`).catch(() => []),
       ]);
-      const blockedSender = Boolean(blockedAddressRows[0] || blockedDomainRows[0]);
-      const reasons = [...assessment.reasons, ...(blockedSender ? ["sender is blocked"] : []), ...(attachmentResult.blocked.length ? [`blocked attachments: ${attachmentResult.blocked.join(", ")}`] : [])];
+      const [organizationBlockedAddressRows, organizationBlockedDomainRows] = organizationId ? await Promise.all([
+        dbRequest<JsonRecord[]>(env, `organization_sender_blocks?organization_id=eq.${encodeURIComponent(organizationId)}&match_type=eq.address&match_value=eq.${encodeURIComponent(headerFrom)}&enabled=eq.true&limit=1`).catch(() => []),
+        dbRequest<JsonRecord[]>(env, `organization_sender_blocks?organization_id=eq.${encodeURIComponent(organizationId)}&match_type=eq.domain&match_value=eq.${encodeURIComponent(domainOf(headerFrom))}&enabled=eq.true&limit=1`).catch(() => []),
+      ]) : [[], []] as [JsonRecord[], JsonRecord[]];
+      const organizationBlocked = Boolean(organizationBlockedAddressRows[0] || organizationBlockedDomainRows[0]);
+      const blockedSender = Boolean(blockedAddressRows[0] || blockedDomainRows[0] || organizationBlocked);
+      const reasons = [...assessment.reasons, ...(blockedSender ? [organizationBlocked ? "organization blocklist match" : "sender is blocked"] : []), ...(attachmentResult.blocked.length ? [`blocked attachments: ${attachmentResult.blocked.join(", ")}`] : [])];
       const explicitPolicy = blockedSender ? "spam" : assessment.policyAction;
       const effectiveScore = blockedSender ? 1 : assessment.score;
       const customFolderId = explicitPolicy === "folder" ? assessment.policyTargetFolderId : null;
       const folder = explicitPolicy === "screen" ? "inbox" : explicitPolicy === "archive" && effectiveScore < SPAM_THRESHOLD ? "archive" : explicitPolicy === "folder" && customFolderId && effectiveScore < SPAM_THRESHOLD ? "custom" : effectiveScore >= SPAM_THRESHOLD || explicitPolicy === "spam" ? "spam" : "inbox";
       const screeningStatus = explicitPolicy === "screen" || (effectiveScore >= 0.35 && effectiveScore < SPAM_THRESHOLD) ? "review" : folder === "spam" ? "blocked" : "none";
-      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, custom_folder_id: folder === "custom" ? customFolderId : null, status: "received", delivery_status: "received", screening_status: screeningStatus, screening_policy_id: assessment.policyId, raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), unsubscribe_url: unsubscribeUrl, spam_score: effectiveScore, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, auth_spf: assessment.authResults.spf, auth_dkim: assessment.authResults.dkim, auth_dmarc: assessment.authResults.dmarc, auth_arc: assessment.authResults.arc, auth_tls: assessment.authResults.tls, trust_score: assessment.trustScore, trust_reasons: reasons, trust_evidence: { ...assessment.trustEvidence, blocked_attachments: attachmentResult.blocked, blocked_sender: blockedSender }, received_auth_at: assessment.receivedAuthAt, sender_first_seen: assessment.senderFirstSeen, known_contact: assessment.knownContact, reply_to_mismatch: assessment.replyToMismatch, link_count: assessment.linkCount, tracking_pixel_count: assessment.trackingPixelCount, updated_at: new Date().toISOString() }) });
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, custom_folder_id: folder === "custom" ? customFolderId : null, status: "received", delivery_status: "received", screening_status: screeningStatus, screening_policy_id: assessment.policyId, raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), unsubscribe_url: unsubscribeUrl, spam_score: effectiveScore, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, auth_spf: assessment.authResults.spf, auth_dkim: assessment.authResults.dkim, auth_dmarc: assessment.authResults.dmarc, auth_arc: assessment.authResults.arc, auth_tls: assessment.authResults.tls, trust_score: assessment.trustScore, trust_reasons: reasons, trust_evidence: { ...assessment.trustEvidence, blocked_attachments: attachmentResult.blocked, blocked_sender: blockedSender, organization_blocked: organizationBlocked, malware_scanner: "static_only" }, received_auth_at: assessment.receivedAuthAt, sender_first_seen: assessment.senderFirstSeen, known_contact: assessment.knownContact, reply_to_mismatch: assessment.replyToMismatch, link_count: assessment.linkCount, tracking_pixel_count: assessment.trackingPixelCount, updated_at: new Date().toISOString() }) });
       await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, policy_id: assessment.policyId, decision: screeningStatus === "blocked" ? "blocked" : screeningStatus === "review" ? "screened" : "allowed", previous_folder: "inbox" }) }).catch(() => undefined);
       if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
-      const mailboxSettings = await getMailboxAdminSettings(env, mailbox);
       if (mailboxSettings && attachmentResult.stored.length) {
         const storedBytes = attachmentResult.stored.reduce((total, attachment) => total + Math.max(0, Number(attachment.byte_size || 0)), 0);
         await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, { method: "PATCH", body: JSON.stringify({ storage_used_bytes: mailboxSettings.storage_used_bytes + storedBytes, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
@@ -3826,9 +3872,16 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (!messageId || !reportType) return error("Message and report type are required");
     const message = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
     if (!message[0]) return error("Message not found", 404);
-    await dbRequest(env, "message_reports", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: messageId, report_type: reportType }) });
-    await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ folder: reportType === "phishing" ? "quarantine" : "spam", previous_folder: message[0].folder, updated_at: new Date().toISOString() }) });
-    return json({ ok: true, reportType });
+    const previousFolder = String(message[0].folder || "inbox");
+    await dbRequest(env, "message_reports", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: messageId, report_type: reportType, details: reportType === "phishing" ? "User reported suspected phishing; escalated to quarantine." : "User reported suspected spam." }) });
+    const existingReasons = Array.isArray(message[0].spam_reasons) ? message[0].spam_reasons.map(String) : [];
+    const existingEvidence = objectValue(message[0].trust_evidence);
+    const patch: JsonRecord = reportType === "phishing"
+      ? { folder: "quarantine", screening_status: "blocked", previous_folder: previousFolder, spam_score: Math.max(1, Number(message[0].spam_score || 0)), spam_reasons: [...new Set([...existingReasons, "user reported phishing", "automatic phishing escalation"])], trust_evidence: { ...existingEvidence, phishing_reported: true, phishing_escalated: true }, updated_at: new Date().toISOString() }
+      : { folder: "spam", screening_status: "blocked", previous_folder: previousFolder, spam_reasons: [...new Set([...existingReasons, "user reported spam"])], updated_at: new Date().toISOString() };
+    await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify(patch) });
+    await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: messageId, decision: reportType === "phishing" ? "blocked" : "screened", previous_folder: previousFolder }) }).catch(() => undefined);
+    return json({ ok: true, reportType, escalated: reportType === "phishing" });
   }
   if (request.method === "GET" && url.pathname === "/api/contacts") { const q = url.searchParams.get("q")?.trim(); const path = `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc${q ? `&or=${encodeURIComponent(`email.ilike.*${q}*,display_name.ilike.*${q}*`)}` : ""}`; return json(await dbRequest(env, path)); }
   if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!email.includes("@")) return error("A valid email is required"); const avatarUrl = typeof body.avatarUrl === "string" && body.avatarUrl.trim() ? body.avatarUrl.trim() : null; if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return error("Profile image URL must use https://"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]), avatar_url: avatarUrl, company: body.company || null, notes: body.notes || null }) }); return json(rows[0], 201); }
