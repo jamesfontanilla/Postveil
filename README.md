@@ -1,6 +1,6 @@
 # Postveil — self-hosted custom-domain mail
 
-Postveil is a Cloudflare Worker and React webmail application for a custom domain. It can receive mail through Cloudflare Email Routing, parse MIME messages, store metadata in Supabase Postgres, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through Brevo.
+Postveil is a Cloudflare Worker and React webmail application for a custom domain. It can receive mail through Cloudflare Email Routing, parse MIME messages, store metadata in Supabase Postgres, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through a prioritized provider pool.
 
 This repository is a self-hosted reference implementation. It is currently designed around one owner per deployment; it is not a hosted multi-tenant service. Each deployment must use its own Supabase project, provider accounts, storage bucket, domain, and secrets.
 
@@ -9,6 +9,10 @@ This repository is a self-hosted reference implementation. It is currently desig
 - Supabase Auth provides the application session and Row Level Security protects direct database access.
 - The Worker supports Brevo, Amazon SES, Mailgun, Postmark, SendGrid, and an HTTPS generic-SMTP relay. Providers are selected by priority and fail over when a provider is unavailable.
 - Provider webhooks update delivery state, bounce/complaint suppression, reputation, and the message timeline with replay protection.
+- Scheduled and recurring sends are durable Worker outbox jobs. Mail merge expands into one private outbound message per recipient and substitutes contact variables server-side.
+- Delivery, read, and confirmation requests are emitted as standards-based message headers where supported by the selected provider; provider callbacks are normalized into receipt events.
+- Confidential mode sends an expiring, password-capable protected-message link. The portal payload is encrypted at rest with a Worker secret; this mode is not end-to-end encryption because the Worker must deliver the content.
+- Reply tracking closes tracked follow-ups when an inbound reply lands in the same conversation.
 - The same Worker serves the built responsive web app through Cloudflare Workers Assets.
 
 ## Security boundaries
@@ -92,17 +96,19 @@ POSTMARK_WEBHOOK_SECRET (optional)
 SENDGRID_WEBHOOK_SECRET (optional)
 SES_WEBHOOK_SECRET (optional)
 SMTP_WEBHOOK_SECRET (optional)
+CONFIDENTIAL_LINK_SECRET (required for confidential mode)
+CONFIDENTIAL_ENCRYPTION_KEY (required for confidential mode)
 ```
 
 `APP_DOMAIN` and `DEFAULT_FROM_EMAIL` must use a domain that is verified with your email provider. `ALLOWED_SENDER_DOMAINS` may contain additional verified domains separated by commas. The default mailbox is `DEFAULT_FROM_EMAIL`, or `postmaster@APP_DOMAIN` when no default is set.
 
-Configure the Brevo webhook to send `POST` requests with the secret in the `x-webhook-secret` header. Query-string webhook tokens are deliberately not accepted.
+Configure each provider webhook to send `POST` requests with the deployment's provider secret in the `x-webhook-secret` header. Query-string webhook tokens are deliberately not accepted. Provider-specific webhook payloads are normalized for delivery, bounce, complaint, open, click, and receipt events; the provider must still be configured to emit those events.
 
 ## Deployment
 
 1. Create your Supabase project and apply the migrations.
 2. Create a private Backblaze B2 bucket and a least-privilege, expiring application key.
-3. Authenticate your sending domain and sender in Brevo.
+3. Authenticate your sending domain and sender with the provider(s) you enable. Amazon SES accounts must be out of the sandbox before sending to arbitrary recipients.
 4. Configure DNS for MX, SPF, DKIM, and DMARC.
 5. For a Cloudflare Git deployment, set the build variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the project's build settings. The publishable key is intended for the browser; never use a service-role key here.
 6. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
@@ -133,6 +139,7 @@ Do not deploy the example domain or example credentials. Do not reuse another de
 - `/api/auto-replies` — automatic-reply configuration
 - `/api/integrations` — provider connection metadata
 - `/api/drafts` — autosaved drafts
+- `/api/drafts/:id/versions` — draft history and version restore
 - `/api/send` — authenticated provider-routed send with threading, CC/BCC, attachments, quotas, suppression checks, tracking controls, and scheduled send
 - `/api/attachments` — private B2 upload and signed download URLs
 - `/api/webhooks/:provider` — provider delivery callback with idempotency and replay protection
@@ -150,6 +157,8 @@ Do not deploy the example domain or example credentials. Do not reuse another de
 - `/api/admin/mailboxes/:id` — mailbox lifecycle, quotas, and sending limits
 - `/api/admin/mailboxes/:id/delegates/:memberId` — shared mailbox permissions
 - `/api/admin/groups` — distribution lists and group addresses
+- `/share/:token` — public protected-message portal for confidential delivery
+- `/api/share/:token/unlock` — one-time/password-checked protected-message access
 
 ## Development checks
 
@@ -166,6 +175,13 @@ Google/Microsoft calendar, OneDrive, Teams, AI, push delivery, and third-party
 antivirus scanning still require provider credentials or a separately operated
 service; the UI exposes these as integration points rather than pretending they
 are connected.
+
+Composition delivery is implemented in the trusted Worker: recurring messages
+generate the next durable outbox item after successful delivery, mail merge
+creates isolated per-recipient messages, contact variables are expanded on the
+server, and receipt events are recorded from provider callbacks. Provider
+support still depends on the provider account's webhook/event configuration;
+SMTP relay deployments must forward the same receipt headers and event payloads.
 
 ## License
 
