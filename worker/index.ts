@@ -1628,6 +1628,8 @@ function ruleMatches(rule: Rule, context: RuleContext): boolean {
 }
 
 async function applyRuleActions(env: Env, ownerId: string, messageId: string, actions: JsonRecord, forwardInbound?: (address: string) => Promise<void>): Promise<JsonRecord> {
+  const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1&select=id,thread_id,mailbox_id,from_address,subject,text_body,raw_object_key,folder`);
+  const message = messageRows[0] || {};
   const patch: JsonRecord = {};
   if (typeof actions.folder === "string" && SYSTEM_FOLDERS.includes(actions.folder as typeof SYSTEM_FOLDERS[number])) {
     patch.folder = actions.folder;
@@ -1635,16 +1637,17 @@ async function applyRuleActions(env: Env, ownerId: string, messageId: string, ac
   }
   if (typeof actions.customFolderId === "string") {
     const folders = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(actions.customFolderId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
-    if (folders[0]) {
-      patch.folder = "custom";
-      patch.custom_folder_id = actions.customFolderId;
-    }
+    if (folders[0]) { patch.folder = "custom"; patch.custom_folder_id = actions.customFolderId; }
   }
   if (typeof actions.markRead === "boolean") patch.is_read = actions.markRead;
   if (typeof actions.star === "boolean") patch.is_starred = actions.star;
   if (typeof actions.pin === "boolean") patch.is_pinned = actions.pin;
   if (typeof actions.flag === "boolean") patch.is_flagged = actions.flag;
   if (typeof actions.priority === "number") patch.priority = Math.max(0, Math.min(2, actions.priority));
+  if (Number.isInteger(actions.snoozeMinutes) && Number(actions.snoozeMinutes) > 0) {
+    patch.previous_folder = String(message.folder || "inbox");
+    patch.snoozed_until = new Date(Date.now() + Math.min(43200, Number(actions.snoozeMinutes)) * 60_000).toISOString();
+  }
   if (Object.keys(patch).length) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify(patch) });
   if (typeof actions.label === "string" && actions.label.trim()) {
     const name = actions.label.trim();
@@ -1653,16 +1656,84 @@ async function applyRuleActions(env: Env, ownerId: string, messageId: string, ac
     if (label) await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, label_id: label.id }) });
   }
   if (typeof actions.forwardTo === "string" && forwardInbound) await forwardInbound(cleanAddress(actions.forwardTo));
+
+  const actionAlreadyRecorded = async (action: string): Promise<boolean> => {
+    const rows = await dbRequest<JsonRecord[]>(env, `mail_events?owner_id=eq.${encodeURIComponent(ownerId)}&message_id=eq.${encodeURIComponent(messageId)}&event_type=eq.rule_action&order=created_at.desc&limit=100&select=payload`).catch(() => []);
+    return rows.some((row) => String(objectValue(row.payload).action || "") === action);
+  };
+  const recordAction = async (action: string, payload: JsonRecord): Promise<void> => {
+    await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, provider: "postveil", event_type: "rule_action", payload: { action, ...payload } }) }).catch(() => undefined);
+  };
+  const optionalAction = async (action: string, callback: () => Promise<JsonRecord | void>): Promise<void> => {
+    if (await actionAlreadyRecorded(action)) return;
+    try { const result = await callback(); await recordAction(action, result || {}); }
+    catch (actionError) { console.error(`Rule action ${action} failed`, actionError); await recordAction(`${action}:failed`, { error: actionError instanceof Error ? actionError.message.slice(0, 240) : "Action failed" }); }
+  };
+  const assignTo = typeof actions.assignTo === "string" ? actions.assignTo.trim() : "";
+  const createTaskTitle = typeof actions.createTask === "string" ? actions.createTask.trim() : "";
+  const webhookUrl = typeof actions.webhookUrl === "string" ? actions.webhookUrl.trim() : "";
+  if (assignTo && message.thread_id) await optionalAction("assign", async () => {
+    const assigneeId = assignTo === "self" ? ownerId : assignTo;
+    await dbRequest(env, "thread_assignments?on_conflict=owner_id,thread_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: ownerId, thread_id: message.thread_id, assignee_id: assigneeId, status: "open", updated_at: new Date().toISOString() }) });
+    return { assigneeId };
+  });
+  if (createTaskTitle) await optionalAction("create_task", async () => {
+    const rows = await dbRequest<JsonRecord[]>(env, "tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, title: createTaskTitle, notes: `Created by a rule from ${String(message.subject || "this message")}`, source_message_id: messageId, due_at: null, priority: 0 }) });
+    return { taskId: rows[0]?.id || null };
+  });
+  if (actions.createCalendarEvent === true) await optionalAction("create_calendar_event", async () => {
+    const startsAt = new Date(Date.now() + 60 * 60_000);
+    const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+    const rows = await dbRequest<JsonRecord[]>(env, "calendar_events", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, title: String(message.subject || "Email event"), description: String(message.text_body || "").slice(0, 2000), starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), all_day: false, attendees: [], source_message_id: messageId }) });
+    return { calendarEventId: rows[0]?.id || null };
+  });
+  if (actions.storeInB2 === true) await optionalAction("store_in_object_storage", async () => {
+    const key = `automation/${ownerId}/${messageId}.json`;
+    await putObject(env, key, JSON.stringify({ messageId, subject: message.subject || "", from: message.from_address || "", text: String(message.text_body || "").slice(0, 200_000), storedAt: new Date().toISOString() }), "application/json");
+    return { objectKey: key };
+  });
+  if (actions.autoReply === true && message.from_address) await optionalAction("auto_reply", async () => {
+    const fromAddress = await defaultFromAddress(env, ownerId);
+    const result = await sendSystemMessage(env, { fromAddress, to: [String(message.from_address)], subject: `Re: ${String(message.subject || "your message")}`.slice(0, 500), text: "Thanks for your message. This is an automatic reply triggered by a Postveil rule.", replyTo: fromAddress }, undefined);
+    return { provider: result.provider || null };
+  });
+  if (webhookUrl) await optionalAction("webhook", async () => {
+    const target = new URL(webhookUrl);
+    const blockedHost = /^(localhost|127(?:\.\d+){3}|0\.0\.0\.0|::1)$/i.test(target.hostname) || target.hostname.endsWith(".local") || target.hostname.endsWith(".internal");
+    if (target.protocol !== "https:" || blockedHost) throw new Error("Automation webhooks must use a public HTTPS endpoint");
+    const payload = JSON.stringify({ event: "postveil.rule.matched", messageId, subject: message.subject || "", from: message.from_address || "", triggeredAt: new Date().toISOString() });
+    const headers = new Headers({ "content-type": "application/json", "user-agent": "Postveil-Automation/1" });
+    if (typeof actions.webhookSecret === "string" && actions.webhookSecret.trim()) headers.set("x-postveil-signature", `sha256=${base64UrlEncode(await hmacSha256(actions.webhookSecret.trim(), payload))}`);
+    const response = await fetch(target.toString(), { method: "POST", headers, body: payload, redirect: "manual" });
+    if (!response.ok) throw new Error(`Webhook returned HTTP ${response.status}`);
+    return { status: response.status };
+  });
   return patch;
 }
 
-async function applyInboundRules(env: Env, ownerId: string, messageId: string, context: RuleContext, forwardInbound?: (address: string) => Promise<void>): Promise<void> {
-  const rules = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&order=priority.asc`);
+async function applyInboundRules(env: Env, ownerId: string, messageId: string, context: RuleContext, forwardInbound?: (address: string) => Promise<void>, organizationId?: string | null): Promise<void> {
+  const personal = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&trigger_type=eq.inbound&order=priority.asc,created_at.asc`).catch(async () => (await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&order=priority.asc,created_at.asc`).catch(() => [])).filter((rule) => !rule.trigger_type || rule.trigger_type === "inbound"));
+  const shared = organizationId ? await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(organizationId)}&scope=eq.organization&enabled=eq.true&trigger_type=eq.inbound&order=priority.asc,created_at.asc`).catch(async () => (await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(organizationId)}&scope=eq.organization&enabled=eq.true&order=priority.asc,created_at.asc`).catch(() => [])).filter((rule) => !rule.trigger_type || rule.trigger_type === "inbound")) : [];
+  const rules = [...personal, ...shared].sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0));
   for (const rule of rules) {
     if (!ruleMatches(rule, context)) continue;
     const actions = rule.actions || {};
     await applyRuleActions(env, ownerId, messageId, actions, forwardInbound);
     if (actions.stopProcessing === true) break;
+  }
+}
+
+async function applyEventRules(env: Env, ownerId: string, messageId: string, eventType: string, organizationId?: string | null): Promise<void> {
+  const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+  const message = rows[0];
+  if (!message) return;
+  const context = { ...ruleContextFromMessage(message), eventType };
+  const personal = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&trigger_type=eq.event&order=priority.asc,created_at.asc`).catch(async () => (await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&order=priority.asc,created_at.asc`).catch(() => [])).filter((rule) => rule.trigger_type === "event"));
+  const shared = organizationId ? await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(organizationId)}&scope=eq.organization&enabled=eq.true&trigger_type=eq.event&order=priority.asc,created_at.asc`).catch(async () => (await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(organizationId)}&scope=eq.organization&enabled=eq.true&order=priority.asc,created_at.asc`).catch(() => [])).filter((rule) => rule.trigger_type === "event")) : [];
+  for (const rule of [...personal, ...shared].sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0))) {
+    if (!ruleMatches(rule, context)) continue;
+    await applyRuleActions(env, ownerId, messageId, rule.actions || {});
+    if (rule.actions?.stopProcessing === true) break;
   }
 }
 
@@ -1681,6 +1752,71 @@ function buildRuleConditions(conditions: unknown, exceptions: unknown): JsonReco
   if (Object.keys(exceptionObject).length) next.exceptions = exceptionObject;
   else delete next.exceptions;
   return next;
+}
+
+function automationTrigger(value: unknown): "inbound" | "event" | "scheduled" {
+  return value === "event" || value === "scheduled" ? value : "inbound";
+}
+
+function automationSchedule(value: unknown): JsonRecord {
+  const source = objectValue(value);
+  const frequency = ["hourly", "daily", "weekly"].includes(String(source.frequency)) ? String(source.frequency) : "daily";
+  const at = typeof source.at === "string" && !Number.isNaN(Date.parse(source.at)) ? new Date(source.at).toISOString() : null;
+  return { frequency, at };
+}
+
+function nextAutomationRun(schedule: JsonRecord, from = new Date()): string {
+  const next = new Date(from);
+  const frequency = String(schedule.frequency || "daily");
+  if (frequency === "hourly") next.setUTCHours(next.getUTCHours() + 1, 0, 0, 0);
+  else if (frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+  else next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString();
+}
+
+async function ruleForActor(env: Env, user: User, ruleId: string): Promise<{ rule: Rule; shared: boolean } | null> {
+  const personal = await dbRequest<Rule[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+  if (personal[0]) return { rule: personal[0], shared: false };
+  const access = await organizationAdmin(env, user).catch(() => null);
+  if (!access) return null;
+  const shared = await dbRequest<Rule[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleId)}&organization_id=eq.${encodeURIComponent(access.organization.id)}&scope=eq.organization&limit=1`).catch(() => []);
+  return shared[0] ? { rule: shared[0], shared: true } : null;
+}
+
+function sieveQuoted(value: string): string { return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`; }
+
+function ruleToSieve(rule: Rule): string {
+  const conditions = objectValue(rule.conditions);
+  const tests = Object.entries(conditions).filter(([key]) => key !== "exceptions" && typeof conditions[key] === "string").map(([key, value]) => {
+    const header = key === "fromContains" ? "from" : key === "toContains" ? "to" : key === "subjectContains" ? "subject" : key === "bodyContains" ? "body" : null;
+    return header ? `header :contains ${sieveQuoted(header)} ${sieveQuoted(String(value))}` : null;
+  }).filter((value): value is string => Boolean(value));
+  const actions = objectValue(rule.actions);
+  const commands: string[] = [];
+  if (typeof actions.folder === "string") commands.push(`fileinto ${sieveQuoted(String(actions.folder))};`);
+  if (actions.markRead === true) commands.push('addflag "\\Seen";');
+  if (actions.markRead === false) commands.push('removeflag "\\Seen";');
+  if (typeof actions.forwardTo === "string") commands.push(`redirect ${sieveQuoted(actions.forwardTo)};`);
+  if (actions.stopProcessing === true) commands.push("stop;");
+  const test = tests.length ? tests.length === 1 ? tests[0] : `allof (${tests.join(", ")})` : "true";
+  return `# Postveil rule: ${rule.name}\nif ${test} {\n  ${commands.join(" ")}\n}`;
+}
+
+function parseSieveRules(source: string): Array<{ name: string; conditions: JsonRecord; actions: JsonRecord; sieve_source: string }> {
+  const rules: Array<{ name: string; conditions: JsonRecord; actions: JsonRecord; sieve_source: string }> = [];
+  const blocks = source.split(/\n\s*\n/).map((value) => value.trim()).filter(Boolean);
+  for (const [index, block] of blocks.entries()) {
+    const conditions: JsonRecord = {};
+    for (const match of block.matchAll(/header\s*:contains\s+"(from|to|subject)"\s+"([^"]+)"/gi)) conditions[match[1].toLowerCase() === "from" ? "fromContains" : match[1].toLowerCase() === "to" ? "toContains" : "subjectContains"] = match[2];
+    const actions: JsonRecord = { stopProcessing: /\bstop\s*;/i.test(block) };
+    const fileinto = block.match(/fileinto\s+"([^"]+)"/i); if (fileinto) actions.folder = fileinto[1].toLowerCase();
+    const redirect = block.match(/redirect\s+"([^"\n]+)"/i); if (redirect) actions.forwardTo = redirect[1];
+    if (/addflag\s+"\\\\Seen"/i.test(block)) actions.markRead = true;
+    if (/removeflag\s+"\\\\Seen"/i.test(block)) actions.markRead = false;
+    if (!Object.keys(conditions).length || !Object.keys(actions).some((key) => key !== "stopProcessing")) continue;
+    rules.push({ name: `Imported Sieve rule ${index + 1}`, conditions, actions, sieve_source: block });
+  }
+  return rules;
 }
 
 type RuleMatch = { id: string; subject: string; fromAddress: string; snippet: string; folder: string; reasons: string[]; plannedActions: JsonRecord };
@@ -2025,7 +2161,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
         isPinned: false,
         priority: 0,
         folder,
-      }, forwardInbound);
+      }, forwardInbound, organizationId);
       const autoReplies = await dbRequest<Array<{ enabled: boolean; subject: string; body: string; starts_at: string | null; ends_at: string | null }>>(env, `auto_replies?owner_id=eq.${encodeURIComponent(ownerId)}&mailbox_id=eq.${encodeURIComponent(mailbox.id)}&enabled=eq.true&limit=1`);
       const autoReply = autoReplies[0];
       const now = Date.now();
@@ -2527,6 +2663,27 @@ async function processScheduled(env: Env): Promise<void> {
   for (const message of snoozed) await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ folder: message.previous_folder || "inbox", previous_folder: null, snoozed_until: null }) }).catch(() => undefined);
   await processDueFollowUps(env, now);
   await processDueReminders(env, now);
+  await processScheduledRules(env, now);
+}
+
+async function processScheduledRules(env: Env, now = new Date().toISOString()): Promise<void> {
+  const rules = await dbRequest<Rule[]>(env, `mail_rules?enabled=eq.true&trigger_type=eq.scheduled&next_run_at=lte.${encodeURIComponent(now)}&order=next_run_at.asc&limit=25`).catch(() => []);
+  for (const rule of rules) {
+    const ownerId = String(rule.owner_id || "");
+    if (!ownerId) continue;
+    const sourceRows = await existingRuleMessages(env, ownerId);
+    const analysis = matchRuleMessages(sourceRows, rule);
+    let runId = "";
+    try {
+      runId = await createRuleRun(env, ownerId, rule.id, "replay", analysis.matches);
+      const result = await applyExistingRuleMatches(env, ownerId, rule, runId, analysis.matches, sourceRows);
+      await finishRuleRun(env, ownerId, runId, { status: result.failures.length ? "failed" : "completed", matched_count: analysis.matches.length, changed_count: result.changedCount, sample: analysis.matches.slice(0, 20), error_message: result.failures[0]?.error || null });
+      await dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(rule.id)}`, { method: "PATCH", body: JSON.stringify({ last_run_at: now, last_run_count: result.changedCount, last_error: result.failures[0]?.error || null, next_run_at: nextAutomationRun(automationSchedule(rule.schedule), new Date(now)) }) });
+    } catch (scheduledError) {
+      if (runId) await finishRuleRun(env, ownerId, runId, { status: "failed", error_message: scheduledError instanceof Error ? scheduledError.message.slice(0, 500) : "Scheduled rule failed" }).catch(() => undefined);
+      await dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(rule.id)}`, { method: "PATCH", body: JSON.stringify({ last_run_at: now, last_error: scheduledError instanceof Error ? scheduledError.message.slice(0, 500) : "Scheduled rule failed", next_run_at: nextAutomationRun(automationSchedule(rule.schedule), new Date(now)) }) }).catch(() => undefined);
+    }
+  }
 }
 
 async function processDueFollowUps(env: Env, now = new Date().toISOString()): Promise<void> {
@@ -3171,6 +3328,7 @@ async function processDeliveryEvent(env: Env, event: DeliveryEvent): Promise<{ m
   const receiptKind = eventName.includes("open") || eventName.includes("read") ? "read" : eventName.includes("confirm") || eventName.includes("receipt") ? "confirmation" : state?.deliveryStatus === "delivered" ? "delivery" : null;
   if (receiptKind) await recordReceiptEvent(env, String(message.owner_id), String(message.id), receiptKind, event.recipient, provider, event.eventId || claim.hash, event.payload);
   const organizationId = message.mailbox_id ? (await dbRequest<MailboxAdminSettings[]>(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(String(message.mailbox_id))}&limit=1`).catch(() => []))[0]?.organization_id : undefined;
+  await applyEventRules(env, String(message.owner_id), String(message.id), event.eventType, organizationId).catch((eventRuleError) => console.error("Event rule processing failed", eventRuleError));
   if (state?.deliveryStatus === "delivered") await recordDomainOutcome(env, organizationId, domainOf(String(message.from_address || "")), "delivered");
   if (state?.deliveryStatus === "bounced" || state?.deliveryStatus === "complained") {
     const recipient = event.recipient || (Array.isArray(message.to_addresses) ? String(message.to_addresses[0] || "") : "");
@@ -3970,11 +4128,33 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
       const validation = validateRuleInput(normalized);
       if (validation.length) { failures.push({ index, error: validation.join("; ") }); continue; }
       try {
-        const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: normalized.name, priority: normalized.priority, enabled: normalized.enabled, conditions: normalized.conditions, actions: normalized.actions }) });
+        const triggerType = automationTrigger(objectValue(value).triggerType ?? objectValue(value).trigger_type);
+        const schedule = triggerType === "scheduled" ? automationSchedule(objectValue(value).schedule) : {};
+        const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: normalized.name, priority: normalized.priority, enabled: normalized.enabled, conditions: normalized.conditions, actions: normalized.actions, scope: "personal", organization_id: null, trigger_type: triggerType, schedule, next_run_at: triggerType === "scheduled" ? nextAutomationRun(schedule) : null }) });
         if (rows[0]) created.push(rows[0]);
       } catch (importError) {
         failures.push({ index, error: importError instanceof Error ? importError.message : "Could not import rule" });
       }
+    }
+    return json({ ok: failures.length === 0, imported: created.length, failures, rules: created }, failures.length && !created.length ? 400 : 200);
+  }
+  if (request.method === "GET" && url.pathname === "/api/rules/sieve") {
+    const rows = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`);
+    return new Response(rows.map(ruleToSieve).join("\n\n"), { headers: { "content-type": "application/sieve; charset=utf-8", "content-disposition": "attachment; filename=postveil-rules.sieve", "cache-control": "no-store" } });
+  }
+  if (request.method === "POST" && url.pathname === "/api/rules/sieve") {
+    const body = (await request.json()) as JsonRecord;
+    const source = String(body.sieve || "").slice(0, 100_000);
+    const parsed = parseSieveRules(source).slice(0, 100);
+    const created: JsonRecord[] = [];
+    const failures: Array<{ index: number; error: string }> = [];
+    for (const [index, rule] of parsed.entries()) {
+      const validation = validateRuleInput(rule);
+      if (validation.length) { failures.push({ index, error: validation.join("; ") }); continue; }
+      try {
+        const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: rule.name, priority: (index + 1) * 100, enabled: true, conditions: rule.conditions, actions: rule.actions, scope: "personal", organization_id: null, trigger_type: "inbound", schedule: {}, next_run_at: null, sieve_source: rule.sieve_source }) });
+        if (rows[0]) created.push(rows[0]);
+      } catch (sieveError) { failures.push({ index, error: sieveError instanceof Error ? sieveError.message : "Could not import Sieve rule" }); }
     }
     return json({ ok: failures.length === 0, imported: created.length, failures, rules: created }, failures.length && !created.length ? 400 : 200);
   }
@@ -3987,12 +4167,27 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const messageId = url.searchParams.get("messageId");
     return json(await dbRequest(env, `message_audit_log?owner_id=eq.${encodeURIComponent(user.id)}${messageId ? `&message_id=eq.${encodeURIComponent(messageId)}` : ""}&order=created_at.desc&limit=100`));
   }
-  if (request.method === "GET" && url.pathname === "/api/rules") return json(await dbRequest(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`));
+  if (request.method === "GET" && url.pathname === "/api/rules") {
+    const personal = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&scope=eq.personal&order=priority.asc,created_at.asc`).catch(() => dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`).catch(() => []));
+    const access = await organizationAdmin(env, user).catch(() => null);
+    const shared = access ? await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(access.organization.id)}&scope=eq.organization&order=priority.asc,created_at.asc`).catch(() => []) : [];
+    return json([...personal, ...shared].sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0)));
+  }
   if (request.method === "POST" && url.pathname === "/api/rules") {
     const body = (await request.json()) as JsonRecord;
     const normalized = normalizeRuleRecord({ ...body, conditions: buildRuleConditions(body.conditions, body.exceptions) });
     const validation = validateRuleInput(normalized);
     if (validation.length) return error(validation.join("; "), 400);
+    const scope = body.scope === "organization" ? "organization" : "personal";
+    const triggerType = automationTrigger(body.triggerType ?? body.trigger_type);
+    const schedule = triggerType === "scheduled" ? automationSchedule(body.schedule) : {};
+    const nextRunAt = triggerType === "scheduled" ? (schedule.at && Date.parse(String(schedule.at)) > Date.now() ? schedule.at : nextAutomationRun(schedule)) : null;
+    let organizationId: string | null = null;
+    if (scope === "organization") {
+      const access = await organizationAdmin(env, user).catch(() => null);
+      if (!access) return error("Workspace administrator access is required for shared rules", 403);
+      organizationId = access.organization.id;
+    }
     const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", {
       method: "POST",
       headers: { Prefer: "return=representation" },
@@ -4003,6 +4198,11 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
         enabled: normalized.enabled,
         conditions: normalized.conditions,
         actions: normalized.actions,
+        scope,
+        organization_id: organizationId,
+        trigger_type: triggerType,
+        schedule,
+        next_run_at: nextRunAt,
       }),
     });
     return json(rows[0], 201);
@@ -4011,10 +4211,12 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (ruleActionMatch && (request.method === "POST" || (request.method === "GET" && ruleActionMatch[2] === "conflicts"))) {
     const ruleId = ruleActionMatch[1];
     const action = ruleActionMatch[2];
-    const rows = await dbRequest<Rule[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
-    if (!rows[0]) return error("Rule not found", 404);
-    const rule = rows[0];
-    const allRules = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`);
+    const lookup = await ruleForActor(env, user, ruleId);
+    if (!lookup) return error("Rule not found", 404);
+    const rule = lookup.rule;
+    const allRules = lookup.shared && rule.organization_id
+      ? await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(rule.organization_id)}&scope=eq.organization&order=priority.asc,created_at.asc`).catch(() => [rule])
+      : await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`);
     const conflicts = ruleConflicts(rule, allRules);
     if (action === "conflicts") return json({ ruleId, conflicts });
     const sourceRows = await existingRuleMessages(env, user.id);
@@ -4039,13 +4241,12 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
     const result = await applyExistingRuleMatches(env, user.id, rule, runId, analysis.matches, sourceRows);
     await finishRuleRun(env, user.id, runId, { status: result.failures.length ? "failed" : "completed", matched_count: analysis.matches.length, changed_count: result.changedCount, sample: analysis.matches.slice(0, 20), error_message: result.failures[0]?.error || null });
-    await dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(rule.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ last_run_at: new Date().toISOString(), last_run_count: result.changedCount, last_error: result.failures[0]?.error || null }) });
+    await dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(rule.id)}`, { method: "PATCH", body: JSON.stringify({ last_run_at: new Date().toISOString(), last_run_count: result.changedCount, last_error: result.failures[0]?.error || null }) });
     return json({ ok: result.failures.length === 0, runId, mode: "apply", matchedCount: analysis.matches.length, changedCount: result.changedCount, failures: result.failures, conflicts, undoable: result.changedCount > 0 });
   }
   const ruleRunsMatch = url.pathname.match(/^\/api\/rules\/([^/]+)\/runs$/);
   if (ruleRunsMatch && request.method === "GET") {
-    const exists = await dbRequest<Array<{ id: string }>>(env, `mail_rules?id=eq.${encodeURIComponent(ruleRunsMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
-    if (!exists[0]) return error("Rule not found", 404);
+    if (!(await ruleForActor(env, user, ruleRunsMatch[1]))) return error("Rule not found", 404);
     return json(await dbRequest(env, `mail_rule_runs?owner_id=eq.${encodeURIComponent(user.id)}&rule_id=eq.${encodeURIComponent(ruleRunsMatch[1])}&order=started_at.desc&limit=50`));
   }
   const ruleRunUndoMatch = url.pathname.match(/^\/api\/rule-runs\/([^/]+)\/undo$/);
@@ -4082,8 +4283,9 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   const ruleMatch = url.pathname.match(/^\/api\/rules\/([^/]+)$/);
   if (ruleMatch && request.method === "PATCH") {
     const body = (await request.json()) as JsonRecord;
-    const existing = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
-    if (!existing[0]) return error("Rule not found", 404);
+    const lookup = await ruleForActor(env, user, ruleMatch[1]);
+    if (!lookup) return error("Rule not found", 404);
+    const existing = [lookup.rule as JsonRecord];
     const candidateConditions = body.conditions !== undefined || body.exceptions !== undefined
       ? buildRuleConditions(body.conditions ?? existing[0].conditions, body.exceptions ?? objectValue(existing[0].conditions).exceptions)
       : existing[0].conditions;
@@ -4096,11 +4298,24 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (typeof body.priority === "number" && Number.isFinite(body.priority)) patch.priority = body.priority;
     if (body.conditions !== undefined || body.exceptions !== undefined) patch.conditions = candidate.conditions;
     if (body.actions !== undefined) patch.actions = objectValue(body.actions);
-    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    if (body.scope !== undefined || body.triggerType !== undefined || body.schedule !== undefined) {
+      if (lookup.shared && body.scope === "personal") return error("Shared rules cannot be changed into personal rules");
+      if (!lookup.shared && body.scope === "organization") {
+        const access = await organizationAdmin(env, user).catch(() => null);
+        if (!access) return error("Workspace administrator access is required for shared rules", 403);
+        patch.scope = "organization"; patch.organization_id = access.organization.id;
+      }
+      const triggerType = automationTrigger(body.triggerType ?? lookup.rule.trigger_type);
+      const schedule = triggerType === "scheduled" ? automationSchedule(body.schedule ?? lookup.rule.schedule) : {};
+      patch.trigger_type = triggerType; patch.schedule = schedule; patch.next_run_at = triggerType === "scheduled" ? nextAutomationRun(schedule) : null;
+    }
+    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
     return json(rows[0] || null);
   }
   if (ruleMatch && request.method === "DELETE") {
-    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE", headers: { Prefer: "return=representation" } });
+    const lookup = await ruleForActor(env, user, ruleMatch[1]);
+    if (!lookup) return error("Rule not found", 404);
+    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}`, { method: "DELETE", headers: { Prefer: "return=representation" } });
     return json({ ok: true, deleted: rows.length });
   }
   if (ruleMatch && request.method === "POST" && ruleMatch[1].endsWith(":run")) {

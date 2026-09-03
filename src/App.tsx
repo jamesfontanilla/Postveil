@@ -276,7 +276,10 @@ type RuleConditionType =
   | "hasAttachment"
   | "isRead"
   | "isFlagged"
-  | "isPinned";
+  | "isPinned"
+  | "priority"
+  | "folder"
+  | "eventTypeContains";
 type RuleCondition = { type: RuleConditionType; value: string };
 type Rule = {
   id: string;
@@ -285,6 +288,11 @@ type Rule = {
   enabled: boolean;
   conditions: Record<string, unknown>;
   actions: Record<string, unknown>;
+  scope?: "personal" | "organization";
+  organization_id?: string | null;
+  trigger_type?: "inbound" | "event" | "scheduled";
+  schedule?: Record<string, unknown>;
+  next_run_at?: string | null;
 };
 type RuleLabMatch = {
   id: string;
@@ -305,6 +313,17 @@ type RuleLabResult = {
   conflicts?: Array<{ severity: "error" | "warning"; message: string }>;
   failures?: Array<{ id: string; error: string }>;
   undoable?: boolean;
+};
+type RuleRun = {
+  id: string;
+  rule_id: string;
+  mode: "preview" | "dry_run" | "apply" | "replay";
+  status: string;
+  matched_count: number;
+  changed_count: number;
+  error_message?: string | null;
+  started_at: string;
+  completed_at?: string | null;
 };
 type AutoReply = {
   id?: string;
@@ -1791,6 +1810,9 @@ const ruleConditionLabels: Record<RuleConditionType, string> = {
   isRead: "Read status",
   isFlagged: "Flagged",
   isPinned: "Pinned",
+  priority: "Priority",
+  folder: "Folder",
+  eventTypeContains: "Event type contains",
 };
 const ruleConditionTypes = Object.keys(ruleConditionLabels) as RuleConditionType[];
 
@@ -1808,7 +1830,7 @@ function ruleConditionRecord(rows: RuleCondition[]): Record<string, unknown> {
     if (!value) return result;
     result[row.type] = ["hasAttachment", "isRead", "isFlagged", "isPinned"].includes(row.type)
       ? value === "true"
-      : value;
+      : row.type === "priority" ? Number(value) : value;
     return result;
   }, {});
 }
@@ -2220,6 +2242,18 @@ function SettingsPanel({
   const [rulePriorityAction, setRulePriorityAction] = useState("ignore");
   const [ruleLabel, setRuleLabel] = useState("");
   const [ruleForwardTo, setRuleForwardTo] = useState("");
+  const [ruleSnoozeMinutes, setRuleSnoozeMinutes] = useState("");
+  const [ruleAssignTo, setRuleAssignTo] = useState("");
+  const [ruleAutoReply, setRuleAutoReply] = useState(false);
+  const [ruleWebhookUrl, setRuleWebhookUrl] = useState("");
+  const [ruleWebhookSecret, setRuleWebhookSecret] = useState("");
+  const [ruleCreateTask, setRuleCreateTask] = useState("");
+  const [ruleCreateCalendarEvent, setRuleCreateCalendarEvent] = useState(false);
+  const [ruleStoreInB2, setRuleStoreInB2] = useState(false);
+  const [ruleScope, setRuleScope] = useState<"personal" | "organization">("personal");
+  const [ruleTriggerType, setRuleTriggerType] = useState<"inbound" | "event" | "scheduled">("inbound");
+  const [ruleSchedule, setRuleSchedule] = useState<"hourly" | "daily" | "weekly">("daily");
+  const [ruleScheduleAt, setRuleScheduleAt] = useState("");
   const [ruleStop, setRuleStop] = useState(true);
   const [ruleEnabled, setRuleEnabled] = useState(true);
   const [rulePosition, setRulePosition] = useState(100);
@@ -2259,7 +2293,9 @@ function SettingsPanel({
   const [retentionDays, setRetentionDays] = useState("365");
   const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
   const [ruleLabBusy, setRuleLabBusy] = useState(false);
+  const [ruleRuns, setRuleRuns] = useState<RuleRun[]>([]);
   const ruleImportRef = useRef<HTMLInputElement>(null);
+  const sieveImportRef = useRef<HTMLInputElement>(null);
   async function updateSettings(patch: JsonSettings) {
     await apiFetch("/api/settings", {
       method: "PATCH",
@@ -2371,6 +2407,10 @@ function SettingsPanel({
     try { setScreeningQueue(await apiFetch<Message[]>("/api/screening/queue")); }
     catch (caught) { setNotice(caught instanceof Error ? caught.message : "Screening queue unavailable"); }
   }
+  async function loadRuleRuns() {
+    try { setRuleRuns(await apiFetch<RuleRun[]>("/api/rule-runs")); }
+    catch (caught) { setNotice(caught instanceof Error ? caught.message : "Rule history unavailable"); }
+  }
   async function loadOrganizationBlocklist() {
     try {
       setOrganizationBlocklist(await apiFetch<OrganizationBlock[]>("/api/admin/organization-blocklist"));
@@ -2465,6 +2505,18 @@ function SettingsPanel({
     setRulePriorityAction("ignore");
     setRuleLabel("");
     setRuleForwardTo("");
+    setRuleSnoozeMinutes("");
+    setRuleAssignTo("");
+    setRuleAutoReply(false);
+    setRuleWebhookUrl("");
+    setRuleWebhookSecret("");
+    setRuleCreateTask("");
+    setRuleCreateCalendarEvent(false);
+    setRuleStoreInB2(false);
+    setRuleScope("personal");
+    setRuleTriggerType("inbound");
+    setRuleSchedule("daily");
+    setRuleScheduleAt("");
     setRuleStop(true);
     setRuleEnabled(true);
     setRulePosition(Math.max(100, ...rules.map((rule) => rule.priority + 100)));
@@ -2488,6 +2540,18 @@ function SettingsPanel({
     setRulePriorityAction(typeof actions.priority === "number" ? String(actions.priority) : "ignore");
     setRuleLabel(typeof actions.label === "string" ? actions.label : "");
     setRuleForwardTo(typeof actions.forwardTo === "string" ? actions.forwardTo : "");
+    setRuleSnoozeMinutes(typeof actions.snoozeMinutes === "number" ? String(actions.snoozeMinutes) : "");
+    setRuleAssignTo(typeof actions.assignTo === "string" ? actions.assignTo : "");
+    setRuleAutoReply(actions.autoReply === true);
+    setRuleWebhookUrl(typeof actions.webhookUrl === "string" ? actions.webhookUrl : "");
+    setRuleWebhookSecret(typeof actions.webhookSecret === "string" ? actions.webhookSecret : "");
+    setRuleCreateTask(typeof actions.createTask === "string" ? actions.createTask : "");
+    setRuleCreateCalendarEvent(actions.createCalendarEvent === true);
+    setRuleStoreInB2(actions.storeInB2 === true);
+    setRuleScope(rule.scope === "organization" ? "organization" : "personal");
+    setRuleTriggerType(rule.trigger_type === "event" || rule.trigger_type === "scheduled" ? rule.trigger_type : "inbound");
+    setRuleSchedule(rule.schedule?.frequency === "hourly" || rule.schedule?.frequency === "weekly" ? rule.schedule.frequency : "daily");
+    setRuleScheduleAt(typeof rule.schedule?.at === "string" ? String(rule.schedule.at).slice(0, 16) : "");
     setRuleStop(actions.stopProcessing !== false);
     setRuleEnabled(rule.enabled);
     setRulePosition(rule.priority);
@@ -2514,6 +2578,14 @@ function SettingsPanel({
     if (rulePriorityAction !== "ignore") actions.priority = Number(rulePriorityAction);
     if (ruleLabel.trim()) actions.label = ruleLabel.trim();
     if (ruleForwardTo.trim()) actions.forwardTo = ruleForwardTo.trim();
+    if (ruleSnoozeMinutes.trim()) actions.snoozeMinutes = Number(ruleSnoozeMinutes);
+    if (ruleAssignTo.trim()) actions.assignTo = ruleAssignTo.trim();
+    if (ruleAutoReply) actions.autoReply = true;
+    if (ruleWebhookUrl.trim()) actions.webhookUrl = ruleWebhookUrl.trim();
+    if (ruleWebhookSecret.trim()) actions.webhookSecret = ruleWebhookSecret.trim();
+    if (ruleCreateTask.trim()) actions.createTask = ruleCreateTask.trim();
+    if (ruleCreateCalendarEvent) actions.createCalendarEvent = true;
+    if (ruleStoreInB2) actions.storeInB2 = true;
     if (!ruleName.trim()) {
       setNotice("Name the rule before saving");
       return;
@@ -2541,6 +2613,9 @@ function SettingsPanel({
           conditions,
           exceptions,
           actions,
+          scope: ruleScope,
+          triggerType: ruleTriggerType,
+          schedule: ruleTriggerType === "scheduled" ? { frequency: ruleSchedule, at: ruleScheduleAt ? new Date(ruleScheduleAt).toISOString() : null } : {},
         }),
       });
       resetRuleEditor();
@@ -2659,6 +2734,23 @@ function SettingsPanel({
     } catch (caught) {
       setNotice(caught instanceof Error ? caught.message : "Rules file could not be imported");
     }
+  }
+  async function exportSieve() {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch("/api/rules/sieve", { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) throw new Error(`Sieve export failed (${response.status})`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "postveil-rules.sieve"; link.click(); URL.revokeObjectURL(url);
+      setNotice("Sieve rules exported");
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Sieve rules could not be exported"); }
+  }
+  async function importSieve(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
+    try {
+      const result = await apiFetch<{ imported: number; failures: Array<{ index: number; error: string }> }>("/api/rules/sieve", { method: "POST", body: JSON.stringify({ sieve: await file.text() }) });
+      setNotice(`${result.imported} Sieve rule${result.imported === 1 ? "" : "s"} imported${result.failures.length ? ` · ${result.failures.length} skipped` : ""}`); onChanged();
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Sieve rules could not be imported"); }
   }
   async function createSignature() {
     if (!signatureName.trim()) return;
@@ -3039,6 +3131,7 @@ function SettingsPanel({
   useEffect(() => {
     if (tab === "security" || tab === "privacy") void loadSecurity();
     if (tab === "spam") { void loadScreeningQueue(); void loadOrganizationBlocklist(); }
+    if (tab === "automation") void loadRuleRuns();
     if (tab === "organize") void loadRetentionPolicies();
   }, [tab]);
   useEffect(() => {
@@ -3748,6 +3841,42 @@ function SettingsPanel({
                     placeholder="Forward to (optional)"
                     type="email"
                   />
+                  <input
+                    value={ruleSnoozeMinutes}
+                    onChange={(event) => setRuleSnoozeMinutes(event.target.value)}
+                    placeholder="Snooze minutes (optional)"
+                    type="number"
+                    min="1"
+                    max="43200"
+                  />
+                  <input
+                    value={ruleAssignTo}
+                    onChange={(event) => setRuleAssignTo(event.target.value)}
+                    placeholder="Assign to account id or self"
+                  />
+                  <input
+                    value={ruleCreateTask}
+                    onChange={(event) => setRuleCreateTask(event.target.value)}
+                    placeholder="Create task (optional title)"
+                  />
+                  <input
+                    value={ruleWebhookUrl}
+                    onChange={(event) => setRuleWebhookUrl(event.target.value)}
+                    placeholder="Webhook URL (HTTPS)"
+                    type="url"
+                  />
+                  {ruleWebhookUrl && <input
+                    value={ruleWebhookSecret}
+                    onChange={(event) => setRuleWebhookSecret(event.target.value)}
+                    placeholder="Webhook signing secret (optional)"
+                    type="password"
+                    autoComplete="new-password"
+                  />}
+                </div>
+                <div className="rule-automation-options">
+                  <label className="toggle-row"><input type="checkbox" checked={ruleAutoReply} onChange={(event) => setRuleAutoReply(event.target.checked)} /> Send automatic reply</label>
+                  <label className="toggle-row"><input type="checkbox" checked={ruleCreateCalendarEvent} onChange={(event) => setRuleCreateCalendarEvent(event.target.checked)} /> Create calendar event</label>
+                  <label className="toggle-row"><input type="checkbox" checked={ruleStoreInB2} onChange={(event) => setRuleStoreInB2(event.target.checked)} /> Save a private copy to object storage</label>
                 </div>
                 <label className="toggle-row">
                   <input type="checkbox" checked={ruleStop} onChange={(event) => setRuleStop(event.target.checked)} /> Stop processing more rules
@@ -3755,6 +3884,16 @@ function SettingsPanel({
                 <label className="toggle-row">
                   <input type="checkbox" checked={ruleEnabled} onChange={(event) => setRuleEnabled(event.target.checked)} /> Rule is enabled
                 </label>
+              </div>
+              <div className="rule-builder-section rule-trigger-section">
+                <div className="rule-section-label">Run this automation</div>
+                <div className="rule-trigger-grid">
+                  <label>Scope<select value={ruleScope} onChange={(event) => setRuleScope(event.target.value as typeof ruleScope)}><option value="personal">My mailboxes</option><option value="organization">Shared with workspace</option></select></label>
+                  <label>Trigger<select value={ruleTriggerType} onChange={(event) => setRuleTriggerType(event.target.value as typeof ruleTriggerType)}><option value="inbound">When new mail arrives</option><option value="event">When a mail event occurs</option><option value="scheduled">On a schedule</option></select></label>
+                  {ruleTriggerType === "event" && <small className="rule-muted">Add an “Event type contains” condition above, such as delivered, bounced, or opened.</small>}
+                  {ruleTriggerType === "scheduled" && <><label>Frequency<select value={ruleSchedule} onChange={(event) => setRuleSchedule(event.target.value as typeof ruleSchedule)}><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label><label>First run<input type="datetime-local" value={ruleScheduleAt} onChange={(event) => setRuleScheduleAt(event.target.value)} /></label></>}
+                </div>
+                <small className="rule-muted">Organization rules require workspace administrator access. Scheduled and event rules are processed by the Worker queue.</small>
               </div>
               <div className="rule-builder-footer">
                 <small className="rule-muted">Rules are evaluated from top to bottom.</small>
@@ -3773,6 +3912,9 @@ function SettingsPanel({
                   <button className="text-button" onClick={() => void exportRules()} title="Download rules as JSON"><Download size={13} /> Export</button>
                   <button className="text-button" onClick={() => ruleImportRef.current?.click()} title="Import rules from JSON"><Upload size={13} /> Import</button>
                   <input ref={ruleImportRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void importRules(event)} />
+                  <button className="text-button" onClick={() => void exportSieve()} title="Download Sieve-compatible rules">Sieve export</button>
+                  <button className="text-button" onClick={() => sieveImportRef.current?.click()} title="Import basic Sieve rules">Sieve import</button>
+                  <input ref={sieveImportRef} className="sr-only" type="file" accept="text/plain,.sieve" onChange={(event) => void importSieve(event)} />
                   <span className="rule-count">{rules.length}</span>
                 </div>
               </div>
@@ -3807,6 +3949,16 @@ function SettingsPanel({
                   </article>
                 );
               })}
+            </div>
+            <div className="setting-card rule-history-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Execution history</h3>
+                  <p>Preview, dry-run, scheduled, and applied runs stay visible for review.</p>
+                </div>
+                <span className="rule-count">{ruleRuns.length}</span>
+              </div>
+              {ruleRuns.length === 0 ? <div className="rule-empty">No rule runs yet.</div> : ruleRuns.slice(0, 12).map((run) => <div className="settings-item rule-history-item" key={run.id}><div><strong>{rules.find((rule) => rule.id === run.rule_id)?.name || "Rule run"}</strong><small>{run.mode.replace(/_/g, " ")} · {run.status} · {run.matched_count} matched · {run.changed_count} changed</small></div><time dateTime={run.started_at}>{new Date(run.started_at).toLocaleString()}</time></div>)}
             </div>
             {ruleLab && (
               <div className="setting-card rule-lab-panel" aria-live="polite">
