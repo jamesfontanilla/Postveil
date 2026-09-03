@@ -3449,6 +3449,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [resultTotal, setResultTotal] = useState<number | null>(null);
   const previousMessageIds = useRef<Set<string>>(new Set());
   const recordedSearchRef = useRef("");
+  const mailListRequestRef = useRef(0);
   const loadMeta = useCallback(async () => {
     try {
       const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, policyRows, preference, savedRows, historyRows] =
@@ -3484,6 +3485,8 @@ function MailboxApp({ session }: { session: Session }) {
   }, []);
   const loadMessages = useCallback(
     async (target: ViewKey = folder, showLoading = true, pageNumber = 1, append = false) => {
+      const requestId = mailListRequestRef.current + 1;
+      mailListRequestRef.current = requestId;
       if (showLoading) setLoading(true);
       setError("");
       try {
@@ -3497,6 +3500,7 @@ function MailboxApp({ session }: { session: Session }) {
         if (query.trim()) params.set("q", query.trim());
         params.set("meta", "true");
         const payload = await apiFetch<MailPage | Message[]>(`/api/mail?${params.toString()}`);
+        if (requestId !== mailListRequestRef.current) return;
         const nextPage = Array.isArray(payload) ? { items: payload, total: null, page: pageNumber, hasMore: payload.length >= 80, normalizedQuery: "" } : payload;
         setMessages((current) => (append ? [...current, ...nextPage.items] : nextPage.items));
         setPage(nextPage.page);
@@ -3511,13 +3515,14 @@ function MailboxApp({ session }: { session: Session }) {
         }
         if (pageNumber === 1 && !append) void apiFetch<SavedSearch[]>("/api/saved-searches?counts=true").then(setSavedSearches).catch(() => undefined);
       } catch (loadError) {
+        if (requestId !== mailListRequestRef.current) return;
         setError(
           loadError instanceof Error
             ? loadError.message
             : "Mailbox unavailable",
         );
       } finally {
-        setLoading(false);
+        if (requestId === mailListRequestRef.current) setLoading(false);
       }
     },
     [filter, folder, query, sort],
@@ -3553,12 +3558,19 @@ function MailboxApp({ session }: { session: Session }) {
   }
   function openMailFolder(target: ViewKey) {
     detailRequestRef.current += 1;
+    mailListRequestRef.current += 1;
     setView("mail");
     setFolder(target);
     setActiveSavedSearchId(null);
     setSelected(null);
     setSelectedId(null);
     setThreadMessages([]);
+    setMessages([]);
+    setPage(1);
+    setHasMore(false);
+    setResultTotal(null);
+    setNormalizedQuery("");
+    setLoading(true);
     setDetailLoading(false);
     clearListSelection();
     setMobileNav(false);
