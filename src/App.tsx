@@ -4735,6 +4735,9 @@ function MailboxApp({ session }: { session: Session }) {
       const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
       if (detailRequestRef.current !== requestId) return;
       setSelected(detail);
+      void apiFetch<TrustData>(`/api/mail/${message.id}/trust`).then((trust) => {
+        if (detailRequestRef.current === requestId) setTrustData(trust);
+      }).catch(() => undefined);
       const inlineAttachments = (detail.attachments || []).filter((attachment) => attachment.content_id);
       if (inlineAttachments.length) {
         const inlineResults = await Promise.all(inlineAttachments.map(async (attachment) => {
