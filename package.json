@@ -24,6 +24,7 @@
     "@aws-sdk/client-sesv2": "^3.879.0",
     "@aws-sdk/s3-request-presigner": "^3.879.0",
     "@supabase/supabase-js": "^2.105.0",
+    "@xmldom/xmldom": "^0.8.11",
     "dompurify": "^3.4.14",
     "lucide-react": "^0.468.0",
     "postal-mime": "^2.4.4",
