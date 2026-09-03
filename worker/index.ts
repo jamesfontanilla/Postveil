@@ -113,6 +113,19 @@ type OrganizationMember = { organization_id: string; user_id: string; role: "own
 type MailboxAdminSettings = { mailbox_id: string; organization_id: string; status: "active" | "suspended" | "archived"; quota_bytes: number; storage_used_bytes: number; sending_limit_daily: number; sending_used_today: number; sending_window_started_at: string; inactivity_days: number; last_activity_at: string | null };
 type AdminAuthUser = { id: string; email?: string; created_at?: string; last_sign_in_at?: string | null; banned_until?: string | null; user_metadata?: JsonRecord };
 type SecurityEvent = { id: string; organization_id: string | null; actor_id: string | null; subject_user_id: string; event_type: string; event_key: string; session_id: string | null; ip_hash: string | null; user_agent: string | null; is_suspicious: boolean; details: JsonRecord; created_at: string };
+type PrivacySettings = {
+  owner_id: string;
+  ai_processing_enabled: boolean;
+  login_alerts_enabled: boolean;
+  remote_images_enabled: boolean;
+  privacy_analytics_enabled: boolean;
+  metadata_minimization_enabled: boolean;
+  external_portal_enabled: boolean;
+  storage_region: string;
+  no_training_ai_policy_acknowledged: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
 type Rule = RuleDefinition & { id: string; owner_id: string; conditions: JsonRecord; actions: JsonRecord; enabled: boolean; priority: number };
 type StoredAttachment = { object_key: string; filename: string; content_type: string; detected_content_type: string; byte_size: number; sha256: string; preview_state: "ready" | "not_available"; safety_status: "unknown" | "suspicious" | "blocked"; safety_reasons: string[]; content_id?: string; disposition?: string | null };
 type ProviderConfig = { id?: string; organization_id?: string; provider: ProviderName; enabled: boolean; priority: number; config: JsonRecord; daily_limit?: number };
@@ -642,11 +655,42 @@ async function permanentlyDeleteMessage(env: Env, ownerId: string, messageId: st
 async function ensureProfileAndMailbox(env: Env, user: User): Promise<Mailbox> {
   await dbRequest(env, "profiles", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ id: user.id, display_name: user.email?.split("@")[0] ?? "Mailbox owner" }) });
   await dbRequest(env, "user_settings", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: user.id }) });
+  await ensurePrivacySettings(env, user.id);
   const existing = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&order=is_default.desc,created_at.asc&limit=1`);
   if (existing[0]) return existing[0];
   const address = defaultMailboxAddress(env);
   const created = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: address.split("@")[0], is_default: true }) });
   return created[0];
+}
+
+async function ensurePrivacySettings(env: Env, ownerId: string): Promise<PrivacySettings> {
+  const existing = await dbRequest<PrivacySettings[]>(env, `user_privacy_settings?owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`).catch(() => []);
+  if (existing[0]) return existing[0];
+  const created = await dbRequest<PrivacySettings[]>(env, "user_privacy_settings", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify({ owner_id: ownerId }),
+  }).catch(() => []);
+  if (created[0]) return created[0];
+  const retry = await dbRequest<PrivacySettings[]>(env, `user_privacy_settings?owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+  if (!retry[0]) throw new Error("Privacy settings could not be initialized");
+  return retry[0];
+}
+
+function privacySettingsView(row: PrivacySettings): PrivacySettings {
+  return {
+    owner_id: row.owner_id,
+    ai_processing_enabled: row.ai_processing_enabled === true,
+    login_alerts_enabled: row.login_alerts_enabled !== false,
+    remote_images_enabled: row.remote_images_enabled === true,
+    privacy_analytics_enabled: row.privacy_analytics_enabled === true,
+    metadata_minimization_enabled: row.metadata_minimization_enabled !== false,
+    external_portal_enabled: row.external_portal_enabled !== false,
+    storage_region: String(row.storage_region || "default"),
+    no_training_ai_policy_acknowledged: row.no_training_ai_policy_acknowledged === true,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
 
 function adminAuthClient(env: Env) {
@@ -840,7 +884,8 @@ async function recordSecurityEvent(env: Env, organization: Organization, user: U
     body: JSON.stringify({ organization_id: organization.id, actor_id: user.id, subject_user_id: user.id, event_type: "login", event_key: eventKey, session_id: sessionId, ip_hash: ipHash, user_agent: userAgent, is_suspicious: suspicious, details: { method: request.method, path: new URL(request.url).pathname } }),
   }).catch(() => undefined);
   await dbRequest(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&user_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
-  if (suspicious && user.email) {
+  const privacy = await ensurePrivacySettings(env, user.id).catch(() => null);
+  if (suspicious && user.email && privacy?.login_alerts_enabled !== false) {
     ctx.waitUntil(sendSystemMessage(env, {
       fromAddress: await defaultFromAddress(env, user.id),
       to: [user.email],
@@ -894,7 +939,9 @@ async function purgeOwnerObjects(env: Env, ownerId: string): Promise<void> {
   const messages = await dbRequest<Array<{ id: string; raw_object_key?: string | null }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,raw_object_key&limit=10000`).catch(() => []);
   const attachments = await dbRequest<Array<{ object_key: string }>>(env, `attachments?owner_id=eq.${encodeURIComponent(ownerId)}&select=object_key&limit=10000`).catch(() => []);
   const keys = [...new Set([...messages.map((message) => message.raw_object_key || ""), ...attachments.map((attachment) => attachment.object_key)].filter(Boolean))];
-  await Promise.allSettled(keys.map((key) => deleteObject(env, key)));
+  // Keep account deletion under the Workers subrequest budget even when a
+  // mailbox contains many raw messages and attachments.
+  await deleteObjects(env, keys);
 }
 
 async function auditAdminEvent(env: Env, organizationId: string, actorId: string, subjectUserId: string, eventType: string, details: JsonRecord = {}): Promise<void> {
@@ -2273,6 +2320,7 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   }
   const idempotencyKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() ? body.idempotencyKey.trim().slice(0, 200) : crypto.randomUUID();
   const mailboxOwnerId = mailbox?.owner_id || ownerId;
+  if (composeMetadata.confidentialMode === true && !(await ensurePrivacySettings(env, mailboxOwnerId)).external_portal_enabled) return error("Protected external-message delivery is disabled in privacy settings", 403);
   const duplicate = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&send_idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=id,status,folder,send_after,scheduled_at&limit=1`);
   if (duplicate[0]) return json({ ok: true, replayed: true, id: duplicate[0].id, status: duplicate[0].status, scheduled: duplicate[0].status === "scheduled" });
   const mergeRequested = composeMetadata.mailMerge === true || composeMetadata.personalizedBulk === true;
@@ -3188,7 +3236,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   let organization: Organization | null = null;
   try {
     organization = await ensureOrganization(env, user);
-    const mfaSetupRoute = url.pathname === "/api/recovery-methods" || url.pathname.startsWith("/api/recovery-methods/") || url.pathname === "/api/recovery-codes" || url.pathname === "/api/recovery-codes/status" || url.pathname === "/api/admin/organization" || url.pathname === "/api/admin/overview";
+    const mfaSetupRoute = url.pathname === "/api/recovery-methods" || url.pathname.startsWith("/api/recovery-methods/") || url.pathname === "/api/recovery-codes" || url.pathname === "/api/recovery-codes/status" || url.pathname === "/api/security/overview" || url.pathname === "/api/privacy-settings" || url.pathname === "/api/admin/organization" || url.pathname === "/api/admin/overview";
     if (!mfaSetupRoute && await organizationMfaBlocked(env, user, organization)) return error("Your workspace requires two-step verification before continuing", 401);
     ctx.waitUntil(recordSecurityEvent(env, organization, user, request, ctx));
   } catch {
@@ -4042,6 +4090,96 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (request.method === "GET" && url.pathname === "/api/signatures") return json(await dbRequest(env, `signatures?owner_id=eq.${encodeURIComponent(user.id)}&order=name.asc`));
   if (request.method === "POST" && url.pathname === "/api/signatures") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "signatures", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: body.mailboxId || mailbox.id, name: String(body.name || "Default"), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, is_default: body.isDefault === true }) }); return json(rows[0], 201); }
+  if (request.method === "GET" && url.pathname === "/api/security/overview") {
+    const [privacy, events] = await Promise.all([
+      ensurePrivacySettings(env, user.id),
+      dbRequest<SecurityEvent[]>(env, `account_security_events?subject_user_id=eq.${encodeURIComponent(user.id)}&order=created_at.desc&limit=50`).catch(() => []),
+    ]);
+    return json({
+      privacy: privacySettingsView(privacy),
+      activity: events.map((event) => ({
+        id: event.id,
+        eventType: event.event_type,
+        sessionId: event.session_id,
+        ipFingerprint: event.ip_hash ? `${event.ip_hash.slice(0, 12)}…` : null,
+        userAgent: event.user_agent,
+        suspicious: event.is_suspicious,
+        details: event.details,
+        createdAt: event.created_at,
+      })),
+    });
+  }
+  if (request.method === "GET" && url.pathname === "/api/privacy-settings") return json(privacySettingsView(await ensurePrivacySettings(env, user.id)));
+  if (request.method === "PATCH" && url.pathname === "/api/privacy-settings") {
+    const body = (await request.json()) as JsonRecord;
+    const current = await ensurePrivacySettings(env, user.id);
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    const booleanKeys = [
+      "ai_processing_enabled",
+      "login_alerts_enabled",
+      "remote_images_enabled",
+      "privacy_analytics_enabled",
+      "metadata_minimization_enabled",
+      "external_portal_enabled",
+      "no_training_ai_policy_acknowledged",
+    ];
+    for (const key of booleanKeys) if (typeof body[key] === "boolean") patch[key] = body[key];
+    if (body.storage_region !== undefined) {
+      const region = String(body.storage_region || "default");
+      if (!["default", "ap-southeast-1", "us-east-1", "eu-west-1", "custom"].includes(region)) return error("Choose a supported storage region", 400);
+      patch.storage_region = region;
+    }
+    if (patch.ai_processing_enabled === true && patch.no_training_ai_policy_acknowledged !== true && current.no_training_ai_policy_acknowledged !== true) return error("Acknowledge the no-training AI policy before enabling AI processing", 409);
+    const rows = await dbRequest<PrivacySettings[]>(env, `user_privacy_settings?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    await dbRequest(env, "account_security_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ organization_id: null, actor_id: user.id, subject_user_id: user.id, event_type: "privacy_settings_updated", event_key: `privacy:${user.id}:${crypto.randomUUID()}`, details: { fields: Object.keys(patch).filter((key) => key !== "updated_at") } }) }).catch(() => undefined);
+    return json(privacySettingsView(rows[0] || { ...current, ...patch } as PrivacySettings));
+  }
+  if (request.method === "GET" && url.pathname === "/api/account/export") {
+    const owner = encodeURIComponent(user.id);
+    const [profile, settings, privacy, mailboxes, messages, attachments, folders, labels, contacts, rules, events] = await Promise.all([
+      dbRequest<JsonRecord[]>(env, `profiles?id=eq.${owner}&limit=1`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${owner}&limit=1`).catch(() => []),
+      dbRequest<PrivacySettings[]>(env, `user_privacy_settings?owner_id=eq.${owner}&limit=1`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `mailboxes?owner_id=eq.${owner}&order=created_at.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${owner}&order=created_at.asc&limit=10000`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `attachments?owner_id=eq.${owner}&order=created_at.asc&limit=10000`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `mail_folders?owner_id=eq.${owner}&order=sort_order.asc,name.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `labels?owner_id=eq.${owner}&order=name.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `contacts?owner_id=eq.${owner}&order=display_name.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `mail_rules?owner_id=eq.${owner}&order=priority.asc,created_at.asc`).catch(() => []),
+      dbRequest<SecurityEvent[]>(env, `account_security_events?subject_user_id=eq.${owner}&order=created_at.desc&limit=1000`).catch(() => []),
+    ]);
+    await dbRequest(env, "account_security_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ actor_id: user.id, subject_user_id: user.id, event_type: "account_exported", event_key: `export:${user.id}:${crypto.randomUUID()}`, details: { messageCount: messages.length, attachmentCount: attachments.length } }) }).catch(() => undefined);
+    const payload = {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      account: { id: user.id, email: user.email || null },
+      profile: profile[0] || null,
+      settings: settings[0] || null,
+      privacy: privacySettingsView(privacy[0] || await ensurePrivacySettings(env, user.id)),
+      mailboxes,
+      messages,
+      attachments,
+      folders,
+      labels,
+      contacts,
+      rules,
+      securityEvents: events,
+      note: "Object-storage binaries are not embedded. Attachment metadata and object keys are included so a controlled export worker can stream them separately.",
+    };
+    return new Response(JSON.stringify(payload), { headers: { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="postveil-account-export-${new Date().toISOString().slice(0, 10)}.json"`, "cache-control": "no-store" } });
+  }
+  if (request.method === "POST" && url.pathname === "/api/account/delete") {
+    const body = (await request.json()) as JsonRecord;
+    const confirmation = String(body.confirmation || "");
+    const email = normalizeRecoveryEmail(String(body.email || ""));
+    if (confirmation !== "DELETE MY ACCOUNT" || !user.email || email !== normalizeRecoveryEmail(user.email)) return error("Type DELETE MY ACCOUNT and your sign-in email to continue", 400);
+    await dbRequest(env, "account_security_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ actor_id: user.id, subject_user_id: user.id, event_type: "account_deletion_requested", event_key: `delete:${user.id}:${crypto.randomUUID()}`, details: { confirmed: true } }) }).catch(() => undefined);
+    await purgeOwnerObjects(env, user.id);
+    const deleted = await adminAuthClient(env).auth.admin.deleteUser(user.id);
+    if (deleted.error) return error("The account could not be deleted", 502);
+    return json({ ok: true, deleted: true });
+  }
   if (request.method === "GET" && url.pathname === "/api/settings") { const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); return json({ ...(rows[0] || { owner_id: user.id }), send_undo_seconds: normalizeUndoSeconds(objectValue(mailbox.settings).send_undo_seconds, 0) }); }
   if (request.method === "PATCH" && url.pathname === "/api/settings") { const body = (await request.json()) as JsonRecord; const allowed = ["theme", "density", "reading_pane", "language", "timezone", "focused_inbox_enabled", "desktop_notifications", "push_subscription"]; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of allowed) if (key in body) patch[key] = body[key]; let undoSeconds = normalizeUndoSeconds(objectValue(mailbox.settings).send_undo_seconds, 0); if ("send_undo_seconds" in body) { undoSeconds = normalizeUndoSeconds(body.send_undo_seconds, undoSeconds); const currentMailboxSettings = objectValue(mailbox.settings); await dbRequest(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ settings: { ...currentMailboxSettings, send_undo_seconds: undoSeconds } }) }); } const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json({ ...(rows[0] || patch), send_undo_seconds: undoSeconds }); }
   if (request.method === "GET" && url.pathname === "/api/calendar") return json(await dbRequest(env, `calendar_events?owner_id=eq.${encodeURIComponent(user.id)}&order=starts_at.asc`));
