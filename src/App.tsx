@@ -227,6 +227,12 @@ type SenderPolicy = {
   target_folder_id?: string | null;
   enabled: boolean;
 };
+type OrganizationBlock = {
+  id: string;
+  match_type: "address" | "domain";
+  match_value: string;
+  enabled: boolean;
+};
 type RetentionPolicy = {
   id: string;
   name: string;
@@ -2194,6 +2200,11 @@ function SettingsPanel({
   const [policyBusy, setPolicyBusy] = useState(false);
   const [screeningQueue, setScreeningQueue] = useState<Message[]>([]);
   const [screeningBusy, setScreeningBusy] = useState<string | null>(null);
+  const [organizationBlocklist, setOrganizationBlocklist] = useState<OrganizationBlock[]>([]);
+  const [organizationBlocklistAvailable, setOrganizationBlocklistAvailable] = useState(false);
+  const [organizationBlockType, setOrganizationBlockType] = useState<OrganizationBlock["match_type"]>("domain");
+  const [organizationBlockValue, setOrganizationBlockValue] = useState("");
+  const [organizationBlockBusy, setOrganizationBlockBusy] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleName, setRuleName] = useState("");
   const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([
@@ -2359,6 +2370,49 @@ function SettingsPanel({
   async function loadScreeningQueue() {
     try { setScreeningQueue(await apiFetch<Message[]>("/api/screening/queue")); }
     catch (caught) { setNotice(caught instanceof Error ? caught.message : "Screening queue unavailable"); }
+  }
+  async function loadOrganizationBlocklist() {
+    try {
+      setOrganizationBlocklist(await apiFetch<OrganizationBlock[]>("/api/admin/organization-blocklist"));
+      setOrganizationBlocklistAvailable(true);
+    } catch {
+      setOrganizationBlocklistAvailable(false);
+    }
+  }
+  async function createOrganizationBlock() {
+    if (!organizationBlockValue.trim()) {
+      setNotice(`Enter a ${organizationBlockType === "domain" ? "domain" : "sender address"}`);
+      return;
+    }
+    setOrganizationBlockBusy(true);
+    try {
+      await apiFetch<OrganizationBlock>("/api/admin/organization-blocklist", { method: "POST", body: JSON.stringify({ matchType: organizationBlockType, matchValue: organizationBlockValue }) });
+      setOrganizationBlockValue("");
+      setNotice("Organization block saved");
+      await loadOrganizationBlocklist();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Organization block could not be saved");
+    } finally {
+      setOrganizationBlockBusy(false);
+    }
+  }
+  async function toggleOrganizationBlock(block: OrganizationBlock) {
+    try {
+      await apiFetch(`/api/admin/organization-blocklist/${block.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !block.enabled }) });
+      await loadOrganizationBlocklist();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Organization block could not be updated");
+    }
+  }
+  async function deleteOrganizationBlock(block: OrganizationBlock) {
+    if (!(await confirm({ title: "Remove organization block?", message: `New mail matching ${block.match_value} will follow normal screening rules.`, confirmLabel: "Remove block", danger: true }))) return;
+    try {
+      await apiFetch(`/api/admin/organization-blocklist/${block.id}`, { method: "DELETE" });
+      setNotice("Organization block removed");
+      await loadOrganizationBlocklist();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Organization block could not be removed");
+    }
   }
   async function decideScreening(message: Message, decision: "approve" | "block" | "reroute") {
     setScreeningBusy(message.id);
@@ -2984,7 +3038,7 @@ function SettingsPanel({
   }, [tab]);
   useEffect(() => {
     if (tab === "security" || tab === "privacy") void loadSecurity();
-    if (tab === "spam") void loadScreeningQueue();
+    if (tab === "spam") { void loadScreeningQueue(); void loadOrganizationBlocklist(); }
     if (tab === "organize") void loadRetentionPolicies();
   }, [tab]);
   useEffect(() => {
@@ -3470,6 +3524,33 @@ function SettingsPanel({
                 </div>
               ))}
             </div>
+            {organizationBlocklistAvailable && <div className="setting-card policy-list-card organization-blocklist-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Organization blocklist</h3>
+                  <p>Administrators can stop a sender or domain for every mailbox in this workspace.</p>
+                </div>
+                <ShieldAlert size={18} aria-hidden="true" />
+              </div>
+              <div className="policy-form">
+                <select value={organizationBlockType} onChange={(event) => setOrganizationBlockType(event.target.value as OrganizationBlock["match_type"])} aria-label="Organization block type">
+                  <option value="domain">This domain</option>
+                  <option value="address">This email address</option>
+                </select>
+                <input value={organizationBlockValue} onChange={(event) => setOrganizationBlockValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createOrganizationBlock(); }} placeholder={organizationBlockType === "domain" ? "example.com" : "sender@example.com"} aria-label="Organization block value" />
+                <button className="secondary-button" onClick={() => void createOrganizationBlock()} disabled={organizationBlockBusy}><ShieldAlert size={15} /> {organizationBlockBusy ? "Saving…" : "Block for workspace"}</button>
+              </div>
+              <small className="field-help">This runs before personal sender decisions. It never overrides confirmed malware blocking.</small>
+              {organizationBlocklist.length === 0 ? <div className="rule-empty">No organization-wide blocks yet.</div> : organizationBlocklist.map((block) => (
+                <div className={`settings-item policy-item ${block.enabled ? "" : "disabled"}`} key={block.id}>
+                  <div className="policy-copy"><strong>{block.match_value}</strong><small>{block.match_type} · workspace-wide</small></div>
+                  <div className="rule-list-actions">
+                    <label className="rule-toggle" title={block.enabled ? "Pause organization block" : "Enable organization block"}><input type="checkbox" checked={block.enabled} onChange={() => void toggleOrganizationBlock(block)} aria-label={`${block.enabled ? "Disable" : "Enable"} organization block for ${block.match_value}`} /><span /></label>
+                    <button className="icon-button compact-icon danger-icon" onClick={() => void deleteOrganizationBlock(block)} aria-label={`Remove organization block for ${block.match_value}`} title="Remove"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>}
             <div className="setting-card screening-queue-card">
               <div className="setting-card-head">
                 <div>
@@ -4930,6 +5011,12 @@ function MailboxApp({ session }: { session: Session }) {
   }
   async function reportSelectedMessage(reportType: "spam" | "phishing") {
     if (!selected) return;
+    if (reportType === "phishing" && !(await confirm({
+      title: "Report this message as phishing?",
+      message: "This will move the message to Quarantine and escalate it as a suspected phishing attempt. You can still review it there.",
+      confirmLabel: "Report phishing",
+      danger: true,
+    }))) return;
     try {
       await apiFetch("/api/mail/report", { method: "POST", body: JSON.stringify({ messageId: selected.id, reportType }) });
       setBulkNotice(reportType === "phishing" ? "Reported as phishing and moved to Quarantine" : "Reported as spam");
@@ -5747,6 +5834,35 @@ function MailboxApp({ session }: { session: Session }) {
                     </div>
                   </div>
                 )}
+                {(() => {
+                  const evidence = selected.trust_evidence || {};
+                  const auth = selected.auth_results || {};
+                  const authStatus = (key: "spf" | "dkim" | "dmarc" | "arc" | "tls") => String(selected[`auth_${key}` as keyof Message] || auth[key] || "missing").toLowerCase();
+                  const warnings: string[] = [];
+                  const notes: string[] = [];
+                  (["spf", "dkim", "dmarc"] as const).forEach((key) => { const value = authStatus(key); if (["fail", "softfail", "permerror", "temperror"].includes(value)) warnings.push(`${key.toUpperCase()} ${value}`); });
+                  if (authStatus("arc") === "fail") warnings.push("ARC failed");
+                  if (authStatus("tls") === "fail") warnings.push("TLS failed");
+                  if (evidence.external_sender === true) notes.push("External sender");
+                  if (selected.sender_first_seen || evidence.first_seen_sender === true) notes.push("First-time sender");
+                  if (evidence.display_name_spoof === true) warnings.push("Display name resembles a known brand");
+                  if (typeof evidence.lookalike_domain === "string" && evidence.lookalike_domain) warnings.push(`Lookalike ${evidence.lookalike_domain} domain`);
+                  if (evidence.suspicious_reply_to === true) warnings.push("Reply-To points to a different domain");
+                  const linkReputation = Array.isArray(evidence.link_reputation) ? evidence.link_reputation as Array<{ host?: string; reputation?: string }> : [];
+                  if (linkReputation.some((link) => link.reputation === "suspicious")) warnings.push("Suspicious link reputation signal");
+                  if (Number(evidence.qr_code_count || 0) > 0) warnings.push("QR-code candidate detected — inspect before scanning");
+                  const attachmentReputation = Array.isArray(evidence.attachment_reputation) ? evidence.attachment_reputation as Array<{ filename?: string; status?: string }> : [];
+                  if (attachmentReputation.some((attachment) => attachment.status === "blocked")) warnings.push("Blocked attachment");
+                  else if (attachmentReputation.some((attachment) => attachment.status === "suspicious")) warnings.push("Attachment needs review");
+                  if (attachmentReputation.length > 0) notes.push("Static attachment checks only; malware sandbox is not configured");
+                  if (evidence.brand_indicator && typeof evidence.brand_indicator === "object" && (evidence.brand_indicator as Record<string, unknown>).present === true) notes.push("Brand indicator declared but not independently verified");
+                  if (evidence.phishing_escalated === true) warnings.push("Phishing report escalated to Quarantine");
+                  if (!warnings.length && !notes.length) return null;
+                  return <div className={`trust-warning-banner ${warnings.length ? "has-warnings" : ""}`} role={warnings.length ? "alert" : "status"}>
+                    <ShieldAlert size={16} aria-hidden="true" />
+                    <div><strong>{warnings.length ? "Review before interacting" : "Sender context"}</strong><span>{[...warnings, ...notes].join(" · ")}</span><small>These are advisory signals, not proof of malicious intent. Avoid links, attachments, and replies until the sender is verified.</small></div>
+                  </div>;
+                })()}
                 {trustLensOpen && <div className="trust-lens">
                   <button className="trust-lens-toggle" onClick={() => void toggleTrustLens()} aria-expanded={trustLensOpen}>
                     <span className="trust-lens-title"><ShieldAlert size={15} /><span><strong>Trust Lens</strong><small> Authentication and sender evidence</small></span></span>
@@ -5759,6 +5875,7 @@ function MailboxApp({ session }: { session: Session }) {
                     const statusClass = (value: string) => value === "pass" ? "trust-status-pass" : value === "missing" || value === "none" ? "trust-status-missing" : "trust-status-fail";
                     const hosts = Array.isArray(evidence.link_hosts) ? evidence.link_hosts as Array<{ host?: string; count?: number }> : [];
                     const history = trustData.screening_history || [];
+                    const brandIndicator = evidence.brand_indicator && typeof evidence.brand_indicator === "object" ? evidence.brand_indicator as Record<string, unknown> : null;
                     return <div className="trust-lens-body">
                       <p className="trust-lens-note">Advisory signals only. Authentication results describe what the receiving server observed; they do not guarantee that a message is safe.</p>
                       <div className="trust-lens-grid">
@@ -5769,8 +5886,13 @@ function MailboxApp({ session }: { session: Session }) {
                         <div className="trust-lens-item"><strong>Contact</strong><span>{trustData.known_contact ? "Known contact" : "Not in contacts"}</span></div>
                         <div className="trust-lens-item"><strong>Reply-To</strong><span className={trustData.reply_to_mismatch ? "trust-status-fail" : "trust-status-pass"}>{trustData.reply_to_mismatch ? "Different address" : "Matches sender"}</span></div>
                         <div className="trust-lens-item"><strong>Tracking pixels</strong><span>{trustData.tracking_pixel_count || 0} detected</span></div>
+                        <div className="trust-lens-item"><strong>Sender boundary</strong><span className={evidence.external_sender ? "trust-status-fail" : "trust-status-pass"}>{evidence.external_sender ? "External sender" : "Same domain"}</span></div>
+                        <div className="trust-lens-item"><strong>Identity signals</strong><span className={evidence.display_name_spoof || evidence.lookalike_domain ? "trust-status-fail" : "trust-status-missing"}>{evidence.display_name_spoof ? "Brand-like display name" : evidence.lookalike_domain ? `Lookalike ${String(evidence.lookalike_domain)}` : "No match detected"}</span></div>
+                        <div className="trust-lens-item"><strong>QR candidates</strong><span>{Number(evidence.qr_code_count || 0)} detected</span></div>
+                        <div className="trust-lens-item"><strong>Attachment checks</strong><span>{Array.isArray(evidence.attachment_reputation) && evidence.attachment_reputation.length ? "Static checks only" : "No attachments"}</span></div>
                       </div>
                       <div className="trust-lens-section"><strong>Link hosts · {trustData.link_count || 0} links</strong>{hosts.length ? <div className="trust-host-list">{hosts.map((item) => <span className="trust-host" key={item.host}>{item.host}{item.count && item.count > 1 ? ` · ${item.count}` : ""}</span>)}</div> : <p className="trust-lens-note">No web links detected.</p>}</div>
+                      {brandIndicator?.present === true && <div className="trust-lens-section"><strong>Brand indicator</strong><p className="trust-lens-note">A BIMI-style declaration was present, but Postveil has not independently verified the logo or domain.</p></div>}
                       {history.length > 0 && <div className="trust-lens-section"><strong>Screening history</strong><p className="trust-lens-note">{history.slice(0, 3).map((item) => `${item.decision} · ${new Date(item.created_at).toLocaleString()}`).join("  |  ")}</p></div>}
                     </div>;
                   })()}

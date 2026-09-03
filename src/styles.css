@@ -878,6 +878,19 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .trust-lens-section > strong { color: var(--ink-soft); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .trust-host-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .trust-host { border: 1px solid var(--line); border-radius: 99px; background: var(--surface); padding: 4px 7px; color: var(--muted); font-size: 10px; }
+.trust-warning-banner { display: flex; align-items: flex-start; gap: 10px; margin-top: 16px; border: 1px solid #d9e2e9; border-radius: 8px; background: #f5f9fb; color: #45606e; padding: 11px 13px; }
+.trust-warning-banner.has-warnings { border-color: #e6bd78; background: #fff8e8; color: #76531d; }
+.trust-warning-banner > svg { flex: 0 0 auto; margin-top: 1px; }
+.trust-warning-banner div { display: grid; gap: 3px; min-width: 0; }
+.trust-warning-banner strong { font-size: 11px; }
+.trust-warning-banner span, .trust-warning-banner small { font-size: 10px; line-height: 1.45; }
+.trust-warning-banner small { color: #8c7660; }
+.organization-blocklist-card { grid-column: 1 / -1; }
+.organization-blocklist-card .policy-form { grid-template-columns: minmax(145px, .5fr) minmax(0, 1fr) auto; }
+.organization-blocklist-card .settings-item { margin-top: 7px; }
+.theme-dark .trust-warning-banner { border-color: #385265; background: #1e2d36; color: #c8dce6; }
+.theme-dark .trust-warning-banner.has-warnings { border-color: #765629; background: #332a1b; color: #f0c77d; }
+.theme-dark .trust-warning-banner small { color: #c2a77a; }
 .theme-dark .trust-lens, .theme-dark .trust-lens-item, .theme-dark .trust-host { background: var(--surface); border-color: var(--line); }
 .theme-dark .screening-queue-main strong, .theme-dark .trust-lens-item strong, .theme-dark .trust-lens-toggle { color: var(--ink); }
 @media (max-width: 720px) {
@@ -885,6 +898,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .screening-queue-actions { justify-content: flex-start; }
   .policy-apply-button { margin-right: auto; }
   .trust-lens-grid { grid-template-columns: 1fr; }
+  .organization-blocklist-card .policy-form { grid-template-columns: 1fr; }
 }
 
 /* Keep the navigation, message list, and reader in their own quiet scroll lanes. */
