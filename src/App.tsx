@@ -65,6 +65,7 @@ import { Session } from "@supabase/supabase-js";
 import { requireSupabase, supabase } from "./lib/supabase";
 import { sanitizeEmailHtml } from "./lib/email-html";
 import { qrImageSource } from "./lib/qr";
+import RichEmailBody from "./components/RichEmailBody";
 
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam" | "quarantine";
 type ViewKey = SystemFolder | "focused" | "other" | "important" | "snoozed" | "muted" | `custom:${string}`;
@@ -243,6 +244,13 @@ type Signature = {
   html_body?: string | null;
   mailbox_id?: string | null;
   is_default: boolean;
+};
+type LinkInspection = {
+  ok: boolean;
+  url: string;
+  finalUrl?: string;
+  chain?: Array<{ url: string; status: number; location?: string | null }>;
+  warning?: string;
 };
 type ComposeLibraryItem = {
   id: string;
@@ -1556,6 +1564,7 @@ function Compose({
   const [confidentialMode, setConfidentialMode] = useState(false);
   const [expiresHours, setExpiresHours] = useState("48");
   const [passwordProtected, setPasswordProtected] = useState(false);
+  const [confidentialPassword, setConfidentialPassword] = useState("");
   const [passwordHint, setPasswordHint] = useState("");
   const [linkPreviewEnabled, setLinkPreviewEnabled] = useState(true);
   const [isMinimized, setIsMinimized] = useState(false);
@@ -1659,11 +1668,12 @@ function Compose({
   async function send(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
+      if (confidentialMode && passwordProtected && confidentialPassword.length < 10) throw new Error("Use a confidential message password of at least 10 characters.");
       if (recurrence !== "none" && !scheduledAt) throw new Error("Choose a first send time before enabling recurring delivery.");
       const delay = Number(delayMinutes || 0);
       const effectiveScheduledAt = scheduledAt ? zonedLocalToIso(scheduledAt, timeZone) : delay > 0 ? new Date(Date.now() + delay * 60_000).toISOString() : null;
       const sendText = text || html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      await apiFetch("/api/send", { method: "POST", body: JSON.stringify({ fromAddress, sendMode, to, cc, bcc, subject, text: sendText, html: composeMode === "plain" ? null : composeMode === "markdown" ? markdownToHtml(text) : html, scheduledAt: effectiveScheduledAt, timezone: timeZone, undoSendSeconds: undoSeconds, idempotencyKey: idempotencyKeyRef.current, warningsAcknowledged: warnings.map((warning) => warning.code), threadId: seed?.threadId, inReplyTo: seed?.inReplyTo, references: seed?.references, attachments, openTrackingEnabled, clickTrackingEnabled, composeMetadata: { composeMode, timezone: timeZone, recurrence, readReceipt, deliveryReceipt, requestConfirmation, mailMerge, contactGroup, replyTracking, followUpTracking, confidentialMode, expiresHours: Number(expiresHours), passwordProtected, passwordHint, linkPreviewEnabled, delayedMinutes: delay } }) });
+      await apiFetch("/api/send", { method: "POST", body: JSON.stringify({ fromAddress, sendMode, to, cc, bcc, subject, text: sendText, html: composeMode === "plain" ? null : composeMode === "markdown" ? markdownToHtml(text) : html, scheduledAt: effectiveScheduledAt, timezone: timeZone, undoSendSeconds: undoSeconds, idempotencyKey: idempotencyKeyRef.current, warningsAcknowledged: warnings.map((warning) => warning.code), threadId: seed?.threadId, inReplyTo: seed?.inReplyTo, references: seed?.references, attachments, openTrackingEnabled, clickTrackingEnabled, composeMetadata: { composeMode, timezone: timeZone, recurrence, readReceipt, deliveryReceipt, requestConfirmation, mailMerge, contactGroup, replyTracking, followUpTracking, confidentialMode, expiresHours: Number(expiresHours), passwordProtected, confidentialPassword: passwordProtected ? confidentialPassword : undefined, passwordHint, linkPreviewEnabled, delayedMinutes: delay } }) });
       onSent(); onClose();
     } catch (sendError) {
       if (sendError instanceof ApiError && Array.isArray(sendError.payload.warnings)) setWarnings(sendError.payload.warnings as Array<{ code: string; title: string; detail: string }>);
@@ -1692,7 +1702,7 @@ function Compose({
       {availableSignatures.length > 0 && <label className="compose-signature-select"><Tag size={14} aria-hidden="true" /><select value={signatureId} onChange={(event) => chooseSignature(event.target.value)} aria-label="Add signature"><option value="">Signature</option>{availableSignatures.map((signature) => <option key={signature.id} value={signature.id}>{signature.name}</option>)}</select></label>}
       <label className="schedule-field"><Clock3 size={14} aria-hidden="true" /><span>{scheduledAt ? "Scheduled" : "Deliver"}</span><select value={delayMinutes} onChange={(event) => setDelayMinutes(event.target.value)} aria-label="Delayed delivery"><option value="0">Now</option><option value="5">In 5 min</option><option value="15">In 15 min</option><option value="30">In 30 min</option><option value="60">In 1 hour</option></select></label><label className="schedule-field"><span>Send at</span><input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} aria-label="Schedule send" /></label><label className="schedule-field"><span>Zone</span><select value={timeZone} onChange={(event) => setTimeZone(event.target.value)} aria-label="Scheduling time zone"><option>{timeZone}</option><option>UTC</option><option>Asia/Manila</option><option>America/New_York</option><option>Europe/London</option><option>Australia/Sydney</option></select></label>
       <button type="button" className={`compose-option-button${showMoreOptions ? " is-active" : ""}`} onClick={() => setShowMoreOptions((current) => !current)} aria-expanded={showMoreOptions}>Delivery & privacy</button></div>
-    {showMoreOptions && <div className="compose-advanced-panel"><div className="compose-advanced-grid"><label>Recurring<select value={recurrence} onChange={(event) => setRecurrence(event.target.value as typeof recurrence)}><option value="none">One time</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>Follow-up tracking<select value={followUpTracking ? "on" : "off"} onChange={(event) => setFollowUpTracking(event.target.value === "on")}><option value="off">Off</option><option value="on">Track reply follow-up</option></select></label></div><div className="compose-check-grid"><label className="checkbox-row"><input type="checkbox" checked={openTrackingEnabled} onChange={(event) => setOpenTrackingEnabled(event.target.checked)} /> Track opens</label><label className="checkbox-row"><input type="checkbox" checked={clickTrackingEnabled} onChange={(event) => setClickTrackingEnabled(event.target.checked)} /> Track clicks</label><label className="checkbox-row"><input type="checkbox" checked={deliveryReceipt} onChange={(event) => setDeliveryReceipt(event.target.checked)} /> Delivery receipt</label><label className="checkbox-row"><input type="checkbox" checked={readReceipt} onChange={(event) => setReadReceipt(event.target.checked)} /> Read receipt</label><label className="checkbox-row"><input type="checkbox" checked={requestConfirmation} onChange={(event) => setRequestConfirmation(event.target.checked)} /> Request confirmation</label><label className="checkbox-row"><input type="checkbox" checked={replyTracking} onChange={(event) => setReplyTracking(event.target.checked)} /> Track replies</label></div><div className="confidential-panel"><label className="checkbox-row"><input type="checkbox" checked={confidentialMode} onChange={(event) => setConfidentialMode(event.target.checked)} /> Confidential message mode</label>{confidentialMode && <div className="confidential-controls"><label>Expires after<select value={expiresHours} onChange={(event) => setExpiresHours(event.target.value)}><option value="1">1 hour</option><option value="24">24 hours</option><option value="48">48 hours</option><option value="168">7 days</option></select></label><label className="checkbox-row"><input type="checkbox" checked={passwordProtected} onChange={(event) => setPasswordProtected(event.target.checked)} /> Password-protect external message</label>{passwordProtected && <input value={passwordHint} onChange={(event) => setPasswordHint(event.target.value)} placeholder="Password hint (never the password)" />}</div>}</div></div>}
+      {showMoreOptions && <div className="compose-advanced-panel"><div className="compose-advanced-grid"><label>Recurring<select value={recurrence} onChange={(event) => setRecurrence(event.target.value as typeof recurrence)}><option value="none">One time</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>Follow-up tracking<select value={followUpTracking ? "on" : "off"} onChange={(event) => setFollowUpTracking(event.target.value === "on")}><option value="off">Off</option><option value="on">Track reply follow-up</option></select></label></div><div className="compose-check-grid"><label className="checkbox-row"><input type="checkbox" checked={openTrackingEnabled} onChange={(event) => setOpenTrackingEnabled(event.target.checked)} /> Track opens</label><label className="checkbox-row"><input type="checkbox" checked={clickTrackingEnabled} onChange={(event) => setClickTrackingEnabled(event.target.checked)} /> Track clicks</label><label className="checkbox-row"><input type="checkbox" checked={deliveryReceipt} onChange={(event) => setDeliveryReceipt(event.target.checked)} /> Delivery receipt</label><label className="checkbox-row"><input type="checkbox" checked={readReceipt} onChange={(event) => setReadReceipt(event.target.checked)} /> Read receipt</label><label className="checkbox-row"><input type="checkbox" checked={requestConfirmation} onChange={(event) => setRequestConfirmation(event.target.checked)} /> Request confirmation</label><label className="checkbox-row"><input type="checkbox" checked={replyTracking} onChange={(event) => setReplyTracking(event.target.checked)} /> Track replies</label></div><div className="confidential-panel"><label className="checkbox-row"><input type="checkbox" checked={confidentialMode} onChange={(event) => setConfidentialMode(event.target.checked)} /> Confidential message mode</label>{confidentialMode && <div className="confidential-controls"><label>Expires after<select value={expiresHours} onChange={(event) => setExpiresHours(event.target.value)}><option value="1">1 hour</option><option value="24">24 hours</option><option value="48">48 hours</option><option value="168">7 days</option></select></label><label className="checkbox-row"><input type="checkbox" checked={passwordProtected} onChange={(event) => setPasswordProtected(event.target.checked)} /> Password-protect external message</label>{passwordProtected && <><input type="password" autoComplete="new-password" minLength={10} value={confidentialPassword} onChange={(event) => setConfidentialPassword(event.target.value)} placeholder="Message password (10+ characters)" aria-label="Confidential message password" /><input value={passwordHint} onChange={(event) => setPasswordHint(event.target.value)} placeholder="Password hint (never the password)" /><small className="compose-help-text">The password is used once to protect this message and is never saved in your draft.</small></>}</div>}</div></div>}
     <div className="attachment-dropzone" role="group" aria-label="Attachment drop zone" onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={(event) => { event.preventDefault(); setIsDragging(false); void uploadFiles(Array.from(event.dataTransfer.files)); }}><UploadCloud size={18} aria-hidden="true" /><div><strong>{isDragging ? "Drop files to attach" : "Add attachments"}</strong><span>Drag files here or choose from your device · 15 MB each</span></div><label className="file-button"><Paperclip size={15} /> Attach files<input ref={fileInputRef} type="file" multiple onChange={(event) => { void uploadFiles(Array.from(event.target.files || [])); event.target.value = ""; }} /></label></div>
     {(localWarnings.length > 0 || warnings.length > 0) && <div className="compose-warning" role="alert"><div className="compose-warning-head"><AlertTriangle size={15} /><strong>Review before sending</strong></div>{[...localWarnings, ...warnings.filter((warning) => !localWarnings.some((local) => local.code === warning.code))].map((warning) => <p key={warning.code}><strong>{warning.title}.</strong> {warning.detail}</p>)}<small>These checks stay inside Postveil; your browser’s native alert is not used.</small></div>}
     {detectedLinks.length > 0 && linkPreviewEnabled && <div className="compose-link-previews"><div className="compose-preview-label">Link preview · {detectedLinks.length}</div>{detectedLinks.slice(0, 3).map((link) => <a href={link} target="_blank" rel="noreferrer" key={link}><strong>{new URL(link).hostname}</strong><span>{link}</span></a>)}</div>}
@@ -3038,9 +3048,9 @@ function SettingsPanel({
                   checked={loadRemoteImages}
                   onChange={(event) => onLoadRemoteImagesChange(event.target.checked)}
                 />
-                Display images in messages
+                Load remote images privately
               </label>
-              <small className="setting-note">Images are shown by default. Turn this off to prevent remote senders from learning when you open a message.</small>
+              <small className="setting-note">Inline images always render. Remote images stay blocked unless Postveil fetches them through its privacy proxy.</small>
             </div>
             <div className="setting-card">
               <h3>Attention</h3>
@@ -3952,7 +3962,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [composeSeed, setComposeSeed] = useState<ComposeSeed | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
-  const [loadRemoteImages, setLoadRemoteImages] = useState(() => storedBooleanPreference(imagePreferenceKey, true));
+  const [loadRemoteImages, setLoadRemoteImages] = useState(() => storedBooleanPreference(imagePreferenceKey, false));
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("newest");
@@ -4666,6 +4676,22 @@ function MailboxApp({ session }: { session: Session }) {
       setError(attachmentError instanceof Error ? attachmentError.message : "Preview unavailable");
     }
   }
+  async function loadExternalEmailImage(source: string) {
+    const current = (await requireSupabase().auth.getSession()).data.session;
+    const response = await fetch(`/api/email-image-proxy?url=${encodeURIComponent(source)}`, {
+      headers: current?.access_token ? { authorization: `Bearer ${current.access_token}` } : {},
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(typeof payload.error === "string" ? payload.error : "Image could not be loaded privately");
+    }
+    const blob = await response.blob();
+    if (!blob.type.toLowerCase().startsWith("image/")) throw new Error("The remote content was not an image");
+    return URL.createObjectURL(blob);
+  }
+  async function inspectEmailLink(source: string): Promise<LinkInspection> {
+    return apiFetch<LinkInspection>(`/api/link-inspection?url=${encodeURIComponent(source)}`);
+  }
   async function downloadAllAttachments(messageId: string) {
     try {
       const session = (await requireSupabase().auth.getSession()).data.session;
@@ -4815,14 +4841,10 @@ function MailboxApp({ session }: { session: Session }) {
           .join(", "),
       }
     : undefined;
-  const selectedBody = selected
-    ? splitQuotedBody(selected.text_body || selected.snippet || "")
-    : { body: "", quote: "" };
   const detailIdentity = selected
     ? detailIdentityForMessage(selected, contacts, mailboxes)
     : null;
   const selectedContact = detailIdentity ? contactFor(detailIdentity.email, contacts) : undefined;
-  const selectedHtml = selected ? sanitizeEmailHtml(selected.html_body, { inlineImageUrls, loadExternalImages: loadRemoteImages }) : "";
   const customFolderDepth = (folderId: string): number => {
     let depth = 0;
     let parentId = folders.find((item) => item.id === folderId)?.parent_id || null;
@@ -5593,15 +5615,17 @@ function MailboxApp({ session }: { session: Session }) {
                     ))}
                   </div>
                 )}
-                <div className={`body-copy ${selectedHtml ? "body-copy-rich" : ""}`}>
-                  {selectedHtml ? <div className="email-html" dangerouslySetInnerHTML={{ __html: selectedHtml }} /> : selectedBody.body || "No message body."}
+                <div className="body-copy body-copy-rich">
+                  <RichEmailBody
+                    htmlBody={selected.html_body}
+                    textBody={selected.text_body}
+                    fallback={selected.snippet}
+                    inlineImageUrls={inlineImageUrls}
+                    loadRemoteImages={loadRemoteImages}
+                    loadExternalImage={loadExternalEmailImage}
+                    inspectLink={inspectEmailLink}
+                  />
                 </div>
-                {selectedBody.quote && (
-                  <details className="quoted-block">
-                    <summary>Show quoted text</summary>
-                    <div className="quoted-content">{selectedBody.quote}</div>
-                  </details>
-                )}
                 {selected.attachments && selected.attachments.length > 0 && (
                   <div className="attachments">
                     <div className="attachments-head">

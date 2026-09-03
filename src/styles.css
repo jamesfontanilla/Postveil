@@ -441,6 +441,97 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .email-html pre { max-width: 100%; overflow-x: auto; white-space: pre-wrap; }
 .email-html blockquote { border-left: 3px solid var(--line-strong); padding-left: 13px; color: var(--muted); }
 .email-html hr { border: 0; border-top: 1px solid var(--line); }
+.rich-email-reader { position: relative; display: grid; gap: 11px; width: 100%; min-width: 0; color: var(--ink); }
+.rich-email-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-muted); padding: 6px; }
+.rich-email-toolbar-group { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.rich-email-toolbar-group button, .rich-email-footer-tools button, .rich-email-source-head button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); padding: 5px 7px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.rich-email-toolbar-group button:hover, .rich-email-toolbar-group button:focus-visible, .rich-email-toolbar-group button.is-active, .rich-email-footer-tools button:hover, .rich-email-footer-tools button:focus-visible { border-color: var(--line-strong); background: var(--surface); color: var(--accent); }
+.rich-email-toolbar-group button:focus-visible, .rich-email-footer-tools button:focus-visible, .rich-email-source-head button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rich-email-reader-tools { justify-content: flex-end; }
+.rich-email-zoom { min-width: 35px; color: var(--ink-soft); font: 10px "IBM Plex Mono", monospace; text-align: center; }
+.rich-email-responsive-icon { font-size: 14px; line-height: 1; }
+.rich-email-security-strip { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; border-bottom: 1px solid var(--line); color: var(--muted); padding: 0 2px 9px; font-size: 10px; }
+.rich-email-security-strip span { display: inline-flex; align-items: center; gap: 4px; }
+.rich-email-security-strip .rich-email-warning, .rich-email-tracker-note { color: #95600c; }
+.rich-email-content-warning, .rich-email-tracker-note { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; border: 1px solid color-mix(in srgb, #b77b17 27%, var(--line)); border-radius: 7px; background: color-mix(in srgb, #e8b44b 8%, var(--surface)); padding: 10px 11px; font-size: 11px; line-height: 1.45; }
+.rich-email-content-warning > div, .rich-email-tracker-note { display: flex; align-items: flex-start; gap: 8px; }
+.rich-email-content-warning svg, .rich-email-tracker-note svg { flex: 0 0 auto; margin-top: 1px; }
+.rich-email-content-warning span { display: grid; gap: 3px; }
+.rich-email-content-warning strong { color: var(--ink-soft); font-size: 11px; }
+.rich-email-content-warning small { color: var(--muted); font-size: 10px; }
+.rich-email-content-warning button { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 4px; background: var(--surface); color: var(--accent); padding: 6px 8px; font-size: 10px; font-weight: 800; cursor: pointer; }
+.rich-email-content-warning button:hover { border-color: var(--accent); }
+.rich-email-surface { width: 100%; min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #17221f; padding: clamp(15px, 3vw, 27px); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.rich-email-surface.rich-email-dark { background: #111916; color: #e7eee9; }
+.rich-email-surface.rich-email-dark .rich-email-html { color: #e7eee9; }
+.rich-email-surface.rich-email-dark .rich-email-html :where(h1, h2, h3, h4, h5, h6, strong, b) { color: #f2f6f3; }
+.rich-email-surface.rich-email-dark .rich-email-html a { color: #9db7ff; }
+.rich-email-surface.rich-email-dark .rich-email-html blockquote { border-color: #52645b; color: #aebbb3; }
+.rich-email-responsive .rich-email-html { width: 100%; max-width: 100%; }
+.rich-email-original-width .rich-email-html { width: max-content; min-width: min(100%, 640px); max-width: none; }
+.rich-email-html { min-width: 0; overflow-wrap: anywhere; line-height: 1.6; }
+.rich-email-html :where(p, h1, h2, h3, h4, h5, h6, blockquote, pre, figure) { max-width: 100%; }
+.rich-email-html :where(p, ul, ol) { margin: 0 0 1em; }
+.rich-email-html > :first-child { margin-top: 0; }
+.rich-email-html > :last-child { margin-bottom: 0; }
+.rich-email-html :where(h1, h2, h3, h4, h5, h6) { line-height: 1.25; }
+.rich-email-html a { color: #3156d8; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; cursor: pointer; }
+.rich-email-html img { display: block; max-width: 100%; height: auto; border-radius: 3px; }
+.rich-email-html table { max-width: 100%; border-collapse: collapse; }
+.rich-email-html td, .rich-email-html th { overflow-wrap: anywhere; }
+.rich-email-html pre { max-width: 100%; overflow: auto; white-space: pre-wrap; }
+.rich-email-html blockquote { border-left: 3px solid var(--line-strong); padding-left: 13px; color: var(--muted); }
+.rich-email-quoted-collapsed blockquote { display: none; }
+.rich-email-quoted-collapsed blockquote + * { margin-top: 0; }
+.rich-email-text-view { max-width: 78ch; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: clamp(15px, 3vw, 27px); line-height: 1.7; }
+.rich-email-plain-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rich-email-collapse { margin-top: 17px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-muted); }
+.rich-email-collapse summary { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ink-soft); padding: 9px 11px; font-size: 11px; font-weight: 700; list-style: none; }
+.rich-email-collapse summary::-webkit-details-marker { display: none; }
+.rich-email-collapse pre { margin: 0; border-top: 1px solid var(--line); padding: 11px; color: var(--muted); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rich-email-source-view { overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: #17221f; color: #dbe7df; }
+.rich-email-source-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #405148; padding: 8px 11px; color: #b7c8bd; font: 10px "IBM Plex Mono", monospace; }
+.rich-email-source-head button { border-color: #405148; color: #dbe7df; }
+.rich-email-source-view pre { max-height: 560px; margin: 0; overflow: auto; padding: 15px; font: 11px/1.55 "IBM Plex Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rich-email-footer-tools { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 9px; }
+.rich-email-footer-note { margin-left: auto; color: var(--muted); font-size: 10px; }
+.rich-email-translation-panel, .rich-email-link-panel { position: relative; display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-muted); padding: 12px; color: var(--ink-soft); }
+.rich-email-translation-panel > svg, .rich-email-link-panel > svg { flex: 0 0 auto; color: var(--accent); margin-top: 2px; }
+.rich-email-translation-panel > div, .rich-email-link-panel > div { min-width: 0; display: grid; gap: 5px; }
+.rich-email-translation-panel strong, .rich-email-link-panel strong { font-size: 11px; }
+.rich-email-translation-panel p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.rich-email-translation-panel label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
+.rich-email-translation-panel select { border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); padding: 5px 7px; font-size: 10px; }
+.rich-email-translation-panel small { color: var(--muted); font-size: 10px; }
+.rich-email-translation-panel > button, .rich-email-link-head button { margin-left: auto; border: 0; background: transparent; color: var(--muted); padding: 2px; cursor: pointer; }
+.rich-email-link-panel { display: grid; gap: 7px; background: var(--surface); }
+.rich-email-link-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rich-email-link-head span { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-size: 10px; font-weight: 800; }
+.rich-email-link-panel code { color: var(--muted); font: 10px/1.4 "IBM Plex Mono", monospace; overflow-wrap: anywhere; }
+.rich-email-link-panel p { margin: 0; color: #16734a; font-size: 10px; font-weight: 700; }
+.rich-email-link-panel p.is-warning { color: #a34235; }
+.rich-email-link-panel > div:last-child { display: flex; justify-content: flex-start; margin-top: 3px; }
+.rich-email-redirect-chain { display: grid; gap: 4px; border-top: 1px solid var(--line); padding-top: 7px; }
+.rich-email-redirect-chain span { color: var(--muted); font-size: 10px; font-weight: 700; }
+.rich-email-print-only { display: none; }
+.theme-dark .rich-email-toolbar, .theme-dark .rich-email-text-view, .theme-dark .rich-email-translation-panel, .theme-dark .rich-email-link-panel { background: var(--surface); }
+@media (max-width: 720px) {
+  .rich-email-toolbar { align-items: stretch; flex-direction: column; }
+  .rich-email-toolbar-group, .rich-email-reader-tools { justify-content: flex-start; }
+  .rich-email-tool-label { display: none; }
+  .rich-email-footer-note { width: 100%; margin-left: 0; }
+  .rich-email-content-warning { flex-direction: column; }
+  .rich-email-content-warning button { width: fit-content; }
+  .rich-email-surface { padding: 15px; }
+}
+@media print {
+  body.printing-email * { visibility: hidden !important; }
+  body.printing-email .rich-email-reader, body.printing-email .rich-email-reader * { visibility: visible !important; }
+  body.printing-email .rich-email-reader { position: absolute; inset: 0; width: 100%; padding: 22px; background: white; }
+  body.printing-email .rich-email-toolbar, body.printing-email .rich-email-security-strip, body.printing-email .rich-email-content-warning, body.printing-email .rich-email-tracker-note, body.printing-email .rich-email-footer-tools, body.printing-email .rich-email-translation-panel, body.printing-email .rich-email-link-panel { display: none !important; }
+  body.printing-email .rich-email-surface, body.printing-email .rich-email-text-view { border: 0; padding: 0; overflow: visible; }
+  body.printing-email .rich-email-print-only { display: block; margin-top: 28px; color: #66736d; font: 10px "IBM Plex Mono", monospace; }
+}
 .quoted-block { max-width: 68ch; margin-top: 22px; border-left: 3px solid var(--line-strong); background: var(--surface-muted); color: var(--muted); }
 .quoted-block summary { cursor: pointer; padding: 10px 13px; color: var(--ink-soft); font-size: 11px; font-weight: 700; list-style-position: inside; }
 .quoted-content { border-top: 1px solid var(--line); padding: 12px 14px; white-space: pre-wrap; font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }

@@ -26,6 +26,8 @@ const allowedStyleProperties = new Set([
 function isSafeUrl(value: string, kind: "href" | "src"): boolean {
   const normalized = value.trim().toLowerCase();
   if (kind === "href" && normalized.startsWith("mailto:")) return true;
+  if (kind === "src" && normalized.startsWith("blob:")) return true;
+  if (kind === "src" && /^data:image\/(?:png|jpe?g|gif|webp|avif);base64,/.test(normalized) && value.length <= 2_000_000) return true;
   return normalized.startsWith("https://") || normalized.startsWith("http://");
 }
 
@@ -72,8 +74,9 @@ function preserveEmailDimension(element: HTMLElement, attribute: "width" | "heig
 
 export type EmailHtmlOptions = {
   inlineImageUrls?: Record<string, string>;
-  /** Remote images are rendered by default; callers can disable them for privacy. */
+  /** Remote images are only rendered after the caller has loaded them through a privacy-preserving proxy. */
   loadExternalImages?: boolean;
+  externalImageUrls?: Record<string, string>;
 };
 
 /**
@@ -89,6 +92,7 @@ export function sanitizeEmailHtml(value: string | null | undefined, options: Ema
   const sanitized = DOMPurify.sanitize(value, {
     ALLOWED_ATTR: allowedAttributes,
     ALLOWED_TAGS: allowedTags,
+    ADD_ATTR: ["data-postveil-remote-src"],
     ALLOW_DATA_ATTR: false,
     FORBID_TAGS: ["base", "embed", "form", "iframe", "link", "meta", "object", "script", "style", "svg"],
   });
@@ -130,9 +134,28 @@ export function sanitizeEmailHtml(value: string | null | undefined, options: Ema
     const inlineUrl = inlineKey ? options.inlineImageUrls?.[inlineKey] : undefined;
     if (inlineUrl) image.setAttribute("src", inlineUrl);
     preserveEmailDimension(image, "width");
+    const declaredWidth = Number(image.getAttribute("width"));
+    const declaredHeight = Number(image.getAttribute("height"));
+    const likelyTrackingPixel = (Number.isFinite(declaredWidth) && declaredWidth >= 0 && declaredWidth <= 4)
+      || (Number.isFinite(declaredHeight) && declaredHeight >= 0 && declaredHeight <= 4)
+      || /(?:pixel|beacon|track|open)/i.test(originalSrc);
+    if (likelyTrackingPixel) {
+      image.removeAttribute("src");
+      image.removeAttribute("data-postveil-remote-src");
+      image.setAttribute("alt", "Tracking image blocked");
+      return;
+    }
     const src = image.getAttribute("src");
-    if (!src || !isSafeUrl(src, "src") || (!loadExternalImages && !inlineUrl)) image.removeAttribute("src");
-    image.setAttribute("loading", loadExternalImages || inlineUrl ? "eager" : "lazy");
+    const external = Boolean(src && isSafeUrl(src, "src") && !inlineUrl);
+    if (external) image.setAttribute("data-postveil-remote-src", src || "");
+    const proxiedUrl = external ? options.externalImageUrls?.[src || ""] : undefined;
+    if (proxiedUrl && isSafeUrl(proxiedUrl, "src")) {
+      image.setAttribute("src", proxiedUrl);
+      image.removeAttribute("data-postveil-remote-src");
+    } else if (!src || !isSafeUrl(src, "src") || (!loadExternalImages && !inlineUrl) || (external && !proxiedUrl)) {
+      image.removeAttribute("src");
+    }
+    image.setAttribute("loading", inlineUrl || proxiedUrl ? "eager" : "lazy");
     image.setAttribute("referrerpolicy", "no-referrer");
     image.setAttribute("decoding", "async");
   });
