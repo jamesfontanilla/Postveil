@@ -943,6 +943,61 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .inspection-columns > div { display: grid; align-content: start; gap: 5px; }
 .inspection-columns code { overflow-wrap: anywhere; border-radius: 4px; background: var(--surface); padding: 5px; color: var(--muted); font: 10px/1.4 "IBM Plex Mono", monospace; }
 .compose-tracking-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--muted); font-size: 10px; }
+.compose-studio { width: min(780px, calc(100vw - 48px)); }
+.compose-address-grid { display: grid; gap: 10px; }
+.compose-recipient-field { position: relative; }
+.recipient-suggestions { position: absolute; z-index: 4; top: calc(100% + 3px); left: 0; right: 0; display: grid; gap: 2px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); box-shadow: 0 12px 30px rgba(23,33,31,.14); padding: 4px; }
+.recipient-suggestions button { display: grid; gap: 2px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); padding: 7px 8px; text-align: left; }
+.recipient-suggestions button:hover { background: var(--surface-muted); }
+.recipient-suggestions strong { font-size: 11px; }
+.recipient-suggestions small { color: var(--muted); font-size: 10px; }
+.compose-group-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 10px; }
+.compose-group-row select { width: auto; min-width: 155px; padding: 7px 9px; }
+.compose-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--ink-soft); font-size: 11px; font-weight: 700; }
+.compose-mode-tabs { display: flex; align-items: center; gap: 3px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-muted); padding: 3px; }
+.compose-mode-tabs button, .compose-rich-toolbar button { border: 0; border-radius: 4px; background: transparent; color: var(--muted); padding: 5px 7px; font-size: 10px; font-weight: 700; }
+.compose-mode-tabs button.is-active, .compose-mode-tabs button:hover, .compose-rich-toolbar button:hover { background: var(--surface); color: var(--accent); }
+.compose-rich-toolbar { display: flex; gap: 4px; margin-top: -5px; }
+.compose-body-editor { min-height: 150px; resize: vertical; }
+.compose-preview, .compose-link-previews { margin-top: 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-muted); padding: 10px 11px; }
+.compose-preview-label { margin-bottom: 6px; color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+.compose-preview > div:last-child { color: var(--ink-soft); font-size: 12px; line-height: 1.55; }
+.compose-link-previews { display: grid; gap: 6px; }
+.compose-link-previews a { display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); padding: 7px 9px; color: var(--ink-soft); text-decoration: none; }
+.compose-link-previews a:hover { border-color: var(--accent); }
+.compose-link-previews strong { font-size: 10px; }
+.compose-link-previews span { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.compose-variable-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 10px; }
+.compose-variable-row button { border: 1px solid var(--line); border-radius: 4px; background: var(--surface-muted); color: var(--accent); padding: 4px 6px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
+.compose-option-row.compose-studio-options { position: relative; }
+.compose-option-button.is-active { color: var(--accent); }
+.compose-library { position: absolute; z-index: 5; top: calc(100% + 5px); left: 20px; display: grid; gap: 4px; width: min(320px, calc(100vw - 40px)); border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); box-shadow: 0 15px 40px rgba(23,33,31,.16); padding: 7px; }
+.compose-library-head { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.compose-library-head select { flex: 1; border: 0; background: transparent; padding: 4px; font-size: 10px; }
+.compose-library-head button { border: 0; background: transparent; color: var(--accent); font-size: 10px; font-weight: 700; }
+.compose-library > button { display: grid; gap: 2px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-soft); padding: 8px; text-align: left; }
+.compose-library > button:hover { background: var(--surface-muted); }
+.compose-library > button strong { font-size: 11px; }
+.compose-library > button small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.compose-advanced-panel { margin: 11px 20px 0; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-muted); padding: 11px; }
+.compose-advanced-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.compose-advanced-grid label, .confidential-controls label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.compose-advanced-grid select, .confidential-controls select { padding: 8px 9px; }
+.compose-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-top: 10px; }
+.compose-check-grid .checkbox-row, .confidential-panel .checkbox-row { color: var(--ink-soft); font-size: 10px; }
+.confidential-panel { margin-top: 11px; border-top: 1px solid var(--line); padding-top: 10px; }
+.confidential-controls { display: grid; gap: 8px; margin-top: 9px; padding-left: 22px; }
+.confidential-controls > input { max-width: 260px; padding: 8px 9px; }
+@media (max-width: 720px) {
+  .compose-studio { width: 100%; }
+  .compose-mode-tabs { max-width: 100%; }
+  .compose-mode-tabs button { padding: 5px 6px; }
+  .compose-group-row, .compose-editor-head { align-items: flex-start; flex-direction: column; }
+  .compose-group-row select { width: 100%; }
+  .compose-advanced-panel { margin-left: 16px; margin-right: 16px; }
+  .compose-advanced-grid, .compose-check-grid { grid-template-columns: 1fr; }
+  .compose-library { left: 0; }
+}
 @media (max-width: 720px) {
   .delivery-ops-grid, .delivery-summary-grid, .inspection-columns { grid-template-columns: 1fr; }
 }

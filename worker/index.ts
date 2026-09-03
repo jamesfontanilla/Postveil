@@ -1991,6 +1991,8 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
       }))),
     });
   }
+  const composeMetadata = objectValue(body.composeMetadata);
+  if (Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: messageId, provider: "postveil", event_type: "compose_features", payload: composeMetadata }) }).catch(() => undefined);
   const run = async () => { if (undoSeconds) await new Promise<void>((resolve) => setTimeout(resolve, undoSeconds * 1000)); await processOutbox(env); };
   if (ctx) { if (scheduledDate) return json({ ok: true, id: messageId, scheduled: true, sendAfter }); ctx.waitUntil(run()); return json({ ok: true, id: messageId, status: "queued", sendAfter, undoSeconds }); }
   await run();
@@ -2057,9 +2059,15 @@ async function handleDraft(env: Env, user: User, body: JsonRecord): Promise<Resp
   const mailboxOwnerId = mailbox.owner_id;
   const id = typeof body.id === "string" ? body.id : "";
    const patch = { subject: String(body.subject || ""), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, to_addresses: splitAddresses(body.to), cc_addresses: splitAddresses(body.cc), bcc_addresses: splitAddresses(body.bcc), from_name: mailbox.display_name || "", from_address: fromAddress, snippet: snippet(String(body.text || "")), updated_at: new Date().toISOString() };
-  if (id) { const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&folder=eq.drafts`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows?.[0] || null); }
+  const composeMetadata = objectValue(body.composeMetadata);
+  if (id) {
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&folder=eq.drafts`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    if (rows[0] && Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: id, provider: "postveil", event_type: "draft_version_saved", payload: { ...composeMetadata, subject: patch.subject, text: patch.text_body, html: patch.html_body, savedAt: new Date().toISOString() } }) }).catch(() => undefined);
+    return json(rows?.[0] || null);
+  }
   const threadId = await findOrCreateThread(env, mailboxOwnerId, patch.subject);
   const rows = await dbRequest<JsonRecord[]>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: mailboxOwnerId, sent_by: user.id, send_mode: access?.delegation?.can_send_as ? "send_as" : access?.delegation?.can_send_on_behalf ? "send_on_behalf" : "own", thread_id: threadId, mailbox_id: mailbox.id, direction: "outbound", folder: "drafts", status: "draft", message_id_header: `<${crypto.randomUUID()}@${env.APP_DOMAIN}>`, ...patch }) });
+  if (rows[0] && Object.keys(composeMetadata).length) await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: mailboxOwnerId, message_id: rows[0].id, provider: "postveil", event_type: "draft_version_saved", payload: { ...composeMetadata, subject: patch.subject, text: patch.text_body, html: patch.html_body, savedAt: new Date().toISOString() } }) }).catch(() => undefined);
   return json(rows?.[0] || null, 201);
 }
 
@@ -3586,6 +3594,24 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const allowed = new Set(existing.map((row) => row.id));
     const ordered = ids.filter((id) => allowed.has(id));
     await Promise.all(ordered.map((id, index) => dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ priority: (index + 1) * 100, updated_at: new Date().toISOString() }) })));
+    return json({ ok: true });
+  }
+  if (request.method === "GET" && url.pathname === "/api/compose-library") {
+    const rows = await dbRequest<Array<{ id: string; payload?: JsonRecord }>>(env, `mail_events?owner_id=eq.${encodeURIComponent(user.id)}&event_type=eq.compose_library_item&order=created_at.desc&limit=100&select=id,payload`).catch(() => []);
+    return json(rows.map((row) => ({ ...objectValue(row.payload), id: row.id })));
+  }
+  if (request.method === "POST" && url.pathname === "/api/compose-library") {
+    const body = (await request.json()) as JsonRecord;
+    const kind = ["template", "canned", "snippet"].includes(String(body.kind)) ? String(body.kind) : "template";
+    const name = String(body.name || "Reusable message").trim().slice(0, 120);
+    const payload = { kind, name, subject: String(body.subject || "").slice(0, 500), text_body: String(body.text_body || "").slice(0, 100000), html_body: typeof body.html_body === "string" ? body.html_body.slice(0, 200000) : null, metadata: objectValue(body.metadata) };
+    if (!name || (!payload.text_body && !payload.html_body)) return error("A name and message content are required");
+    const rows = await dbRequest<JsonRecord[]>(env, "mail_events", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, provider: "postveil", event_type: "compose_library_item", payload }) });
+    return json({ ...payload, id: rows[0]?.id || crypto.randomUUID() }, 201);
+  }
+  const composeLibraryMatch = url.pathname.match(/^\/api\/compose-library\/([^/]+)$/);
+  if (composeLibraryMatch && request.method === "DELETE") {
+    await dbRequest(env, `mail_events?id=eq.${encodeURIComponent(composeLibraryMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&event_type=eq.compose_library_item`, { method: "DELETE" });
     return json({ ok: true });
   }
   if (request.method === "GET" && url.pathname === "/api/signatures") return json(await dbRequest(env, `signatures?owner_id=eq.${encodeURIComponent(user.id)}&order=name.asc`));
