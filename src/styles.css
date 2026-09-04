@@ -1572,3 +1572,68 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .collaboration-thread-controls { grid-template-columns: 1fr; }
   .collaboration-comment-options { grid-template-columns: 1fr; }
 }
+
+/* Calendar, contacts, and work surfaces share one calm workspace grammar. */
+.workspace-stack { display: grid; align-content: start; gap: 12px; }
+.workspace-toolbar, .workspace-list-toolbar, .workspace-board-head, .card-heading, .calendar-list-heading, .project-create-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.workspace-toolbar { flex-wrap: wrap; margin-bottom: 16px; }
+.workspace-view-switcher, .calendar-nav, .project-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.workspace-view-switcher button, .project-tabs button { border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-soft); padding: 7px 11px; font-size: 10px; cursor: pointer; }
+.workspace-view-switcher button.selected, .project-tabs button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.calendar-nav strong { min-width: 150px; color: var(--ink); font-size: 12px; text-align: center; }
+.workspace-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.workspace-field-grid label { display: grid; gap: 5px; color: var(--muted); font: 10px "DM Mono", monospace; }
+.workspace-resource-row { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink); padding: 9px 0; text-align: left; cursor: pointer; }
+.workspace-resource-row.active { color: var(--accent); }
+.workspace-resource-row span:not(.color-dot) { display: grid; gap: 2px; min-width: 0; }
+.workspace-resource-row strong { font-size: 11px; }
+.workspace-resource-row small { color: var(--muted); font-size: 9px; }
+.workspace-share-icon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 17px; }
+.workspace-calendar-panel { border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow: hidden; }
+.calendar-weekdays, .calendar-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.calendar-weekdays { border-bottom: 1px solid var(--line); background: var(--surface-muted); }
+.calendar-weekdays span { padding: 9px 10px; color: var(--muted); font: 9px "DM Mono", monospace; text-transform: uppercase; }
+.calendar-day { min-height: 92px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 7px; background: var(--surface); }
+.calendar-day:nth-child(7n) { border-right: 0; }
+.calendar-day.today > span { border-radius: 50%; background: var(--accent); color: white; }
+.calendar-day > span { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-bottom: 5px; color: var(--ink-soft); font-size: 10px; }
+.calendar-day.muted { background: var(--surface-muted); }
+.calendar-day.muted > span { color: var(--faint); }
+.calendar-event-chip { display: block; width: 100%; overflow: hidden; border: 0; border-left: 2px solid var(--accent); background: var(--accent-soft); color: var(--ink-soft); margin: 3px 0; padding: 4px 5px; font-size: 9px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.calendar-day > small { color: var(--muted); font-size: 9px; }
+.calendar-agenda-list { display: grid; gap: 10px; padding: 16px; }
+.calendar-search { display: flex; align-items: center; gap: 6px; min-width: 170px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); padding: 7px 9px; }
+.calendar-search input { min-width: 0; border: 0; background: transparent; padding: 0; }
+.event-copy { min-width: 0; flex: 1; }
+.event-copy small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+.event-card > .secondary-button { flex: 0 0 auto; }
+.workspace-success { border-color: #a9d6c4; background: #effaf5; color: #237b59; }
+.contact-card { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 13px; }
+.contact-card > div:nth-child(2) { min-width: 0; flex: 1; }
+.contact-card strong { display: block; color: var(--ink); font-size: 12px; }
+.contact-card p, .contact-card small { display: block; margin: 3px 0 0; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-card-actions { display: flex; gap: 5px; }
+.project-create-row { align-items: flex-end; }
+.project-create-row > div:first-child { min-width: 180px; }
+.project-create-row .inline-form { flex: 1; justify-content: flex-end; }
+.project-tabs { margin: 14px 0; }
+.project-tabs button { display: inline-flex; align-items: center; gap: 7px; }
+.project-tabs button small { color: var(--muted); }
+.workspace-board-head { align-items: flex-end; margin: 20px 0 14px; }
+.workspace-board-head h2 { margin: 4px 0; color: var(--ink); font-size: 21px; letter-spacing: -.04em; }
+.workspace-board-head p { margin: 0; color: var(--muted); font-size: 11px; }
+.kanban-board { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; overflow-x: auto; padding-bottom: 5px; }
+.kanban-column { min-height: 180px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); padding: 9px; }
+.kanban-column-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.kanban-column-head h3 { margin: 0; color: var(--ink-soft); font-size: 11px; }
+.kanban-column-head span { color: var(--muted); font: 10px "DM Mono", monospace; }
+.kanban-card { display: grid; gap: 7px; margin: 7px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 10px; }
+.kanban-card strong { color: var(--ink); font-size: 11px; line-height: 1.35; }
+.kanban-card small { color: var(--muted); font-size: 9px; }
+.kanban-card select { width: 100%; padding: 5px 7px; font-size: 9px; }
+.project-message-queue { margin-top: 16px; }
+.project-message-row { display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--line); padding: 9px 0; }
+.project-message-row .text-button { min-width: 0; flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-stamp { color: var(--muted); }
+@media (max-width: 980px) { .calendar-workspace-grid, .contacts-workspace-grid { grid-template-columns: minmax(220px, .75fr) minmax(300px, 1.25fr); } .kanban-board { grid-template-columns: repeat(4, 180px); } }
+@media (max-width: 720px) { .workspace-toolbar, .workspace-list-toolbar, .workspace-board-head, .project-create-row { align-items: stretch; flex-direction: column; } .calendar-nav { justify-content: space-between; } .calendar-nav strong { min-width: auto; } .workspace-field-grid { grid-template-columns: 1fr; } .calendar-day { min-height: 74px; padding: 5px; } .calendar-weekdays span { padding: 7px 4px; font-size: 8px; } .calendar-event-chip { font-size: 8px; } .calendar-agenda-list { padding: 10px; } .calendar-list-heading { align-items: stretch; flex-direction: column; } .calendar-search { width: 100%; box-sizing: border-box; } .project-create-row .inline-form { width: 100%; flex-direction: column; } .project-message-row { align-items: stretch; flex-wrap: wrap; } .project-message-row .text-button { flex-basis: 100%; } .contact-card { align-items: flex-start; flex-wrap: wrap; } .contact-card-actions { width: 100%; padding-left: 44px; } }

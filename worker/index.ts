@@ -73,6 +73,15 @@ import {
   type CollaborationPriority,
   type CollaborationStatus,
 } from "./collaboration.ts";
+import {
+  buildIcsCalendar,
+  buildIcsEvent,
+  buildVCard,
+  calendarBusySlots,
+  csvEscape,
+  normalizeWorkspaceSlug,
+  parseContactCsv,
+} from "./workspace.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -127,6 +136,8 @@ type OrganizationMember = { organization_id: string; user_id: string; role: "own
 type MailboxAdminSettings = { mailbox_id: string; organization_id: string; status: "active" | "suspended" | "archived"; quota_bytes: number; storage_used_bytes: number; sending_limit_daily: number; sending_used_today: number; sending_window_started_at: string; inactivity_days: number; last_activity_at: string | null };
 type CollaborationThread = { id?: string; owner_id: string; organization_id: string; thread_id: string; status: CollaborationStatus; priority: CollaborationPriority; assignee_id?: string | null; sla_due_at?: string | null; sla_breached_at?: string | null; first_response_at?: string | null; last_customer_at?: string | null; last_agent_at?: string | null; created_at?: string; updated_at?: string };
 type CollaborationMember = { user_id: string; email: string; display_name: string; role: OrganizationMember["role"]; status: OrganizationMember["status"] };
+type WorkspaceCalendar = { id: string; owner_id: string; organization_id?: string | null; name: string; slug: string; color: string; timezone: string; visibility: "private" | "shared" | string; is_default: boolean };
+type WorkspaceProject = { id: string; owner_id: string; organization_id?: string | null; name: string; description: string; color: string; status: string; created_by: string };
 type AdminAuthUser = { id: string; email?: string; created_at?: string; last_sign_in_at?: string | null; banned_until?: string | null; user_metadata?: JsonRecord };
 type SecurityEvent = { id: string; organization_id: string | null; actor_id: string | null; subject_user_id: string; event_type: string; event_key: string; session_id: string | null; ip_hash: string | null; user_agent: string | null; is_suspicious: boolean; details: JsonRecord; created_at: string };
 type PrivacySettings = {
@@ -848,6 +859,52 @@ async function applyCollaborationPolicies(env: Env, context: { ownerId: string; 
     await collaborationActivity(env, context, actorId, "policy_applied", { policyId: policy.id, policyName: policy.name, kind: policy.kind, event, actions });
   }
   return current;
+}
+
+async function workspaceCalendarsForUser(env: Env, user: User, organization: Organization | null): Promise<WorkspaceCalendar[]> {
+  const filters = [`owner_id.eq.${user.id}`];
+  if (organization?.id) filters.push(`organization_id.eq.${organization.id}`);
+  return dbRequest<WorkspaceCalendar[]>(env, `workspace_calendars?or=(${filters.join(",")})&order=is_default.desc,name.asc&limit=100`).catch(() => []);
+}
+
+async function ensureWorkspaceCalendar(env: Env, user: User, organization: Organization | null, requestedId?: unknown): Promise<WorkspaceCalendar | null> {
+  const calendars = await workspaceCalendarsForUser(env, user, organization);
+  if (typeof requestedId === "string" && requestedId) return calendars.find((calendar) => calendar.id === requestedId) || null;
+  const existing = calendars.find((calendar) => calendar.owner_id === user.id && calendar.is_default) || calendars.find((calendar) => calendar.owner_id === user.id);
+  if (existing) return existing;
+  const slug = `personal-${user.id.replace(/-/g, "").slice(0, 12)}`;
+  const rows = await dbRequest<WorkspaceCalendar[]>(env, "workspace_calendars", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, organization_id: organization?.id || null, name: "Personal", slug, timezone: "UTC", visibility: "private", is_default: true }) }).catch(() => []);
+  return rows[0] || (await workspaceCalendarsForUser(env, user, organization)).find((calendar) => calendar.owner_id === user.id) || null;
+}
+
+async function canEditWorkspaceCalendar(env: Env, user: User, organization: Organization | null, calendar: WorkspaceCalendar): Promise<boolean> {
+  if (calendar.owner_id === user.id) return true;
+  if (!organization?.id || calendar.organization_id !== organization.id) return false;
+  const member = await organizationMember(env, organization.id, user.id);
+  if (!member || member.status !== "active") return false;
+  if (member.role === "owner" || member.role === "admin") return true;
+  const access = await dbRequest<Array<{ role: string }>>(env, `workspace_calendar_members?calendar_id=eq.${encodeURIComponent(calendar.id)}&user_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+  return access[0]?.role === "editor";
+}
+
+async function workspaceCalendarEvents(env: Env, user: User, organization: Organization | null, from?: string, to?: string, query?: string): Promise<JsonRecord[]> {
+  const calendars = await workspaceCalendarsForUser(env, user, organization);
+  if (!calendars.length) return [];
+  const ids = calendars.map((calendar) => calendar.id).join(",");
+  const range = `${from ? `&starts_at=lt.${encodeURIComponent(to || "2999-01-01T00:00:00.000Z")}` : ""}${to ? `&ends_at=gt.${encodeURIComponent(from || "1970-01-01T00:00:00.000Z")}` : ""}`;
+  const search = query?.trim() ? `&or=${encodeURIComponent(`title.ilike.*${safeLike(query.trim())}*,description.ilike.*${safeLike(query.trim())}*`)}` : "";
+  return dbRequest<JsonRecord[]>(env, `calendar_events?calendar_id=in.(${ids})${range}${search}&order=starts_at.asc&limit=500`).catch(() => []);
+}
+
+async function workspaceProjectList(env: Env, user: User, organization: Organization | null): Promise<WorkspaceProject[]> {
+  const filters = [`owner_id.eq.${user.id}`];
+  if (organization?.id) filters.push(`organization_id.eq.${organization.id}`);
+  return dbRequest<WorkspaceProject[]>(env, `workspace_projects?or=(${filters.join(",")})&status=neq.archived&order=updated_at.desc&limit=100`).catch(() => []);
+}
+
+async function workspaceProjectAccess(env: Env, user: User, organization: Organization | null, projectId: string): Promise<WorkspaceProject | null> {
+  const projects = await workspaceProjectList(env, user, organization);
+  return projects.find((project) => project.id === projectId) || null;
 }
 
 async function organizationMfaBlocked(env: Env, user: User, organization: Organization): Promise<boolean> {
@@ -4325,7 +4382,90 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: messageId, decision: reportType === "phishing" ? "blocked" : "screened", previous_folder: previousFolder }) }).catch(() => undefined);
     return json({ ok: true, reportType, escalated: reportType === "phishing" });
   }
-  if (request.method === "GET" && url.pathname === "/api/contacts") { const q = url.searchParams.get("q")?.trim(); const path = `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc${q ? `&or=${encodeURIComponent(`email.ilike.*${q}*,display_name.ilike.*${q}*`)}` : ""}`; return json(await dbRequest(env, path)); }
+  if (request.method === "GET" && url.pathname === "/api/contacts") {
+    const q = url.searchParams.get("q")?.trim();
+    const path = `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc${q ? `&or=${encodeURIComponent(`email.ilike.*${safeLike(q)}*,display_name.ilike.*${safeLike(q)}*,company.ilike.*${safeLike(q)}*`)}` : ""}`;
+    return json(await dbRequest(env, path));
+  }
+  if (request.method === "POST" && url.pathname === "/api/contacts") {
+    const body = (await request.json()) as JsonRecord;
+    const email = cleanAddress(String(body.email || ""));
+    if (!isValidEmailAddress(email)) return error("A valid email is required");
+    const avatarUrl = typeof body.avatarUrl === "string" && body.avatarUrl.trim() ? body.avatarUrl.trim() : null;
+    if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return error("Profile image URL must use https://");
+    const rows = await dbRequest<JsonRecord[]>(env, "contacts?on_conflict=owner_id,email", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]).trim().slice(0, 160), avatar_url: avatarUrl, company: String(body.company || "").trim().slice(0, 160) || null, notes: String(body.notes || "").slice(0, 2000), source: String(body.source || "manual").slice(0, 40) }) });
+    const contact = rows[0];
+    if (contact && typeof body.groupId === "string" && body.groupId) {
+      const group = await dbRequest<JsonRecord[]>(env, `contact_groups?id=eq.${encodeURIComponent(body.groupId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+      if (group[0]) await dbRequest(env, "contact_group_members", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ group_id: group[0].id, contact_id: contact.id }) }).catch(() => undefined);
+    }
+    return json(contact, 201);
+  }
+  const contactMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)$/);
+  if (contactMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    const id = decodeURIComponent(contactMatch[1]);
+    const owned = await dbRequest<JsonRecord[]>(env, `contacts?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    if (!owned[0]) return error("Contact not found", 404);
+    if (request.method === "DELETE") { await dbRequest(env, `contacts?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" }); return json({ ok: true }); }
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (body.email !== undefined) { const email = cleanAddress(String(body.email)); if (!isValidEmailAddress(email)) return error("A valid email is required"); patch.email = email; }
+    if (body.displayName !== undefined) patch.display_name = String(body.displayName).trim().slice(0, 160);
+    if (body.company !== undefined) patch.company = String(body.company || "").trim().slice(0, 160) || null;
+    if (body.notes !== undefined) patch.notes = String(body.notes || "").slice(0, 2000);
+    const rows = await dbRequest<JsonRecord[]>(env, `contacts?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+  if (request.method === "GET" && url.pathname === "/api/contact-groups") {
+    const groups = await dbRequest<JsonRecord[]>(env, `contact_groups?owner_id=eq.${encodeURIComponent(user.id)}&order=name.asc`);
+    const ids = groups.map((group) => String(group.id));
+    const members = ids.length ? await dbRequest<Array<{ group_id: string; contact_id: string }>>(env, `contact_group_members?group_id=in.(${ids.join(",")})`).catch(() => []) : [];
+    return json(groups.map((group) => ({ ...group, contact_ids: members.filter((member) => member.group_id === group.id).map((member) => member.contact_id), count: members.filter((member) => member.group_id === group.id).length })));
+  }
+  if (request.method === "POST" && url.pathname === "/api/contact-groups") {
+    const body = (await request.json()) as JsonRecord;
+    const name = String(body.name || "").trim().slice(0, 120);
+    if (!name) return error("Group name is required");
+    const rows = await dbRequest<JsonRecord[]>(env, "contact_groups", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, name, color: String(body.color || "#2d5bff") }) });
+    return json(rows[0] || null, 201);
+  }
+  const contactGroupMatch = url.pathname.match(/^\/api\/contact-groups\/([^/]+)\/members$/);
+  if (contactGroupMatch && request.method === "POST") {
+    const groupId = decodeURIComponent(contactGroupMatch[1]);
+    const group = await dbRequest<JsonRecord[]>(env, `contact_groups?id=eq.${encodeURIComponent(groupId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    if (!group[0]) return error("Contact group not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const requestedContactIds = Array.isArray(body.contactIds) ? (body.contactIds as unknown[]).filter((id): id is string => typeof id === "string").slice(0, 500) : [];
+    const ownedContacts = requestedContactIds.length ? await dbRequest<Array<{ id: string }>>(env, `contacts?id=in.(${requestedContactIds.map((id) => encodeURIComponent(id)).join(",")})&owner_id=eq.${encodeURIComponent(user.id)}&select=id`).catch(() => []) : [];
+    const contactIds = ownedContacts.map((contact) => contact.id);
+    if (contactIds.length) await dbRequest(env, "contact_group_members", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify(contactIds.map((contactId) => ({ group_id: groupId, contact_id: contactId }))) });
+    return json({ ok: true, added: contactIds.length });
+  }
+  if (request.method === "POST" && url.pathname === "/api/contacts/import") {
+    const body = (await request.json()) as JsonRecord;
+    const groupId = typeof body.groupId === "string" && body.groupId ? body.groupId : null;
+    if (groupId) {
+      const group = await dbRequest<JsonRecord[]>(env, `contact_groups?id=eq.${encodeURIComponent(groupId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+      if (!group[0]) return error("Contact group not found", 404);
+    }
+    const imported = parseContactCsv(String(body.csv || "")).slice(0, 500).map((contact) => ({ owner_id: user.id, email: cleanAddress(contact.email), display_name: contact.displayName.slice(0, 160) || contact.email.split("@")[0], company: contact.company.slice(0, 160) || null, notes: contact.notes.slice(0, 2000), source: "csv" })).filter((contact) => isValidEmailAddress(contact.email));
+    if (!imported.length) return error("No valid contacts were found", 400);
+    const rows = await dbRequest<JsonRecord[]>(env, "contacts?on_conflict=owner_id,email", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(imported) });
+    if (groupId && rows.length) await dbRequest(env, "contact_group_members", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify(rows.map((contact) => ({ group_id: groupId, contact_id: contact.id }))) }).catch(() => undefined);
+    return json({ ok: true, imported: rows.length });
+  }
+  if (request.method === "GET" && url.pathname === "/api/contacts/export") {
+    const rows = await dbRequest<JsonRecord[]>(env, `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc`);
+    const csv = ["display_name,email,company,notes", ...rows.map((row) => [row.display_name, row.email, row.company, row.notes].map(csvEscape).join(","))].join("\r\n");
+    return new Response(`${csv}\r\n`, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": "attachment; filename=postveil-contacts.csv", "cache-control": "no-store" } });
+  }
+  const contactVcardMatch = url.pathname.match(/^\/api\/contacts\/([^/]+)\.vcf$/);
+  if (contactVcardMatch && request.method === "GET") {
+    const id = decodeURIComponent(contactVcardMatch[1]);
+    const rows = await dbRequest<JsonRecord[]>(env, `contacts?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    if (!rows[0]) return error("Contact not found", 404);
+    return new Response(buildVCard(rows[0]), { headers: { "content-type": "text/vcard; charset=utf-8", "content-disposition": `attachment; filename="postveil-contact-${id}.vcf"`, "cache-control": "no-store" } });
+  }
   if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!email.includes("@")) return error("A valid email is required"); const avatarUrl = typeof body.avatarUrl === "string" && body.avatarUrl.trim() ? body.avatarUrl.trim() : null; if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return error("Profile image URL must use https://"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]), avatar_url: avatarUrl, company: body.company || null, notes: body.notes || null }) }); return json(rows[0], 201); }
   if (request.method === "GET" && url.pathname === "/api/sender-policies") return json(await dbRequest<SenderPolicy[]>(env, `sender_policies?owner_id=eq.${encodeURIComponent(user.id)}&order=enabled.desc,match_type.asc,match_value.asc`).catch(() => []));
   if (request.method === "POST" && url.pathname === "/api/sender-policies") {
@@ -4740,14 +4880,267 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (request.method === "GET" && url.pathname === "/api/settings") { const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); return json({ ...(rows[0] || { owner_id: user.id }), send_undo_seconds: normalizeUndoSeconds(objectValue(mailbox.settings).send_undo_seconds, 0) }); }
   if (request.method === "PATCH" && url.pathname === "/api/settings") { const body = (await request.json()) as JsonRecord; const allowed = ["theme", "density", "reading_pane", "language", "timezone", "focused_inbox_enabled", "desktop_notifications", "push_subscription"]; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of allowed) if (key in body) patch[key] = body[key]; let undoSeconds = normalizeUndoSeconds(objectValue(mailbox.settings).send_undo_seconds, 0); if ("send_undo_seconds" in body) { undoSeconds = normalizeUndoSeconds(body.send_undo_seconds, undoSeconds); const currentMailboxSettings = objectValue(mailbox.settings); await dbRequest(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ settings: { ...currentMailboxSettings, send_undo_seconds: undoSeconds } }) }); } const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json({ ...(rows[0] || patch), send_undo_seconds: undoSeconds }); }
-  if (request.method === "GET" && url.pathname === "/api/calendar") return json(await dbRequest(env, `calendar_events?owner_id=eq.${encodeURIComponent(user.id)}&order=starts_at.asc`));
-  if (request.method === "POST" && url.pathname === "/api/calendar") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "calendar_events", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, title: String(body.title || "Untitled event"), description: String(body.description || ""), location: body.location || null, starts_at: body.startsAt, ends_at: body.endsAt, all_day: body.allDay === true, attendees: body.attendees || [] }) }); return json(rows[0], 201); }
+  if (request.method === "GET" && url.pathname === "/api/calendars") return json(await workspaceCalendarsForUser(env, user, organization));
+  if (request.method === "POST" && url.pathname === "/api/calendars") {
+    const body = (await request.json()) as JsonRecord;
+    const visibility = body.visibility === "shared" ? "shared" : "private";
+    if (visibility === "shared" && !(organization?.id && await organizationAdmin(env, user).catch(() => null))) return error("Workspace administrator access is required for shared calendars", 403);
+    const name = String(body.name || "Personal").trim().slice(0, 120);
+    const rows = await dbRequest<WorkspaceCalendar[]>(env, "workspace_calendars", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, organization_id: visibility === "shared" ? organization?.id || null : null, name, slug: normalizeWorkspaceSlug(body.slug || name), color: String(body.color || "#2d5bff"), timezone: String(body.timezone || "UTC"), visibility, is_default: body.isDefault === true }) });
+    return json(rows[0] || null, 201);
+  }
+  const calendarAdminMatch = url.pathname.match(/^\/api\/calendars\/([^/]+)$/);
+  if (calendarAdminMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    const calendarId = decodeURIComponent(calendarAdminMatch[1]);
+    const calendar = (await workspaceCalendarsForUser(env, user, organization)).find((item) => item.id === calendarId);
+    if (!calendar) return error("Calendar not found", 404);
+    if (!(await canEditWorkspaceCalendar(env, user, organization, calendar))) return error("Calendar editor access is required", 403);
+    if (request.method === "DELETE") { await dbRequest(env, `workspace_calendars?id=eq.${encodeURIComponent(calendarId)}&owner_id=eq.${encodeURIComponent(calendar.owner_id)}`, { method: "DELETE" }); return json({ ok: true }); }
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    for (const [input, column] of [["name", "name"], ["color", "color"], ["timezone", "timezone"], ["isDefault", "is_default"]] as const) if (input in body) patch[column] = input === "isDefault" ? body[input] === true : String(body[input] || "").trim().slice(0, 120);
+    const rows = await dbRequest<JsonRecord[]>(env, `workspace_calendars?id=eq.${encodeURIComponent(calendarId)}&owner_id=eq.${encodeURIComponent(calendar.owner_id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+  const calendarMemberMatch = url.pathname.match(/^\/api\/calendars\/([^/]+)\/members$/);
+  if (calendarMemberMatch && request.method === "POST") {
+    const calendarId = decodeURIComponent(calendarMemberMatch[1]);
+    const calendar = (await workspaceCalendarsForUser(env, user, organization)).find((item) => item.id === calendarId);
+    if (!calendar || calendar.visibility !== "shared") return error("Shared calendar not found", 404);
+    const admin = organization?.id ? await organizationAdmin(env, user).catch(() => null) : null;
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const body = (await request.json()) as JsonRecord;
+    const memberId = String(body.userId || "");
+    const member = organization?.id ? await organizationMember(env, organization.id, memberId) : null;
+    if (!member || member.status !== "active") return error("Workspace member not found", 404);
+    const role = ["free_busy", "viewer", "editor"].includes(String(body.role)) ? String(body.role) : "viewer";
+    await dbRequest(env, "workspace_calendar_members", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ calendar_id: calendarId, user_id: memberId, role }) });
+    return json({ ok: true, calendarId, userId: memberId, role });
+  }
+  if (request.method === "GET" && url.pathname === "/api/workspace/overview") {
+    const calendars = await workspaceCalendarsForUser(env, user, organization);
+    const events = await workspaceCalendarEvents(env, user, organization, url.searchParams.get("from") || undefined, url.searchParams.get("to") || undefined, url.searchParams.get("q") || undefined);
+    const eventIds = events.map((event) => String(event.id));
+    const attendees = eventIds.length ? await dbRequest<JsonRecord[]>(env, `calendar_event_attendees?event_id=in.(${eventIds.join(",")})&order=created_at.asc`).catch(() => []) : [];
+    const contacts = await dbRequest<JsonRecord[]>(env, `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc&limit=2000`).catch(() => []);
+    const groups = await dbRequest<JsonRecord[]>(env, `contact_groups?owner_id=eq.${encodeURIComponent(user.id)}&order=name.asc`).catch(() => []);
+    const groupIds = groups.map((group) => String(group.id));
+    const groupMembers = groupIds.length ? await dbRequest<JsonRecord[]>(env, `contact_group_members?group_id=in.(${groupIds.join(",")})`).catch(() => []) : [];
+    const projects = await workspaceProjectList(env, user, organization);
+    const tasks = await dbRequest<JsonRecord[]>(env, `tasks?owner_id=eq.${encodeURIComponent(user.id)}&order=status.asc,position.asc,due_at.asc.nullsfirst,created_at.desc&limit=500`).catch(() => []);
+    const links = await dbRequest<JsonRecord[]>(env, `scheduling_links?or=(owner_id.eq.${user.id}${organization?.id ? `,organization_id.eq.${organization.id}` : ""})&order=created_at.desc&limit=100`).catch(() => []);
+    return json({ calendars, events: events.map((event) => ({ ...event, attendees: attendees.filter((attendee) => attendee.event_id === event.id) })), contacts, groups: groups.map((group) => ({ ...group, contact_ids: groupMembers.filter((member) => member.group_id === group.id).map((member) => member.contact_id) })), projects, tasks, schedulingLinks: links });
+  }
+  const calendarIcsMatch = url.pathname.match(/^\/api\/calendar\/([^/]+)\.ics$/);
+  if (calendarIcsMatch && request.method === "GET") {
+    const eventId = decodeURIComponent(calendarIcsMatch[1]);
+    const events = await workspaceCalendarEvents(env, user, organization);
+    const event = events.find((item) => item.id === eventId);
+    if (!event) return error("Event not found", 404);
+    return new Response(buildIcsEvent(event), { headers: { "content-type": "text/calendar; charset=utf-8", "content-disposition": `attachment; filename="postveil-event-${eventId}.ics"`, "cache-control": "no-store" } });
+  }
+  if (request.method === "GET" && url.pathname === "/api/calendar") {
+    return json(await workspaceCalendarEvents(env, user, organization, url.searchParams.get("from") || undefined, url.searchParams.get("to") || undefined, url.searchParams.get("q") || undefined));
+  }
+  if ((request.method === "GET" || request.method === "REPORT") && url.pathname === "/dav/calendars") {
+    const calendars = await workspaceCalendarsForUser(env, user, organization);
+    const xml = `<?xml version="1.0" encoding="UTF-8"?><d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">${calendars.map((calendar) => `<d:response><d:href>/dav/calendars/${calendar.id}</d:href><d:propstat><d:prop><d:displayname>${calendar.name}</d:displayname><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:getcontenttype>text/calendar</d:getcontenttype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`).join("")}</d:multistatus>`;
+    return new Response(xml, { headers: { "content-type": "application/xml; charset=utf-8", "cache-control": "no-store" } });
+  }
+  const davCalendarMatch = url.pathname.match(/^\/dav\/calendars\/([^/]+)$/);
+  if ((request.method === "GET" || request.method === "REPORT") && davCalendarMatch) {
+    const calendarId = decodeURIComponent(davCalendarMatch[1]);
+    const calendar = (await workspaceCalendarsForUser(env, user, organization)).find((item) => item.id === calendarId);
+    if (!calendar) return error("Calendar not found", 404);
+    const events = await dbRequest<JsonRecord[]>(env, `calendar_events?calendar_id=eq.${encodeURIComponent(calendarId)}&order=starts_at.asc&limit=1000`).catch(() => []);
+    return new Response(buildIcsCalendar(events), { headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "no-store" } });
+  }
+  if (request.method === "GET" && url.pathname === "/dav/addressbooks") {
+    const contacts = await dbRequest<JsonRecord[]>(env, `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc&limit=2000`).catch(() => []);
+    const vCards = contacts.map((contact) => buildVCard(contact)).join("");
+    return new Response(vCards, { headers: { "content-type": "text/vcard; charset=utf-8", "cache-control": "no-store" } });
+  }
+  if (request.method === "POST" && url.pathname === "/api/calendar") {
+    const body = (await request.json()) as JsonRecord;
+    const calendar = await ensureWorkspaceCalendar(env, user, organization, body.calendarId);
+    if (!calendar) return error("Calendar not found", 404);
+    if (!(await canEditWorkspaceCalendar(env, user, organization, calendar))) return error("You cannot edit this calendar", 403);
+    const startsAt = String(body.startsAt || "");
+    const endsAt = String(body.endsAt || "");
+    if (!startsAt || !endsAt || !Number.isFinite(Date.parse(startsAt)) || !Number.isFinite(Date.parse(endsAt)) || Date.parse(endsAt) <= Date.parse(startsAt)) return error("Event times are invalid", 400);
+    const attendees = Array.isArray(body.attendees) ? (body.attendees as unknown[]).map((entry) => typeof entry === "string" ? { email: cleanAddress(entry), display_name: "" } : { email: cleanAddress(String(objectValue(entry).email || "")), display_name: String(objectValue(entry).displayName || objectValue(entry).display_name || "").slice(0, 160) }).filter((entry) => isValidEmailAddress(entry.email)).slice(0, 100) : [];
+    if (body.sourceMessageId !== undefined && body.sourceMessageId !== null && !(await hasOwnedRecord(env, "messages", user.id, body.sourceMessageId))) return error("Source message not found", 404);
+    const rows = await dbRequest<JsonRecord[]>(env, "calendar_events", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, organizer_id: user.id, calendar_id: calendar.id, title: String(body.title || "Untitled event").trim().slice(0, 240), description: String(body.description || "").slice(0, 5000), location: String(body.location || "").slice(0, 500) || null, starts_at: startsAt, ends_at: endsAt, all_day: body.allDay === true, attendees: attendees.map((entry) => entry.email), timezone: String(body.timezone || calendar.timezone || "UTC").slice(0, 80), recurrence_rule: String(body.recurrenceRule || "").slice(0, 240) || null, recurrence_until: body.recurrenceUntil || null, reminders: Array.isArray(body.reminders) ? (body.reminders as unknown[]).slice(0, 10) : [], visibility: body.visibility === "shared" && calendar.visibility === "shared" ? "shared" : "private", status: "confirmed", conference_url: String(body.conferenceUrl || "").slice(0, 1000) || null, source_message_id: body.sourceMessageId || null, external_uid: `${crypto.randomUUID()}@${env.APP_DOMAIN}` }) });
+    const event = rows[0];
+    if (event && attendees.length) await dbRequest(env, "calendar_event_attendees", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(attendees.map((entry) => ({ event_id: event.id, email: entry.email, display_name: entry.display_name }))) }).catch(() => undefined);
+    return json(event, 201);
+  }
+  const calendarRsvpMatch = url.pathname.match(/^\/api\/calendar\/([^/]+)\/rsvp$/);
+  if (calendarRsvpMatch && request.method === "POST") {
+    const eventId = decodeURIComponent(calendarRsvpMatch[1]);
+    const body = (await request.json()) as JsonRecord;
+    const response = ["accepted", "tentative", "declined"].includes(String(body.response)) ? String(body.response) : "pending";
+    const email = cleanAddress(String(body.email || user.email || ""));
+    if (!isValidEmailAddress(email)) return error("A valid attendee email is required", 400);
+    const event = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(eventId)}&limit=1`).catch(() => []);
+    if (!event[0]) return error("Event not found", 404);
+    const eventCalendars = await workspaceCalendarsForUser(env, user, organization);
+    if (event[0].owner_id !== user.id && !eventCalendars.some((calendar) => calendar.id === event[0].calendar_id)) return error("Event is not available to this account", 403);
+    const rows = await dbRequest<JsonRecord[]>(env, `calendar_event_attendees?event_id=eq.${encodeURIComponent(eventId)}&email=eq.${encodeURIComponent(email)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ response, responded_at: new Date().toISOString() }) });
+    if (!rows[0]) await dbRequest(env, "calendar_event_attendees", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ event_id: eventId, email, response, responded_at: new Date().toISOString() }) });
+    return json({ ok: true, eventId, email, response });
+  }
+  if (request.method === "GET" && url.pathname === "/api/calendar/availability") {
+    const from = new Date(url.searchParams.get("from") || Date.now());
+    const to = new Date(url.searchParams.get("to") || from.getTime() + 7 * 86_400_000);
+    if (to <= from) return error("Availability range is invalid", 400);
+    const requestedEmail = cleanAddress(String(url.searchParams.get("email") || user.email || ""));
+    let targetUserId = user.id;
+    if (requestedEmail && requestedEmail !== cleanAddress(String(user.email || ""))) {
+      const memberUsers = await authUsers(env).catch(() => []);
+      const target = memberUsers.find((candidate) => cleanAddress(String(candidate.email || "")) === requestedEmail);
+      const member = target && organization?.id ? await organizationMember(env, organization.id, target.id) : null;
+      if (!target || !member || member.status !== "active") return error("Availability is only shared with workspace members", 403);
+      targetUserId = target.id;
+    }
+    const rows = await dbRequest<JsonRecord[]>(env, `calendar_events?owner_id=eq.${encodeURIComponent(targetUserId)}&starts_at=lt.${encodeURIComponent(to.toISOString())}&ends_at=gt.${encodeURIComponent(from.toISOString())}&status=neq.cancelled&order=starts_at.asc&limit=500`).catch(() => []);
+    return json({ email: requestedEmail, from: from.toISOString(), to: to.toISOString(), busy: calendarBusySlots(rows, from, to) });
+  }
   const calendarMatch = url.pathname.match(/^\/api\/calendar\/([^/]+)$/);
-  if (request.method === "PATCH" && calendarMatch) { const body = (await request.json()) as JsonRecord; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of ["title", "description", "location", "starts_at", "ends_at", "all_day", "attendees"]) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(calendarMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || null); }
-  if (request.method === "GET" && url.pathname === "/api/tasks") return json(await dbRequest(env, `tasks?owner_id=eq.${encodeURIComponent(user.id)}&order=completed.asc,due_at.asc,created_at.desc`));
-  if (request.method === "POST" && url.pathname === "/api/tasks") { const body = (await request.json()) as JsonRecord; if (body.sourceMessageId !== undefined && body.sourceMessageId !== null && !(await hasOwnedRecord(env, "messages", user.id, body.sourceMessageId))) return error("Source message not found", 404); const rows = await dbRequest<JsonRecord[]>(env, "tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, title: String(body.title || "Untitled task"), notes: String(body.notes || ""), due_at: body.dueAt || null, priority: Number(body.priority || 0), source_message_id: body.sourceMessageId || null }) }); return json(rows[0], 201); }
+  if (calendarMatch && request.method === "PATCH") {
+    const eventId = decodeURIComponent(calendarMatch[1]);
+    const existing = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(eventId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    if (!existing[0]) return error("Event not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    for (const [input, column] of [["title", "title"], ["description", "description"], ["location", "location"], ["startsAt", "starts_at"], ["endsAt", "ends_at"], ["allDay", "all_day"], ["timezone", "timezone"], ["recurrenceRule", "recurrence_rule"], ["recurrenceUntil", "recurrence_until"], ["reminders", "reminders"], ["conferenceUrl", "conference_url"], ["status", "status"]] as const) if (input in body) patch[column] = body[input];
+    if (body.calendarId !== undefined) { const target = await ensureWorkspaceCalendar(env, user, organization, body.calendarId); if (!target || !(await canEditWorkspaceCalendar(env, user, organization, target))) return error("Calendar not found or not editable", 403); patch.calendar_id = target.id; }
+    const rows = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(eventId)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+  if (request.method === "GET" && url.pathname === "/api/scheduling-links") {
+    return json(await dbRequest(env, `scheduling_links?or=(owner_id.eq.${user.id}${organization?.id ? `,organization_id.eq.${organization.id}` : ""})&order=created_at.desc&limit=100`).catch(() => []));
+  }
+  if (request.method === "POST" && url.pathname === "/api/scheduling-links") {
+    const body = (await request.json()) as JsonRecord;
+    const title = String(body.title || "Meet with me").trim().slice(0, 160);
+    const slug = normalizeWorkspaceSlug(body.slug || title, `meet-${crypto.randomUUID().slice(0, 8)}`);
+    const calendar = await ensureWorkspaceCalendar(env, user, organization, body.calendarId);
+    const rows = await dbRequest<JsonRecord[]>(env, "scheduling_links", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, organization_id: organization?.id || null, calendar_id: calendar?.id || null, slug, title, description: String(body.description || "").slice(0, 1000), duration_minutes: Math.max(5, Math.min(480, Number(body.durationMinutes || 30))), timezone: String(body.timezone || calendar?.timezone || "UTC"), availability: objectValue(body.availability), active: body.active !== false, require_email: body.requireEmail !== false }) });
+    return json(rows[0] || null, 201);
+  }
+  const schedulingLinkMatch = url.pathname.match(/^\/api\/scheduling-links\/([^/]+)$/);
+  if (schedulingLinkMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    const id = decodeURIComponent(schedulingLinkMatch[1]);
+    if (request.method === "DELETE") { await dbRequest(env, `scheduling_links?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" }); return json({ ok: true }); }
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    for (const [input, column] of [["title", "title"], ["description", "description"], ["timezone", "timezone"], ["availability", "availability"], ["active", "active"], ["requireEmail", "require_email"]] as const) if (input in body) patch[column] = body[input];
+    if (body.durationMinutes !== undefined) patch.duration_minutes = Math.max(5, Math.min(480, Number(body.durationMinutes)));
+    const rows = await dbRequest<JsonRecord[]>(env, `scheduling_links?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+  if (request.method === "GET" && url.pathname === "/api/projects") return json(await workspaceProjectList(env, user, organization));
+  if (request.method === "POST" && url.pathname === "/api/projects") {
+    const body = (await request.json()) as JsonRecord;
+    const name = String(body.name || "").trim().slice(0, 120);
+    if (!name) return error("Project name is required");
+    const rows = await dbRequest<WorkspaceProject[]>(env, "workspace_projects", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, organization_id: organization?.id || null, created_by: user.id, name, description: String(body.description || "").slice(0, 2000), color: String(body.color || "#2d5bff"), status: "active" }) });
+    const project = rows[0];
+    if (project && organization?.id) await dbRequest(env, "workspace_project_members", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ project_id: project.id, user_id: user.id, role: "manager" }) }).catch(() => undefined);
+    return json(project, 201);
+  }
+  const projectBoardMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/board$/);
+  if (projectBoardMatch && request.method === "GET") {
+    const projectId = decodeURIComponent(projectBoardMatch[1]);
+    const project = await workspaceProjectAccess(env, user, organization, projectId);
+    if (!project) return error("Project not found", 404);
+    const [tasks, messages] = await Promise.all([
+      dbRequest<JsonRecord[]>(env, `tasks?project_id=eq.${encodeURIComponent(projectId)}&order=status.asc,position.asc,due_at.asc.nullsfirst,created_at.desc&limit=500`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `messages?project_id=eq.${encodeURIComponent(projectId)}&owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.desc&limit=100&select=id,thread_id,subject,from_address,work_state,follow_up_at,created_at`).catch(() => []),
+    ]);
+    return json({ project, tasks, messages });
+  }
+  const projectTaskMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tasks$/);
+  if (projectTaskMatch && request.method === "POST") {
+    const projectId = decodeURIComponent(projectTaskMatch[1]);
+    const project = await workspaceProjectAccess(env, user, organization, projectId);
+    if (!project) return error("Project not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const status = ["todo", "in_progress", "blocked", "done"].includes(String(body.status)) ? String(body.status) : "todo";
+    const assigneeId = typeof body.assigneeId === "string" && body.assigneeId ? body.assigneeId : null;
+    if (assigneeId && (!organization?.id || !(await organizationMember(env, organization.id, assigneeId)))) return error("Assignee is not a workspace member", 400);
+    if (body.sourceMessageId !== undefined && body.sourceMessageId !== null && !(await hasOwnedRecord(env, "messages", user.id, body.sourceMessageId))) return error("Source message not found", 404);
+    const rows = await dbRequest<JsonRecord[]>(env, "tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, project_id: projectId, assignee_id: assigneeId, title: String(body.title || "Untitled task").trim().slice(0, 240), notes: String(body.notes || "").slice(0, 5000), due_at: body.dueAt || null, priority: Math.max(0, Math.min(2, Number(body.priority || 0))), status, completed: status === "done", completed_at: status === "done" ? new Date().toISOString() : null, position: Math.max(0, Number(body.position || 0)), source_message_id: body.sourceMessageId || null }) });
+    return json(rows[0] || null, 201);
+  }
+  const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (projectMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    const projectId = decodeURIComponent(projectMatch[1]);
+    const project = await workspaceProjectAccess(env, user, organization, projectId);
+    if (!project) return error("Project not found", 404);
+    const admin = organization?.id ? await organizationAdmin(env, user).catch(() => null) : null;
+    if (project.owner_id !== user.id && !admin) return error("Project manager access is required", 403);
+    if (request.method === "DELETE") { await dbRequest(env, `workspace_projects?id=eq.${encodeURIComponent(projectId)}&owner_id=eq.${encodeURIComponent(project.owner_id)}`, { method: "PATCH", body: JSON.stringify({ status: "archived", updated_at: new Date().toISOString() }) }); return json({ ok: true }); }
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    for (const [input, column] of [["name", "name"], ["description", "description"], ["color", "color"], ["status", "status"]] as const) if (input in body) patch[column] = String(body[input] || "").slice(0, input === "description" ? 2000 : 120);
+    const rows = await dbRequest<JsonRecord[]>(env, `workspace_projects?id=eq.${encodeURIComponent(projectId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+  if (request.method === "GET" && url.pathname === "/api/tasks") return json(await dbRequest(env, `tasks?owner_id=eq.${encodeURIComponent(user.id)}&order=status.asc,position.asc,completed.asc,due_at.asc.nullsfirst,created_at.desc&limit=500`));
+  if (request.method === "POST" && url.pathname === "/api/tasks") {
+    const body = (await request.json()) as JsonRecord;
+    if (body.sourceMessageId !== undefined && body.sourceMessageId !== null && !(await hasOwnedRecord(env, "messages", user.id, body.sourceMessageId))) return error("Source message not found", 404);
+    let projectId = typeof body.projectId === "string" && body.projectId ? body.projectId : null;
+    if (projectId && !(await workspaceProjectAccess(env, user, organization, projectId))) return error("Project not found", 404);
+    const assigneeId = typeof body.assigneeId === "string" && body.assigneeId ? body.assigneeId : null;
+    if (assigneeId && (!organization?.id || !(await organizationMember(env, organization.id, assigneeId)))) return error("Assignee is not a workspace member", 400);
+    const status = ["todo", "in_progress", "blocked", "done"].includes(String(body.status)) ? String(body.status) : body.completed === true ? "done" : "todo";
+    const rows = await dbRequest<JsonRecord[]>(env, "tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, project_id: projectId, assignee_id: assigneeId, title: String(body.title || "Untitled task").trim().slice(0, 240), notes: String(body.notes || "").slice(0, 5000), due_at: body.dueAt || null, priority: Math.max(0, Math.min(2, Number(body.priority || 0))), status, completed: status === "done", completed_at: status === "done" ? new Date().toISOString() : null, position: Math.max(0, Number(body.position || 0)), source_message_id: body.sourceMessageId || null }) });
+    return json(rows[0], 201);
+  }
   const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
-  if (request.method === "PATCH" && taskMatch) { const body = (await request.json()) as JsonRecord; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of ["title", "notes", "due_at", "priority", "completed"]) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `tasks?id=eq.${encodeURIComponent(taskMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || null); }
+  if (request.method === "PATCH" && taskMatch) {
+    const taskId = decodeURIComponent(taskMatch[1]);
+    const existing = await dbRequest<JsonRecord[]>(env, `tasks?id=eq.${encodeURIComponent(taskId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    if (!existing[0]) return error("Task not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    for (const key of ["title", "notes", "due_at", "priority", "position", "project_id", "assignee_id"]) if (key in body) patch[key] = body[key];
+    const status = body.status !== undefined ? String(body.status) : body.completed === true ? "done" : body.completed === false ? "todo" : String(existing[0].status || "todo");
+    if (!["todo", "in_progress", "blocked", "done"].includes(status)) return error("Task status is invalid", 400);
+    patch.status = status;
+    patch.completed = status === "done";
+    patch.completed_at = status === "done" ? existing[0].completed_at || new Date().toISOString() : null;
+    if (patch.project_id && !(await workspaceProjectAccess(env, user, organization, String(patch.project_id)))) return error("Project not found", 404);
+    if (patch.assignee_id && (!organization?.id || !(await organizationMember(env, organization.id, String(patch.assignee_id))))) return error("Assignee is not a workspace member", 400);
+    const rows = await dbRequest<JsonRecord[]>(env, `tasks?id=eq.${encodeURIComponent(taskId)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+  const messageTaskMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/task$/);
+  if (messageTaskMatch && request.method === "POST") {
+    const messageId = decodeURIComponent(messageTaskMatch[1]);
+    const message = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    if (!message[0]) return error("Message not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const title = String(body.title || message[0].subject || "Follow up on message").trim().slice(0, 240);
+    const projectId = typeof body.projectId === "string" && body.projectId ? body.projectId : null;
+    if (projectId && !(await workspaceProjectAccess(env, user, organization, projectId))) return error("Project not found", 404);
+    const rows = await dbRequest<JsonRecord[]>(env, "tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, project_id: projectId, title, notes: String(body.notes || `Created from ${message[0].from_address || "message"}`).slice(0, 5000), due_at: body.dueAt || null, priority: Math.max(0, Math.min(2, Number(body.priority || 0))), status: "todo", completed: false, source_message_id: messageId }) });
+    return json(rows[0] || null, 201);
+  }
+  const messageProjectMatch = url.pathname.match(/^\/api\/messages\/([^/]+)\/project$/);
+  if (messageProjectMatch && request.method === "POST") {
+    const messageId = decodeURIComponent(messageProjectMatch[1]);
+    const message = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    if (!message[0]) return error("Message not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const projectId = body.projectId ? String(body.projectId) : null;
+    if (projectId && !(await workspaceProjectAccess(env, user, organization, projectId))) return error("Project not found", 404);
+    const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ project_id: projectId, updated_at: new Date().toISOString() }) });
+    return json(rows[0] || null);
+  }
   if (request.method === "GET" && url.pathname === "/api/auto-replies") return json(await dbRequest(env, `auto_replies?owner_id=eq.${encodeURIComponent(user.id)}&order=created_at.asc`));
   if (request.method === "POST" && url.pathname === "/api/auto-replies") { const body = (await request.json()) as JsonRecord; const mailboxId = String(body.mailboxId || mailbox.id); if (!(await hasOwnedRecord(env, "mailboxes", user.id, mailboxId))) return error("Mailbox not found", 404); const rows = await dbRequest<JsonRecord[]>(env, "auto_replies", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: mailboxId, enabled: body.enabled === true, subject: String(body.subject || "Automatic reply"), body: String(body.body || ""), starts_at: body.startsAt || null, ends_at: body.endsAt || null }) }); return json(rows[0] || null); }
   if (request.method === "GET" && url.pathname === "/api/integrations") return json(await dbRequest(env, `integrations?owner_id=eq.${encodeURIComponent(user.id)}&order=provider.asc`));
@@ -4869,7 +5262,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/share/") || url.pathname.startsWith("/api/share/")) { try { return protectedHeaders(await handleConfidentialRoute(request, env)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Message could not be opened", 500); } }
-    if (url.pathname.startsWith("/api/")) { try { return protectedHeaders(await api(request, env, ctx)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
+    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/dav/")) { try { return protectedHeaders(await api(request, env, ctx)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
     const assetResponse = await env.ASSETS.fetch(request);
     const noStoreAsset = url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest";
     return protectedHeaders(assetResponse, noStoreAsset);
