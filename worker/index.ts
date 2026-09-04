@@ -59,6 +59,20 @@ import {
   type DeliveryInput,
   type ProviderName,
 } from "./delivery.ts";
+import {
+  cleanCollaborationText,
+  collaborationCommentKind,
+  collaborationMentionEmails,
+  collaborationPolicyMatches,
+  collaborationPriority,
+  collaborationSlaBreached,
+  collaborationSlaDueAt,
+  collaborationStatus,
+  collaborationVisibility,
+  type CollaborationEvent,
+  type CollaborationPriority,
+  type CollaborationStatus,
+} from "./collaboration.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -111,6 +125,8 @@ type Mailbox = { id: string; owner_id: string; address: string; display_name: st
 type Organization = { id: string; owner_id: string; name: string; slug: string; settings: JsonRecord; created_at: string; updated_at: string };
 type OrganizationMember = { organization_id: string; user_id: string; role: "owner" | "admin" | "member"; status: "active" | "suspended"; require_mfa: boolean; last_seen_at: string | null; created_at: string; updated_at: string };
 type MailboxAdminSettings = { mailbox_id: string; organization_id: string; status: "active" | "suspended" | "archived"; quota_bytes: number; storage_used_bytes: number; sending_limit_daily: number; sending_used_today: number; sending_window_started_at: string; inactivity_days: number; last_activity_at: string | null };
+type CollaborationThread = { id?: string; owner_id: string; organization_id: string; thread_id: string; status: CollaborationStatus; priority: CollaborationPriority; assignee_id?: string | null; sla_due_at?: string | null; sla_breached_at?: string | null; first_response_at?: string | null; last_customer_at?: string | null; last_agent_at?: string | null; created_at?: string; updated_at?: string };
+type CollaborationMember = { user_id: string; email: string; display_name: string; role: OrganizationMember["role"]; status: OrganizationMember["status"] };
 type AdminAuthUser = { id: string; email?: string; created_at?: string; last_sign_in_at?: string | null; banned_until?: string | null; user_metadata?: JsonRecord };
 type SecurityEvent = { id: string; organization_id: string | null; actor_id: string | null; subject_user_id: string; event_type: string; event_key: string; session_id: string | null; ip_hash: string | null; user_agent: string | null; is_suspicious: boolean; details: JsonRecord; created_at: string };
 type PrivacySettings = {
@@ -759,6 +775,79 @@ async function organizationAdmin(env: Env, user: User): Promise<{ organization: 
   const member = await organizationMember(env, organization.id, user.id);
   if (!member || member.status !== "active" || !["owner", "admin"].includes(member.role)) return null;
   return { organization, member };
+}
+
+async function collaborationMembers(env: Env, organizationId: string): Promise<CollaborationMember[]> {
+  const members = await dbRequest<OrganizationMember[]>(env, `organization_members?organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.active&order=created_at.asc`);
+  const users = await authUsers(env).catch(() => []);
+  const userMap = new Map(users.map((candidate) => [candidate.id, candidate]));
+  return members.map((member) => ({
+    user_id: member.user_id,
+    email: String(userMap.get(member.user_id)?.email || ""),
+    display_name: authUserDisplayName(userMap.get(member.user_id) || { id: member.user_id }),
+    role: member.role,
+    status: member.status,
+  }));
+}
+
+async function collaborationThreadContext(env: Env, user: User, threadId: string): Promise<{ organization: Organization; ownerId: string; threadId: string; mailboxIds: string[]; member: OrganizationMember } | null> {
+  if (!threadId || !/^[0-9a-f-]{20,}$/i.test(threadId)) return null;
+  const messages = await dbRequest<Array<{ owner_id: string; mailbox_id?: string | null }>>(env, `messages?thread_id=eq.${encodeURIComponent(threadId)}&select=owner_id,mailbox_id&limit=100`).catch(() => []);
+  if (!messages.length) return null;
+  const ownerId = String(messages[0].owner_id || "");
+  const delegatedIds = await delegatedMailboxIds(env, user.id, "read");
+  const mailboxIds = [...new Set(messages.map((message) => String(message.mailbox_id || "")).filter(Boolean))];
+  if (ownerId !== user.id && !mailboxIds.some((id) => delegatedIds.includes(id))) return null;
+  const organizations = await dbRequest<Organization[]>(env, `organizations?owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`).catch(() => []);
+  const organization = organizations[0] || await ensureOrganization(env, user);
+  const member = await organizationMember(env, organization.id, user.id);
+  if (!member || member.status !== "active") return null;
+  return { organization, ownerId, threadId, mailboxIds, member };
+}
+
+async function ensureCollaborationThread(env: Env, ownerId: string, organizationId: string, threadId: string, priority: CollaborationPriority = "normal"): Promise<CollaborationThread> {
+  const existing = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?owner_id=eq.${encodeURIComponent(ownerId)}&thread_id=eq.${encodeURIComponent(threadId)}&limit=1`).catch(() => []);
+  if (existing[0]) return existing[0];
+  const created = await dbRequest<CollaborationThread[]>(env, "collaboration_threads", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify({ owner_id: ownerId, organization_id: organizationId, thread_id: threadId, status: "open", priority, sla_due_at: collaborationSlaDueAt(priority) }),
+  }).catch(() => []);
+  if (created[0]) return created[0];
+  const retry = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?owner_id=eq.${encodeURIComponent(ownerId)}&thread_id=eq.${encodeURIComponent(threadId)}&limit=1`);
+  if (!retry[0]) throw new Error("Collaboration state could not be initialized");
+  return retry[0];
+}
+
+async function collaborationActivity(env: Env, context: { ownerId: string; organizationId: string; threadId: string | null }, actorId: string, eventType: string, payload: JsonRecord = {}): Promise<void> {
+  await dbRequest(env, "collaboration_activity", {
+    method: "POST",
+    body: JSON.stringify({ owner_id: context.ownerId, organization_id: context.organizationId, thread_id: context.threadId, actor_id: actorId, event_type: eventType.slice(0, 80), payload }),
+  }).catch(() => undefined);
+}
+
+async function applyCollaborationPolicies(env: Env, context: { ownerId: string; organizationId: string; threadId: string }, actorId: string, event: CollaborationEvent, state: CollaborationThread): Promise<CollaborationThread> {
+  const policies = await dbRequest<Array<{ id: string; name: string; kind: string; conditions?: JsonRecord; actions?: JsonRecord }>>(env, `collaboration_policies?organization_id=eq.${encodeURIComponent(context.organizationId)}&enabled=eq.true&order=priority.asc,created_at.asc&limit=100`).catch(() => []);
+  let current = state;
+  for (const policy of policies) {
+    if (!collaborationPolicyMatches(policy.conditions, event, current)) continue;
+    const actions = objectValue(policy.actions);
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (actions.status !== undefined) patch.status = collaborationStatus(actions.status);
+    if (actions.priority !== undefined) patch.priority = collaborationPriority(actions.priority);
+    if (actions.assignTo === "unassigned" || actions.assignTo === null) patch.assignee_id = null;
+    if (typeof actions.assignTo === "string" && /^[0-9a-f-]{20,}$/i.test(actions.assignTo)) {
+      const member = await organizationMember(env, context.organizationId, actions.assignTo);
+      if (member?.status === "active") patch.assignee_id = actions.assignTo;
+    }
+    if (actions.slaMinutes !== undefined) patch.sla_due_at = collaborationSlaDueAt(collaborationPriority(patch.priority ?? current.priority), Date.now(), Number(actions.slaMinutes));
+    if (Object.keys(patch).length > 1) {
+      const rows = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?id=eq.${encodeURIComponent(String(current.id || ""))}&owner_id=eq.${encodeURIComponent(context.ownerId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }).catch(() => []);
+      current = rows[0] || { ...current, ...patch } as CollaborationThread;
+    }
+    await collaborationActivity(env, context, actorId, "policy_applied", { policyId: policy.id, policyName: policy.name, kind: policy.kind, event, actions });
+  }
+  return current;
 }
 
 async function organizationMfaBlocked(env: Env, user: User, organization: Organization): Promise<boolean> {
@@ -2148,6 +2237,14 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
         await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, { method: "PATCH", body: JSON.stringify({ storage_used_bytes: mailboxSettings.storage_used_bytes + storedBytes, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
       }
       await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
+      if (organizationId) {
+        const collaboration = await ensureCollaborationThread(env, ownerId, organizationId, threadId, "normal").catch(() => null);
+        if (collaboration) {
+          await dbRequest(env, `collaboration_threads?id=eq.${encodeURIComponent(String(collaboration.id || ""))}`, { method: "PATCH", body: JSON.stringify({ last_customer_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
+          await collaborationActivity(env, { ownerId, organizationId, threadId }, ownerId, "message_received", { messageId, from: headerFrom });
+          await applyCollaborationPolicies(env, { ownerId, organizationId, threadId }, ownerId, "message_received", collaboration).catch(() => undefined);
+        }
+      }
       await markInboundReply(env, ownerId, threadId, messageId, headerFrom);
       await applyInboundRules(env, ownerId, messageId, {
         from: headerFrom,
@@ -3764,6 +3861,193 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
   }
 
+  const collaborationThreadMatch = url.pathname.match(/^\/api\/collaboration\/threads\/([^/]+)$/);
+  if (collaborationThreadMatch && request.method === "GET") {
+    const threadId = decodeURIComponent(collaborationThreadMatch[1]);
+    const context = await collaborationThreadContext(env, user, threadId);
+    if (!context) return error("Conversation not found or not shared with you", 404);
+    let state = await ensureCollaborationThread(env, context.ownerId, context.organization.id, threadId);
+    if (collaborationSlaBreached(state.sla_due_at) && !state.sla_breached_at) {
+      const breachedAt = new Date().toISOString();
+      const rows = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?id=eq.${encodeURIComponent(String(state.id || ""))}&owner_id=eq.${encodeURIComponent(context.ownerId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ sla_breached_at: breachedAt, updated_at: breachedAt }) }).catch(() => []);
+      state = rows[0] || { ...state, sla_breached_at: breachedAt };
+      await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "sla_breached", { priority: state.priority, dueAt: state.sla_due_at });
+    }
+    const [comments, activity, presence, members, assignment] = await Promise.all([
+      dbRequest<JsonRecord[]>(env, `thread_comments?thread_id=eq.${encodeURIComponent(threadId)}&organization_id=eq.${encodeURIComponent(context.organization.id)}&order=created_at.asc&limit=200`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `collaboration_activity?thread_id=eq.${encodeURIComponent(threadId)}&organization_id=eq.${encodeURIComponent(context.organization.id)}&order=created_at.asc&limit=200`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `collaboration_presence?thread_id=eq.${encodeURIComponent(threadId)}&organization_id=eq.${encodeURIComponent(context.organization.id)}&last_seen_at=gte.${encodeURIComponent(new Date(Date.now() - 45_000).toISOString())}&order=last_seen_at.desc`).catch(() => []),
+      collaborationMembers(env, context.organization.id),
+      dbRequest<JsonRecord[]>(env, `thread_assignments?owner_id=eq.${encodeURIComponent(context.ownerId)}&thread_id=eq.${encodeURIComponent(threadId)}&limit=1`).catch(() => []),
+    ]);
+    const memberMap = new Map(members.map((member) => [member.user_id, member]));
+    const canSeePrivate = context.member.role === "owner" || context.member.role === "admin";
+    const visibleComments = comments.filter((comment) => comment.visibility !== "private" || canSeePrivate || String(comment.author_id || "") === user.id).map((comment) => ({ ...comment, author: memberMap.get(String(comment.author_id || "")) || null, mentioned_user_ids: Array.isArray(comment.mentioned_user_ids) ? comment.mentioned_user_ids : [] }));
+    return json({ thread: state, assignment: assignment[0] || null, comments: visibleComments, activity: activity.map((item) => ({ ...item, actor: memberMap.get(String(item.actor_id || "")) || null })), presence: presence.map((item) => ({ ...item, member: memberMap.get(String(item.user_id || "")) || null })), members });
+  }
+
+  const collaborationCommentMatch = url.pathname.match(/^\/api\/collaboration\/threads\/([^/]+)\/comments(?:\/([^/]+))?$/);
+  if (collaborationCommentMatch) {
+    const threadId = decodeURIComponent(collaborationCommentMatch[1]);
+    const commentId = collaborationCommentMatch[2] ? decodeURIComponent(collaborationCommentMatch[2]) : "";
+    const context = await collaborationThreadContext(env, user, threadId);
+    if (!context) return error("Conversation not found or not shared with you", 404);
+    await ensureCollaborationThread(env, context.ownerId, context.organization.id, threadId);
+    if (request.method === "POST" && !commentId) {
+      const body = (await request.json()) as JsonRecord;
+      const text = cleanCollaborationText(body.body, 4000);
+      if (!text) return error("Comment text is required");
+      const kind = collaborationCommentKind(body.kind);
+      const visibility = collaborationVisibility(body.visibility);
+      const requestedIds = Array.isArray(body.mentionedUserIds) ? body.mentionedUserIds.map(String).filter((id) => /^[0-9a-f-]{20,}$/i.test(id)).slice(0, 20) : [];
+      const members = await collaborationMembers(env, context.organization.id);
+      const memberIds = new Set(members.map((member) => member.user_id));
+      const mentionedUserIds = requestedIds.filter((id) => memberIds.has(id));
+      const rows = await dbRequest<JsonRecord[]>(env, "thread_comments", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: context.ownerId, organization_id: context.organization.id, thread_id: threadId, author_id: user.id, body: text, kind, visibility, mentioned_user_ids: mentionedUserIds }) });
+      await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, kind === "note" ? "internal_note_added" : "comment_added", { commentId: rows[0]?.id || null, visibility, mentionedUserIds, mentionedEmails: collaborationMentionEmails(text) });
+      const state = await ensureCollaborationThread(env, context.ownerId, context.organization.id, threadId);
+      await applyCollaborationPolicies(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "comment_added", state).catch(() => undefined);
+      return json(rows[0] || null, 201);
+    }
+    if (commentId && (request.method === "PATCH" || request.method === "DELETE")) {
+      const existing = await dbRequest<JsonRecord[]>(env, `thread_comments?id=eq.${encodeURIComponent(commentId)}&thread_id=eq.${encodeURIComponent(threadId)}&organization_id=eq.${encodeURIComponent(context.organization.id)}&limit=1`);
+      if (!existing[0]) return error("Comment not found", 404);
+      const canManage = String(existing[0].author_id || "") === user.id || context.member.role === "owner" || context.member.role === "admin";
+      if (!canManage) return error("Only the author or a workspace administrator can change this comment", 403);
+      if (request.method === "DELETE") {
+        await dbRequest(env, `thread_comments?id=eq.${encodeURIComponent(commentId)}&thread_id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ deleted_at: new Date().toISOString(), body: "Comment removed", updated_at: new Date().toISOString() }) });
+        await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "comment_removed", { commentId });
+        return json({ ok: true });
+      }
+      const body = (await request.json()) as JsonRecord;
+      const text = cleanCollaborationText(body.body, 4000);
+      if (!text) return error("Comment text is required");
+      const rows = await dbRequest<JsonRecord[]>(env, `thread_comments?id=eq.${encodeURIComponent(commentId)}&thread_id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ body: text, updated_at: new Date().toISOString() }) });
+      await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "comment_edited", { commentId });
+      return json(rows[0] || null);
+    }
+    return error("Comment route not found", 404);
+  }
+
+  const collaborationAssignmentMatch = url.pathname.match(/^\/api\/collaboration\/threads\/([^/]+)\/(assignment|presence)$/);
+  if (collaborationAssignmentMatch) {
+    const threadId = decodeURIComponent(collaborationAssignmentMatch[1]);
+    const operation = collaborationAssignmentMatch[2];
+    const context = await collaborationThreadContext(env, user, threadId);
+    if (!context) return error("Conversation not found or not shared with you", 404);
+    let state = await ensureCollaborationThread(env, context.ownerId, context.organization.id, threadId);
+    if (operation === "presence") {
+      if (request.method === "POST") {
+        const body = (await request.json()) as JsonRecord;
+        const presenceState = body.state === "composing" || body.state === "idle" ? body.state : "viewing";
+        await dbRequest(env, "collaboration_presence", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ organization_id: context.organization.id, thread_id: threadId, user_id: user.id, state: presenceState, last_seen_at: new Date().toISOString() }) });
+        return json({ ok: true, state: presenceState });
+      }
+      return error("Presence route requires POST", 405);
+    }
+    if (request.method !== "PATCH" && request.method !== "POST") return error("Assignment route requires PATCH or POST", 405);
+    const body = (await request.json()) as JsonRecord;
+    const members = await collaborationMembers(env, context.organization.id);
+    const assigneeId = body.assigneeId === null || body.assigneeId === "" || body.assigneeId === "unassigned" ? null : String(body.assigneeId || "");
+    if (assigneeId && !members.some((member) => member.user_id === assigneeId)) return error("Assignee must be an active workspace member", 400);
+    const nextPriority = body.priority === undefined ? state.priority : collaborationPriority(body.priority);
+    const nextStatus = body.status === undefined ? state.status : collaborationStatus(body.status);
+    const dueAt = body.slaDueAt === null ? null : typeof body.slaDueAt === "string" && Date.parse(body.slaDueAt) > Date.now() ? body.slaDueAt : body.slaMinutes !== undefined ? collaborationSlaDueAt(nextPriority, Date.now(), Number(body.slaMinutes)) : state.sla_due_at || collaborationSlaDueAt(nextPriority);
+    const patch: JsonRecord = { assignee_id: assigneeId, status: nextStatus, priority: nextPriority, sla_due_at: dueAt, sla_breached_at: null, updated_at: new Date().toISOString() };
+    const rows = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?id=eq.${encodeURIComponent(String(state.id || ""))}&owner_id=eq.${encodeURIComponent(context.ownerId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    state = rows[0] || { ...state, ...patch } as CollaborationThread;
+    await dbRequest(env, "thread_assignments", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: context.ownerId, organization_id: context.organization.id, thread_id: threadId, assignee_id: assigneeId, assigned_by: user.id, status: ["resolved", "closed"].includes(nextStatus) ? "done" : nextStatus === "pending" ? "open" : "in_progress", due_at: dueAt, updated_at: new Date().toISOString() }) }).catch(() => undefined);
+    await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "thread_assignment_updated", { assigneeId, status: nextStatus, priority: nextPriority, slaDueAt: dueAt });
+    const event: CollaborationEvent = body.priority !== undefined ? "priority_changed" : body.status !== undefined ? "status_changed" : "assignment_changed";
+    state = await applyCollaborationPolicies(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, event, state);
+    return json(state);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/collaboration/overview") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const [members, sharedItems, policies, threads, activity] = await Promise.all([
+      collaborationMembers(env, organization.id),
+      dbRequest<JsonRecord[]>(env, `collaboration_shared_items?organization_id=eq.${encodeURIComponent(organization.id)}&enabled=eq.true&order=kind.asc,name.asc&limit=500`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `collaboration_policies?organization_id=eq.${encodeURIComponent(organization.id)}&order=priority.asc,created_at.asc&limit=100`).catch(() => []),
+      dbRequest<CollaborationThread[]>(env, `collaboration_threads?organization_id=eq.${encodeURIComponent(organization.id)}&order=updated_at.desc&limit=1000`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `collaboration_activity?organization_id=eq.${encodeURIComponent(organization.id)}&order=created_at.desc&limit=100`).catch(() => []),
+    ]);
+    const statusCounts = threads.reduce<Record<string, number>>((result, row) => { result[row.status] = (result[row.status] || 0) + 1; return result; }, {});
+    const priorityCounts = threads.reduce<Record<string, number>>((result, row) => { result[row.priority] = (result[row.priority] || 0) + 1; return result; }, {});
+    return json({ organization: { id: organization.id, name: organization.name }, members, sharedItems, policies, activity, analytics: { totalThreads: threads.length, assignedThreads: threads.filter((row) => row.assignee_id).length, unassignedThreads: threads.filter((row) => !row.assignee_id).length, slaBreached: threads.filter((row) => collaborationSlaBreached(row.sla_due_at) || row.sla_breached_at).length, statusCounts, priorityCounts } });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/collaboration/shared-items") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    return json(await dbRequest(env, `collaboration_shared_items?organization_id=eq.${encodeURIComponent(organization.id)}&enabled=eq.true&order=kind.asc,name.asc&limit=500`));
+  }
+  if (request.method === "POST" && url.pathname === "/api/collaboration/shared-items") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const admin = await organizationAdmin(env, user);
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const body = (await request.json()) as JsonRecord;
+    const kind = ["template", "contact", "signature", "calendar", "label"].includes(String(body.kind)) ? String(body.kind) : "template";
+    const name = cleanCollaborationText(body.name, 120);
+    const payload = objectValue(body.payload);
+    if (!name) return error("A shared item name is required");
+    if (JSON.stringify(payload).length > 100_000) return error("Shared item data is too large");
+    const rows = await dbRequest<JsonRecord[]>(env, "collaboration_shared_items", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ organization_id: organization.id, created_by: user.id, kind, name, payload, enabled: true }) });
+    await collaborationActivity(env, { ownerId: organization.owner_id, organizationId: organization.id, threadId: null }, user.id, "shared_item_created", { kind, name }).catch(() => undefined);
+    return json(rows[0] || null, 201);
+  }
+  const collaborationSharedItemMatch = url.pathname.match(/^\/api\/collaboration\/shared-items\/([^/]+)$/);
+  if (collaborationSharedItemMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const admin = await organizationAdmin(env, user);
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const id = decodeURIComponent(collaborationSharedItemMatch[1]);
+    if (request.method === "DELETE") { await dbRequest(env, `collaboration_shared_items?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "DELETE" }); return json({ ok: true }); }
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (body.name !== undefined) patch.name = cleanCollaborationText(body.name, 120);
+    if (body.payload !== undefined) patch.payload = objectValue(body.payload);
+    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+    const rows = await dbRequest<JsonRecord[]>(env, `collaboration_shared_items?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/collaboration/policies") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    return json(await dbRequest(env, `collaboration_policies?organization_id=eq.${encodeURIComponent(organization.id)}&order=priority.asc,created_at.asc&limit=100`));
+  }
+  if (request.method === "POST" && url.pathname === "/api/collaboration/policies") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const admin = await organizationAdmin(env, user);
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const body = (await request.json()) as JsonRecord;
+    const name = cleanCollaborationText(body.name, 120);
+    const kind = body.kind === "approval" ? "approval" : "escalation";
+    if (!name) return error("A policy name is required");
+    const conditions = objectValue(body.conditions);
+    const actions = objectValue(body.actions);
+    if (JSON.stringify(conditions).length > 10_000 || JSON.stringify(actions).length > 10_000) return error("Policy data is too large");
+    const rows = await dbRequest<JsonRecord[]>(env, "collaboration_policies", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ organization_id: organization.id, created_by: user.id, name, kind, priority: Math.max(0, Math.min(10_000, Number(body.priority || 100))), enabled: body.enabled !== false, conditions, actions }) });
+    return json(rows[0] || null, 201);
+  }
+  const collaborationPolicyMatch = url.pathname.match(/^\/api\/collaboration\/policies\/([^/]+)$/);
+  if (collaborationPolicyMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const admin = await organizationAdmin(env, user);
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const id = decodeURIComponent(collaborationPolicyMatch[1]);
+    if (request.method === "DELETE") { await dbRequest(env, `collaboration_policies?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "DELETE" }); return json({ ok: true }); }
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (body.name !== undefined) patch.name = cleanCollaborationText(body.name, 120);
+    if (body.conditions !== undefined) patch.conditions = objectValue(body.conditions);
+    if (body.actions !== undefined) patch.actions = objectValue(body.actions);
+    if (body.kind === "approval" || body.kind === "escalation") patch.kind = body.kind;
+    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+    if (body.priority !== undefined) patch.priority = Math.max(0, Math.min(10_000, Number(body.priority)));
+    const rows = await dbRequest<JsonRecord[]>(env, `collaboration_policies?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/work") {
     const requestedState = url.searchParams.get("state");
     if (requestedState && !normalizeWorkState(requestedState)) return error("Work state is invalid", 400);
@@ -4340,7 +4624,13 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (request.method === "GET" && url.pathname === "/api/compose-library") {
     const rows = await dbRequest<Array<{ id: string; payload?: JsonRecord }>>(env, `mail_events?owner_id=eq.${encodeURIComponent(user.id)}&event_type=eq.compose_library_item&order=created_at.desc&limit=100&select=id,payload`).catch(() => []);
-    return json(rows.map((row) => ({ ...objectValue(row.payload), id: row.id })));
+    const sharedRows = organization ? await dbRequest<Array<{ id: string; name: string; kind: string; payload?: JsonRecord }>>(env, `collaboration_shared_items?organization_id=eq.${encodeURIComponent(organization.id)}&kind=eq.template&enabled=eq.true&order=name.asc&limit=100&select=id,name,kind,payload`).catch(() => []) : [];
+    const shared = sharedRows.map((row) => {
+      const payload = objectValue(row.payload);
+      const text = String(payload.text_body || payload.text || "");
+      return { ...payload, id: `shared:${row.id}`, kind: "template", name: row.name, text_body: text, html_body: typeof payload.html_body === "string" ? payload.html_body : null, shared: true };
+    }).filter((row) => row.text_body || row.html_body);
+    return json([...rows.map((row) => ({ ...objectValue(row.payload), id: row.id })), ...shared]);
   }
   if (request.method === "POST" && url.pathname === "/api/compose-library") {
     const body = (await request.json()) as JsonRecord;
