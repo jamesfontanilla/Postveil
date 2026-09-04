@@ -87,10 +87,36 @@ export function promptInjectionSignals(text: string): string[] {
   return signals;
 }
 
+function stripTagBlocks(value: string, tagName: "style" | "script"): string {
+  const lower = value.toLowerCase();
+  const opening = `<${tagName}`;
+  const closing = `</${tagName}`;
+  let cursor = 0;
+  let output = "";
+
+  while (cursor < value.length) {
+    const openAt = lower.indexOf(opening, cursor);
+    if (openAt === -1) return output + value.slice(cursor);
+
+    const openEnd = lower.indexOf(">", openAt + opening.length);
+    if (openEnd === -1) return output + value.slice(cursor, openAt);
+
+    const closeAt = lower.indexOf(closing, openEnd + 1);
+    if (closeAt === -1) return output + value.slice(cursor, openAt);
+
+    const closeEnd = lower.indexOf(">", closeAt + closing.length);
+    if (closeEnd === -1) return output + value.slice(cursor, openAt);
+
+    output += value.slice(cursor, openAt) + " ";
+    cursor = closeEnd + 1;
+  }
+
+  return output;
+}
+
 export function cleanAiText(value: unknown, maxChars = 12000): string {
-  return String(value || "")
-    .replace(/<style[\s\S]*?<\/style\s*>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script\s*>/gi, " ")
+  const withoutActiveBlocks = stripTagBlocks(stripTagBlocks(String(value || ""), "style"), "script");
+  return withoutActiveBlocks
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim()
