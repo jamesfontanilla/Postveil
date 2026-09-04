@@ -52,7 +52,6 @@ import {
   Settings2,
   ShieldAlert,
   SlidersHorizontal,
-  Sparkles,
   Star,
   Tag,
   Trash2,
@@ -67,7 +66,6 @@ import { requireSupabase, supabase } from "./lib/supabase";
 import { sanitizeEmailHtml } from "./lib/email-html";
 import { qrImageSource } from "./lib/qr";
 import RichEmailBody from "./components/RichEmailBody";
-import AiWorkspace from "./components/AiWorkspace";
 
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam" | "quarantine";
 type ViewKey = SystemFolder | "focused" | "other" | "important" | "snoozed" | "muted" | `custom:${string}`;
@@ -4528,7 +4526,7 @@ function CopyIcon() { return <span aria-hidden="true">⧉</span>; }
 function MailboxApp({ session }: { session: Session }) {
   const { confirm, prompt } = useAppDialog();
   const imagePreferenceKey = `postveil.load_remote_images:${session.user.id}`;
-  const [view, setView] = useState<"mail" | "calendar" | "tasks" | "contacts" | "projects" | "ai">("mail");
+  const [view, setView] = useState<"mail" | "calendar" | "tasks" | "contacts" | "projects">("mail");
   const [folder, setFolder] = useState<ViewKey>("inbox");
   const [messages, setMessages] = useState<Message[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
@@ -5711,13 +5709,6 @@ function MailboxApp({ session }: { session: Session }) {
             <Briefcase size={17} />
             <span>Projects</span>
           </button>
-          <button
-            className={view === "ai" ? "active folder-link" : "folder-link"}
-            onClick={() => setView("ai")}
-          >
-            <Sparkles size={17} />
-            <span>AI & privacy</span>
-          </button>
         </nav>
         <div className="sidebar-spacer" />
         <div className="account-chip">
@@ -6499,8 +6490,6 @@ function MailboxApp({ session }: { session: Session }) {
             )}
           </section>
         </>
-      ) : view === "ai" ? (
-        <AiWorkspace />
       ) : (
         <Workspace
           mode={view}
