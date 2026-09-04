@@ -12,6 +12,7 @@ export type RuleContext = {
   isPinned: boolean;
   priority: number;
   folder: string;
+  eventType?: string;
 };
 
 export type RuleDefinition = {
@@ -22,6 +23,10 @@ export type RuleDefinition = {
   actions?: JsonRecord;
   enabled?: boolean;
   priority?: number;
+  scope?: "personal" | "organization";
+  organization_id?: string | null;
+  trigger_type?: "inbound" | "event" | "scheduled";
+  schedule?: JsonRecord;
 };
 
 export type RuleConflict = {
@@ -50,6 +55,7 @@ export const RULE_CONDITION_KEYS = [
   "isPinned",
   "priority",
   "folder",
+  "eventTypeContains",
 ] as const;
 
 export const RULE_ACTION_KEYS = [
@@ -62,6 +68,14 @@ export const RULE_ACTION_KEYS = [
   "priority",
   "label",
   "forwardTo",
+  "snoozeMinutes",
+  "assignTo",
+  "autoReply",
+  "webhookUrl",
+  "webhookSecret",
+  "createTask",
+  "createCalendarEvent",
+  "storeInB2",
   "stopProcessing",
 ] as const;
 
@@ -90,6 +104,7 @@ function conditionLabel(key: string, value: unknown): string {
     isPinned: "Pin status",
     priority: "Priority",
     folder: "Folder",
+    eventTypeContains: "Event type contains",
   };
   const rendered = typeof value === "boolean" ? (value ? "yes" : "no") : `“${String(value)}”`;
   return `${labels[key] || key} ${rendered}`;
@@ -109,6 +124,7 @@ function partEvaluation(part: JsonRecord, context: RuleContext, isException = fa
   if (typeof part.isPinned === "boolean") checks.push(["isPinned", part.isPinned === context.isPinned]);
   if (typeof part.priority === "number") checks.push(["priority", part.priority === context.priority]);
   if (typeof part.folder === "string") checks.push(["folder", part.folder === context.folder]);
+  if (part.eventTypeContains !== undefined) checks.push(["eventTypeContains", textIncludes(context.eventType, part.eventTypeContains)]);
   for (const [key, matched] of checks) if (matched) reasons.push(conditionLabel(key, part[key]));
   const matches = checks.every(([, matched]) => matched);
   return { matched: checks.length > 0 && matches || !isException && checks.length === 0, reasons };
@@ -127,6 +143,7 @@ export function ruleContextFromMessage(message: JsonRecord): RuleContext {
     isPinned: message.is_pinned === true,
     priority: typeof message.priority === "number" ? message.priority : 0,
     folder: String(message.folder || ""),
+    eventType: String(message.event_type || ""),
   };
 }
 
@@ -185,9 +202,15 @@ export function validateRuleInput(input: JsonRecord): string[] {
     const value = actions[key];
     if (["markRead", "star", "pin", "flag", "stopProcessing"].includes(key) && typeof value !== "boolean") errors.push(`Action ${key} must be true or false`);
     if (key === "priority" && (!Number.isInteger(value) || Number(value) < 0 || Number(value) > 2)) errors.push("Action priority must be 0, 1, or 2");
-    if (["folder", "customFolderId", "label", "forwardTo"].includes(key) && (typeof value !== "string" || !value.trim() || value.length > 240)) errors.push(`Action ${key} must be a non-empty value of 240 characters or fewer`);
+    if (["folder", "customFolderId", "label", "forwardTo", "assignTo", "createTask", "webhookUrl", "webhookSecret"].includes(key) && (typeof value !== "string" || !value.trim() || value.length > 240)) errors.push(`Action ${key} must be a non-empty value of 240 characters or fewer`);
     if (key === "folder" && typeof value === "string" && !SYSTEM_FOLDERS.has(value)) errors.push("Action folder must be a system folder");
     if (key === "forwardTo" && typeof value === "string" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) errors.push("Action forwardTo must be a valid email address");
+    if (key === "assignTo" && typeof value === "string" && value !== "self" && !/^[0-9a-f-]{36}$/i.test(value.trim())) errors.push("Action assignTo must be self or a valid account id");
+    if (key === "snoozeMinutes" && (!Number.isInteger(value) || Number(value) < 1 || Number(value) > 43200)) errors.push("Action snoozeMinutes must be between 1 and 43200");
+    if (["autoReply", "createCalendarEvent", "storeInB2"].includes(key) && typeof value !== "boolean") errors.push(`Action ${key} must be true or false`);
+    if (key === "webhookUrl" && typeof value === "string") {
+      try { const parsed = new URL(value.trim()); if (parsed.protocol !== "https:") errors.push("Action webhookUrl must use HTTPS"); } catch { errors.push("Action webhookUrl must be a valid HTTPS URL"); }
+    }
   }
   return [...new Set(errors)];
 }
@@ -213,12 +236,22 @@ export function normalizeRuleRecord(input: JsonRecord): JsonRecord {
   const normalizedConditions: JsonRecord = { ...nonExceptionConditions(conditions) };
   if (Object.keys(exceptions).length) normalizedConditions.exceptions = exceptions;
   const actions = objectValue(input.actions);
+  const scope = input.scope === "organization" ? "organization" : "personal";
+  const triggerType = input.trigger_type === "event" || input.trigger_type === "scheduled" || input.triggerType === "event" || input.triggerType === "scheduled"
+    ? (input.trigger_type === "event" || input.triggerType === "event" ? "event" : "scheduled")
+    : "inbound";
+  const schedule = objectValue(input.schedule);
   return {
     name: String(input.name || "New rule").trim().slice(0, 120),
     priority: Number.isFinite(Number(input.priority)) ? Number(input.priority) : 100,
     enabled: input.enabled !== false,
     conditions: normalizedConditions,
     actions,
+    scope,
+    organization_id: typeof input.organization_id === "string" ? input.organization_id : null,
+    trigger_type: triggerType,
+    schedule,
+    next_run_at: typeof input.next_run_at === "string" ? input.next_run_at : null,
   };
 }
 

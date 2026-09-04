@@ -59,6 +59,20 @@ import {
   type DeliveryInput,
   type ProviderName,
 } from "./delivery.ts";
+import {
+  cleanCollaborationText,
+  collaborationCommentKind,
+  collaborationMentionEmails,
+  collaborationPolicyMatches,
+  collaborationPriority,
+  collaborationSlaBreached,
+  collaborationSlaDueAt,
+  collaborationStatus,
+  collaborationVisibility,
+  type CollaborationEvent,
+  type CollaborationPriority,
+  type CollaborationStatus,
+} from "./collaboration.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -111,8 +125,23 @@ type Mailbox = { id: string; owner_id: string; address: string; display_name: st
 type Organization = { id: string; owner_id: string; name: string; slug: string; settings: JsonRecord; created_at: string; updated_at: string };
 type OrganizationMember = { organization_id: string; user_id: string; role: "owner" | "admin" | "member"; status: "active" | "suspended"; require_mfa: boolean; last_seen_at: string | null; created_at: string; updated_at: string };
 type MailboxAdminSettings = { mailbox_id: string; organization_id: string; status: "active" | "suspended" | "archived"; quota_bytes: number; storage_used_bytes: number; sending_limit_daily: number; sending_used_today: number; sending_window_started_at: string; inactivity_days: number; last_activity_at: string | null };
+type CollaborationThread = { id?: string; owner_id: string; organization_id: string; thread_id: string; status: CollaborationStatus; priority: CollaborationPriority; assignee_id?: string | null; sla_due_at?: string | null; sla_breached_at?: string | null; first_response_at?: string | null; last_customer_at?: string | null; last_agent_at?: string | null; created_at?: string; updated_at?: string };
+type CollaborationMember = { user_id: string; email: string; display_name: string; role: OrganizationMember["role"]; status: OrganizationMember["status"] };
 type AdminAuthUser = { id: string; email?: string; created_at?: string; last_sign_in_at?: string | null; banned_until?: string | null; user_metadata?: JsonRecord };
 type SecurityEvent = { id: string; organization_id: string | null; actor_id: string | null; subject_user_id: string; event_type: string; event_key: string; session_id: string | null; ip_hash: string | null; user_agent: string | null; is_suspicious: boolean; details: JsonRecord; created_at: string };
+type PrivacySettings = {
+  owner_id: string;
+  ai_processing_enabled: boolean;
+  login_alerts_enabled: boolean;
+  remote_images_enabled: boolean;
+  privacy_analytics_enabled: boolean;
+  metadata_minimization_enabled: boolean;
+  external_portal_enabled: boolean;
+  storage_region: string;
+  no_training_ai_policy_acknowledged: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
 type Rule = RuleDefinition & { id: string; owner_id: string; conditions: JsonRecord; actions: JsonRecord; enabled: boolean; priority: number };
 type StoredAttachment = { object_key: string; filename: string; content_type: string; detected_content_type: string; byte_size: number; sha256: string; preview_state: "ready" | "not_available"; safety_status: "unknown" | "suspicious" | "blocked"; safety_reasons: string[]; content_id?: string; disposition?: string | null };
 type ProviderConfig = { id?: string; organization_id?: string; provider: ProviderName; enabled: boolean; priority: number; config: JsonRecord; daily_limit?: number };
@@ -642,11 +671,42 @@ async function permanentlyDeleteMessage(env: Env, ownerId: string, messageId: st
 async function ensureProfileAndMailbox(env: Env, user: User): Promise<Mailbox> {
   await dbRequest(env, "profiles", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ id: user.id, display_name: user.email?.split("@")[0] ?? "Mailbox owner" }) });
   await dbRequest(env, "user_settings", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: user.id }) });
+  await ensurePrivacySettings(env, user.id);
   const existing = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&order=is_default.desc,created_at.asc&limit=1`);
   if (existing[0]) return existing[0];
   const address = defaultMailboxAddress(env);
   const created = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: address.split("@")[0], is_default: true }) });
   return created[0];
+}
+
+async function ensurePrivacySettings(env: Env, ownerId: string): Promise<PrivacySettings> {
+  const existing = await dbRequest<PrivacySettings[]>(env, `user_privacy_settings?owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`).catch(() => []);
+  if (existing[0]) return existing[0];
+  const created = await dbRequest<PrivacySettings[]>(env, "user_privacy_settings", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify({ owner_id: ownerId }),
+  }).catch(() => []);
+  if (created[0]) return created[0];
+  const retry = await dbRequest<PrivacySettings[]>(env, `user_privacy_settings?owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+  if (!retry[0]) throw new Error("Privacy settings could not be initialized");
+  return retry[0];
+}
+
+function privacySettingsView(row: PrivacySettings): PrivacySettings {
+  return {
+    owner_id: row.owner_id,
+    ai_processing_enabled: row.ai_processing_enabled === true,
+    login_alerts_enabled: row.login_alerts_enabled !== false,
+    remote_images_enabled: row.remote_images_enabled === true,
+    privacy_analytics_enabled: row.privacy_analytics_enabled === true,
+    metadata_minimization_enabled: row.metadata_minimization_enabled !== false,
+    external_portal_enabled: row.external_portal_enabled !== false,
+    storage_region: String(row.storage_region || "default"),
+    no_training_ai_policy_acknowledged: row.no_training_ai_policy_acknowledged === true,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
 
 function adminAuthClient(env: Env) {
@@ -715,6 +775,79 @@ async function organizationAdmin(env: Env, user: User): Promise<{ organization: 
   const member = await organizationMember(env, organization.id, user.id);
   if (!member || member.status !== "active" || !["owner", "admin"].includes(member.role)) return null;
   return { organization, member };
+}
+
+async function collaborationMembers(env: Env, organizationId: string): Promise<CollaborationMember[]> {
+  const members = await dbRequest<OrganizationMember[]>(env, `organization_members?organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.active&order=created_at.asc`);
+  const users = await authUsers(env).catch(() => []);
+  const userMap = new Map(users.map((candidate) => [candidate.id, candidate]));
+  return members.map((member) => ({
+    user_id: member.user_id,
+    email: String(userMap.get(member.user_id)?.email || ""),
+    display_name: authUserDisplayName(userMap.get(member.user_id) || { id: member.user_id }),
+    role: member.role,
+    status: member.status,
+  }));
+}
+
+async function collaborationThreadContext(env: Env, user: User, threadId: string): Promise<{ organization: Organization; ownerId: string; threadId: string; mailboxIds: string[]; member: OrganizationMember } | null> {
+  if (!threadId || !/^[0-9a-f-]{20,}$/i.test(threadId)) return null;
+  const messages = await dbRequest<Array<{ owner_id: string; mailbox_id?: string | null }>>(env, `messages?thread_id=eq.${encodeURIComponent(threadId)}&select=owner_id,mailbox_id&limit=100`).catch(() => []);
+  if (!messages.length) return null;
+  const ownerId = String(messages[0].owner_id || "");
+  const delegatedIds = await delegatedMailboxIds(env, user.id, "read");
+  const mailboxIds = [...new Set(messages.map((message) => String(message.mailbox_id || "")).filter(Boolean))];
+  if (ownerId !== user.id && !mailboxIds.some((id) => delegatedIds.includes(id))) return null;
+  const organizations = await dbRequest<Organization[]>(env, `organizations?owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`).catch(() => []);
+  const organization = organizations[0] || await ensureOrganization(env, user);
+  const member = await organizationMember(env, organization.id, user.id);
+  if (!member || member.status !== "active") return null;
+  return { organization, ownerId, threadId, mailboxIds, member };
+}
+
+async function ensureCollaborationThread(env: Env, ownerId: string, organizationId: string, threadId: string, priority: CollaborationPriority = "normal"): Promise<CollaborationThread> {
+  const existing = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?owner_id=eq.${encodeURIComponent(ownerId)}&thread_id=eq.${encodeURIComponent(threadId)}&limit=1`).catch(() => []);
+  if (existing[0]) return existing[0];
+  const created = await dbRequest<CollaborationThread[]>(env, "collaboration_threads", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify({ owner_id: ownerId, organization_id: organizationId, thread_id: threadId, status: "open", priority, sla_due_at: collaborationSlaDueAt(priority) }),
+  }).catch(() => []);
+  if (created[0]) return created[0];
+  const retry = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?owner_id=eq.${encodeURIComponent(ownerId)}&thread_id=eq.${encodeURIComponent(threadId)}&limit=1`);
+  if (!retry[0]) throw new Error("Collaboration state could not be initialized");
+  return retry[0];
+}
+
+async function collaborationActivity(env: Env, context: { ownerId: string; organizationId: string; threadId: string | null }, actorId: string, eventType: string, payload: JsonRecord = {}): Promise<void> {
+  await dbRequest(env, "collaboration_activity", {
+    method: "POST",
+    body: JSON.stringify({ owner_id: context.ownerId, organization_id: context.organizationId, thread_id: context.threadId, actor_id: actorId, event_type: eventType.slice(0, 80), payload }),
+  }).catch(() => undefined);
+}
+
+async function applyCollaborationPolicies(env: Env, context: { ownerId: string; organizationId: string; threadId: string }, actorId: string, event: CollaborationEvent, state: CollaborationThread): Promise<CollaborationThread> {
+  const policies = await dbRequest<Array<{ id: string; name: string; kind: string; conditions?: JsonRecord; actions?: JsonRecord }>>(env, `collaboration_policies?organization_id=eq.${encodeURIComponent(context.organizationId)}&enabled=eq.true&order=priority.asc,created_at.asc&limit=100`).catch(() => []);
+  let current = state;
+  for (const policy of policies) {
+    if (!collaborationPolicyMatches(policy.conditions, event, current)) continue;
+    const actions = objectValue(policy.actions);
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (actions.status !== undefined) patch.status = collaborationStatus(actions.status);
+    if (actions.priority !== undefined) patch.priority = collaborationPriority(actions.priority);
+    if (actions.assignTo === "unassigned" || actions.assignTo === null) patch.assignee_id = null;
+    if (typeof actions.assignTo === "string" && /^[0-9a-f-]{20,}$/i.test(actions.assignTo)) {
+      const member = await organizationMember(env, context.organizationId, actions.assignTo);
+      if (member?.status === "active") patch.assignee_id = actions.assignTo;
+    }
+    if (actions.slaMinutes !== undefined) patch.sla_due_at = collaborationSlaDueAt(collaborationPriority(patch.priority ?? current.priority), Date.now(), Number(actions.slaMinutes));
+    if (Object.keys(patch).length > 1) {
+      const rows = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?id=eq.${encodeURIComponent(String(current.id || ""))}&owner_id=eq.${encodeURIComponent(context.ownerId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }).catch(() => []);
+      current = rows[0] || { ...current, ...patch } as CollaborationThread;
+    }
+    await collaborationActivity(env, context, actorId, "policy_applied", { policyId: policy.id, policyName: policy.name, kind: policy.kind, event, actions });
+  }
+  return current;
 }
 
 async function organizationMfaBlocked(env: Env, user: User, organization: Organization): Promise<boolean> {
@@ -840,7 +973,8 @@ async function recordSecurityEvent(env: Env, organization: Organization, user: U
     body: JSON.stringify({ organization_id: organization.id, actor_id: user.id, subject_user_id: user.id, event_type: "login", event_key: eventKey, session_id: sessionId, ip_hash: ipHash, user_agent: userAgent, is_suspicious: suspicious, details: { method: request.method, path: new URL(request.url).pathname } }),
   }).catch(() => undefined);
   await dbRequest(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&user_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
-  if (suspicious && user.email) {
+  const privacy = await ensurePrivacySettings(env, user.id).catch(() => null);
+  if (suspicious && user.email && privacy?.login_alerts_enabled !== false) {
     ctx.waitUntil(sendSystemMessage(env, {
       fromAddress: await defaultFromAddress(env, user.id),
       to: [user.email],
@@ -894,7 +1028,9 @@ async function purgeOwnerObjects(env: Env, ownerId: string): Promise<void> {
   const messages = await dbRequest<Array<{ id: string; raw_object_key?: string | null }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&select=id,raw_object_key&limit=10000`).catch(() => []);
   const attachments = await dbRequest<Array<{ object_key: string }>>(env, `attachments?owner_id=eq.${encodeURIComponent(ownerId)}&select=object_key&limit=10000`).catch(() => []);
   const keys = [...new Set([...messages.map((message) => message.raw_object_key || ""), ...attachments.map((attachment) => attachment.object_key)].filter(Boolean))];
-  await Promise.allSettled(keys.map((key) => deleteObject(env, key)));
+  // Keep account deletion under the Workers subrequest budget even when a
+  // mailbox contains many raw messages and attachments.
+  await deleteObjects(env, keys);
 }
 
 async function auditAdminEvent(env: Env, organizationId: string, actorId: string, subjectUserId: string, eventType: string, details: JsonRecord = {}): Promise<void> {
@@ -1016,6 +1152,38 @@ async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor
     const name = String(body.name || organization.name).trim().slice(0, 120) || "Postveil workspace";
     const rows = await dbRequest<Organization[]>(env, `organizations?id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ name, settings: nextSettings, updated_at: new Date().toISOString() }) });
     return json(rows[0] || { ...organization, name, settings: nextSettings });
+  }
+  if (request.method === "GET" && url.pathname === "/api/admin/organization-blocklist") {
+    return json(await dbRequest<JsonRecord[]>(env, `organization_sender_blocks?organization_id=eq.${encodeURIComponent(organization.id)}&order=match_type.asc,match_value.asc`).catch(() => []));
+  }
+  if (request.method === "POST" && url.pathname === "/api/admin/organization-blocklist") {
+    const body = (await request.json()) as JsonRecord;
+    const matchType = body.matchType === "domain" ? "domain" : body.matchType === "address" ? "address" : "";
+    if (!matchType) return error("Choose a sender or domain");
+    let matchValue = "";
+    try { matchValue = normalizeSenderPolicyValue(matchType, body.matchValue); } catch (blockError) { return error(blockError instanceof Error ? blockError.message : "Blocklist value is invalid"); }
+    try {
+      const rows = await dbRequest<JsonRecord[]>(env, "organization_sender_blocks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ organization_id: organization.id, created_by: actor.id, match_type: matchType, match_value: matchValue, enabled: true }) });
+      return json(rows[0], 201);
+    } catch (blockError) {
+      return error(blockError instanceof Error ? blockError.message : "That organization block already exists", 409);
+    }
+  }
+  const organizationBlockMatch = url.pathname.match(/^\/api\/admin\/organization-blocklist\/([^/]+)$/);
+  if (organizationBlockMatch && request.method === "PATCH") {
+    const id = decodeURIComponent(organizationBlockMatch[1]);
+    const existing = await dbRequest<JsonRecord[]>(env, `organization_sender_blocks?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}&limit=1`);
+    if (!existing[0]) return error("Organization block not found", 404);
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+    const rows = await dbRequest<JsonRecord[]>(env, `organization_sender_blocks?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || { ...existing[0], ...patch });
+  }
+  if (organizationBlockMatch && request.method === "DELETE") {
+    const id = decodeURIComponent(organizationBlockMatch[1]);
+    await dbRequest(env, `organization_sender_blocks?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "DELETE" });
+    return json({ ok: true });
   }
   if (request.method === "GET" && url.pathname === "/api/admin/groups") return json(await groupList(env, organization.id));
   if (request.method === "POST" && url.pathname === "/api/admin/groups") {
@@ -1449,7 +1617,7 @@ async function saveAttachments(env: Env, ownerId: string, messageId: string, att
   return { stored, blocked };
 }
 
-async function assessInbound(env: Env, ownerId: string, mailboxId: string, envelopeFrom: string, headerFrom: string, subject: string, textBody: string, htmlBody: string, parsed: { headers?: Array<{ key: string; value: string }>; attachments?: Array<{ filename?: string | null; mimeType?: string }> }): Promise<{ score: number; reasons: string[]; focusedScore: number; focusedCategory: string; authResults: TrustAuthResults; trustScore: number; trustReasons: string[]; trustEvidence: JsonRecord; receivedAuthAt: string | null; senderFirstSeen: boolean; knownContact: boolean; replyToMismatch: boolean; linkCount: number; trackingPixelCount: number; policyId: string | null; policyAction: string | null; policyTargetFolderId: string | null }> {
+async function assessInbound(env: Env, ownerId: string, mailboxId: string, envelopeFrom: string, headerFrom: string, subject: string, textBody: string, htmlBody: string, parsed: { headers?: Array<{ key: string; value: string }>; attachments?: Array<{ filename?: string | null; mimeType?: string }> }, fromName = "", mailboxAddress = ""): Promise<{ score: number; reasons: string[]; focusedScore: number; focusedCategory: string; authResults: TrustAuthResults; trustScore: number; trustReasons: string[]; trustEvidence: JsonRecord; receivedAuthAt: string | null; senderFirstSeen: boolean; knownContact: boolean; replyToMismatch: boolean; linkCount: number; trackingPixelCount: number; policyId: string | null; policyAction: string | null; policyTargetFolderId: string | null }> {
   let score = 0;
   let focusedScore = 0.5;
   const reasons: string[] = [];
@@ -1460,6 +1628,8 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   const dmarc = authResults.dmarc;
   const authFailures = [spf, dkim, dmarc].filter((status) => status === "fail" || status === "softfail" || status === "permerror" || status === "temperror");
   if (dmarc === "fail") { score += 0.18; reasons.push("DMARC failure"); }
+  if (spf === "fail" || spf === "softfail" || spf === "permerror" || spf === "temperror") reasons.push("SPF failure");
+  if (dkim === "fail" || dkim === "softfail" || dkim === "permerror" || dkim === "temperror") reasons.push("DKIM failure");
   if (authFailures.length) { score += 0.18 + Math.min(0.12, (authFailures.length - 1) * 0.06); reasons.push("authentication failure"); }
   if ([spf, dkim, dmarc].filter(Boolean).length >= 2 && authFailures.length === 0 && [spf, dkim, dmarc].every((status) => !status || status === "pass")) { score -= 0.08; reasons.push("authentication passed"); }
   if (envelopeFrom && headerFrom && cleanAddress(envelopeFrom) !== cleanAddress(headerFrom)) { score += 0.12; reasons.push("envelope/header sender mismatch"); }
@@ -1470,13 +1640,18 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   });
   const sender = cleanAddress(headerFrom || envelopeFrom);
   const replyTo = cleanAddress(headerValue(parsed, "reply-to") || headerFrom);
-  const linkEvidence = extractTrustEvidence({ sender, replyTo, subject, textBody, htmlBody, authentication: authResults });
+  const linkEvidence = extractTrustEvidence({ sender, replyTo, fromName, mailboxAddress, subject, textBody, htmlBody, authentication: authResults, attachments: parsed.attachments });
   if (linkEvidence.reply_to_mismatch) { score += 0.10; reasons.push("reply-to mismatch"); }
   const content = `${subject} ${textBody} ${stripHtml(htmlBody)}`;
   const urls = content.match(/https?:\/\/[^\s"'<>]+/gi) || [];
   if (urls.length >= 5) { score += 0.10; reasons.push("many links"); }
   if (urls.some((url) => /(?:bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|cutt\.ly)\//i.test(url))) { score += 0.08; reasons.push("shortened link"); }
   if (urls.some((url) => /^(?:https?:\/\/)?(?:[^/]+@)?(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?(?:[/?#]|$)/i.test(url) || urlHost(url).startsWith("xn--"))) { score += 0.08; reasons.push("suspicious link host"); }
+  if (linkEvidence.lookalike_domain) { score += 0.16; reasons.push(`lookalike ${linkEvidence.lookalike_domain} domain`); }
+  if (linkEvidence.display_name_spoof) { score += 0.14; reasons.push("display-name spoofing signal"); }
+  if (linkEvidence.suspicious_reply_to) { score += 0.12; reasons.push("suspicious reply-to domain"); }
+  if (linkEvidence.qr_code_count) { score += 0.08; reasons.push("QR-code candidate"); }
+  if (linkEvidence.link_reputation.some((item) => item.reputation === "suspicious")) { score += 0.10; reasons.push("link reputation warning"); }
   if (hasDeceptiveLink(htmlBody)) { score += 0.16; reasons.push("deceptive link text"); }
   if (linkEvidence.tracking_pixel_count) { score += Math.min(0.10, 0.04 + linkEvidence.tracking_pixel_count * 0.02); reasons.push("tracking pixel"); }
   const credentialRequest = /(?:verify|confirm|unlock|suspend|password|login|sign[ -]?in|security code|one[- ]?time code|account)/i.test(content);
@@ -1487,6 +1662,7 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   const suspicious = (parsed.attachments || []).filter((item) => isSuspiciousAttachment(String(item.filename || ""), String(item.mimeType || "")));
   if (blocked.length) { score = Math.max(score, 0.90); reasons.push("dangerous attachment"); }
   if (suspicious.length && !blocked.length) { score += 0.16; reasons.push("suspicious attachment type"); }
+  if ((linkEvidence.attachment_reputation || []).some((item) => item.status === "suspicious")) reasons.push("attachment reputation warning");
   if (!textBody.trim() && htmlBody) { score += 0.04; reasons.push("HTML-only message"); }
   const knownContact = await dbRequest<Array<{ id: string }>>(env, `contacts?owner_id=eq.${encodeURIComponent(ownerId)}&email=eq.${encodeURIComponent(sender)}&limit=1`).catch(() => []);
   const previous = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(ownerId)}&from_address=eq.${encodeURIComponent(sender)}&select=id&order=created_at.desc&limit=25`).catch(() => []);
@@ -1512,7 +1688,7 @@ async function assessInbound(env: Env, ownerId: string, mailboxId: string, envel
   score = Math.max(0, Math.min(1, score));
   focusedScore = Math.max(0, Math.min(1, focusedScore - score * 0.35));
   const trustScore = Math.max(0, Math.min(1, 1 - score));
-  const trustEvidence = extractTrustEvidence({ sender, replyTo, subject, textBody, htmlBody, authentication: authResults, firstSeenSender: !previous[0], knownContact: Boolean(knownContact[0]), policyAction: senderPolicy?.action || null, policyId: senderPolicy?.id || null });
+  const trustEvidence = extractTrustEvidence({ sender, replyTo, fromName, mailboxAddress, subject, textBody, htmlBody, authentication: authResults, attachments: parsed.attachments, firstSeenSender: !previous[0], knownContact: Boolean(knownContact[0]), policyAction: senderPolicy?.action || null, policyId: senderPolicy?.id || null });
   return {
     score,
     reasons,
@@ -1541,6 +1717,8 @@ function ruleMatches(rule: Rule, context: RuleContext): boolean {
 }
 
 async function applyRuleActions(env: Env, ownerId: string, messageId: string, actions: JsonRecord, forwardInbound?: (address: string) => Promise<void>): Promise<JsonRecord> {
+  const messageRows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1&select=id,thread_id,mailbox_id,from_address,subject,text_body,raw_object_key,folder`);
+  const message = messageRows[0] || {};
   const patch: JsonRecord = {};
   if (typeof actions.folder === "string" && SYSTEM_FOLDERS.includes(actions.folder as typeof SYSTEM_FOLDERS[number])) {
     patch.folder = actions.folder;
@@ -1548,16 +1726,17 @@ async function applyRuleActions(env: Env, ownerId: string, messageId: string, ac
   }
   if (typeof actions.customFolderId === "string") {
     const folders = await dbRequest<Array<{ id: string }>>(env, `mail_folders?id=eq.${encodeURIComponent(actions.customFolderId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
-    if (folders[0]) {
-      patch.folder = "custom";
-      patch.custom_folder_id = actions.customFolderId;
-    }
+    if (folders[0]) { patch.folder = "custom"; patch.custom_folder_id = actions.customFolderId; }
   }
   if (typeof actions.markRead === "boolean") patch.is_read = actions.markRead;
   if (typeof actions.star === "boolean") patch.is_starred = actions.star;
   if (typeof actions.pin === "boolean") patch.is_pinned = actions.pin;
   if (typeof actions.flag === "boolean") patch.is_flagged = actions.flag;
   if (typeof actions.priority === "number") patch.priority = Math.max(0, Math.min(2, actions.priority));
+  if (Number.isInteger(actions.snoozeMinutes) && Number(actions.snoozeMinutes) > 0) {
+    patch.previous_folder = String(message.folder || "inbox");
+    patch.snoozed_until = new Date(Date.now() + Math.min(43200, Number(actions.snoozeMinutes)) * 60_000).toISOString();
+  }
   if (Object.keys(patch).length) await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify(patch) });
   if (typeof actions.label === "string" && actions.label.trim()) {
     const name = actions.label.trim();
@@ -1566,16 +1745,84 @@ async function applyRuleActions(env: Env, ownerId: string, messageId: string, ac
     if (label) await dbRequest(env, "message_labels", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ message_id: messageId, label_id: label.id }) });
   }
   if (typeof actions.forwardTo === "string" && forwardInbound) await forwardInbound(cleanAddress(actions.forwardTo));
+
+  const actionAlreadyRecorded = async (action: string): Promise<boolean> => {
+    const rows = await dbRequest<JsonRecord[]>(env, `mail_events?owner_id=eq.${encodeURIComponent(ownerId)}&message_id=eq.${encodeURIComponent(messageId)}&event_type=eq.rule_action&order=created_at.desc&limit=100&select=payload`).catch(() => []);
+    return rows.some((row) => String(objectValue(row.payload).action || "") === action);
+  };
+  const recordAction = async (action: string, payload: JsonRecord): Promise<void> => {
+    await dbRequest(env, "mail_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, provider: "postveil", event_type: "rule_action", payload: { action, ...payload } }) }).catch(() => undefined);
+  };
+  const optionalAction = async (action: string, callback: () => Promise<JsonRecord | void>): Promise<void> => {
+    if (await actionAlreadyRecorded(action)) return;
+    try { const result = await callback(); await recordAction(action, result || {}); }
+    catch (actionError) { console.error(`Rule action ${action} failed`, actionError); await recordAction(`${action}:failed`, { error: actionError instanceof Error ? actionError.message.slice(0, 240) : "Action failed" }); }
+  };
+  const assignTo = typeof actions.assignTo === "string" ? actions.assignTo.trim() : "";
+  const createTaskTitle = typeof actions.createTask === "string" ? actions.createTask.trim() : "";
+  const webhookUrl = typeof actions.webhookUrl === "string" ? actions.webhookUrl.trim() : "";
+  if (assignTo && message.thread_id) await optionalAction("assign", async () => {
+    const assigneeId = assignTo === "self" ? ownerId : assignTo;
+    await dbRequest(env, "thread_assignments?on_conflict=owner_id,thread_id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: ownerId, thread_id: message.thread_id, assignee_id: assigneeId, status: "open", updated_at: new Date().toISOString() }) });
+    return { assigneeId };
+  });
+  if (createTaskTitle) await optionalAction("create_task", async () => {
+    const rows = await dbRequest<JsonRecord[]>(env, "tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, title: createTaskTitle, notes: `Created by a rule from ${String(message.subject || "this message")}`, source_message_id: messageId, due_at: null, priority: 0 }) });
+    return { taskId: rows[0]?.id || null };
+  });
+  if (actions.createCalendarEvent === true) await optionalAction("create_calendar_event", async () => {
+    const startsAt = new Date(Date.now() + 60 * 60_000);
+    const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+    const rows = await dbRequest<JsonRecord[]>(env, "calendar_events", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: ownerId, title: String(message.subject || "Email event"), description: String(message.text_body || "").slice(0, 2000), starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), all_day: false, attendees: [], source_message_id: messageId }) });
+    return { calendarEventId: rows[0]?.id || null };
+  });
+  if (actions.storeInB2 === true) await optionalAction("store_in_object_storage", async () => {
+    const key = `automation/${ownerId}/${messageId}.json`;
+    await putObject(env, key, JSON.stringify({ messageId, subject: message.subject || "", from: message.from_address || "", text: String(message.text_body || "").slice(0, 200_000), storedAt: new Date().toISOString() }), "application/json");
+    return { objectKey: key };
+  });
+  if (actions.autoReply === true && message.from_address) await optionalAction("auto_reply", async () => {
+    const fromAddress = await defaultFromAddress(env, ownerId);
+    const result = await sendSystemMessage(env, { fromAddress, to: [String(message.from_address)], subject: `Re: ${String(message.subject || "your message")}`.slice(0, 500), text: "Thanks for your message. This is an automatic reply triggered by a Postveil rule.", replyTo: fromAddress }, undefined);
+    return { provider: result.provider || null };
+  });
+  if (webhookUrl) await optionalAction("webhook", async () => {
+    const target = new URL(webhookUrl);
+    const blockedHost = /^(localhost|127(?:\.\d+){3}|0\.0\.0\.0|::1)$/i.test(target.hostname) || target.hostname.endsWith(".local") || target.hostname.endsWith(".internal");
+    if (target.protocol !== "https:" || blockedHost) throw new Error("Automation webhooks must use a public HTTPS endpoint");
+    const payload = JSON.stringify({ event: "postveil.rule.matched", messageId, subject: message.subject || "", from: message.from_address || "", triggeredAt: new Date().toISOString() });
+    const headers = new Headers({ "content-type": "application/json", "user-agent": "Postveil-Automation/1" });
+    if (typeof actions.webhookSecret === "string" && actions.webhookSecret.trim()) headers.set("x-postveil-signature", `sha256=${base64UrlEncode(await hmacSha256(actions.webhookSecret.trim(), payload))}`);
+    const response = await fetch(target.toString(), { method: "POST", headers, body: payload, redirect: "manual" });
+    if (!response.ok) throw new Error(`Webhook returned HTTP ${response.status}`);
+    return { status: response.status };
+  });
   return patch;
 }
 
-async function applyInboundRules(env: Env, ownerId: string, messageId: string, context: RuleContext, forwardInbound?: (address: string) => Promise<void>): Promise<void> {
-  const rules = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&order=priority.asc`);
+async function applyInboundRules(env: Env, ownerId: string, messageId: string, context: RuleContext, forwardInbound?: (address: string) => Promise<void>, organizationId?: string | null): Promise<void> {
+  const personal = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&trigger_type=eq.inbound&order=priority.asc,created_at.asc`).catch(async () => (await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&order=priority.asc,created_at.asc`).catch(() => [])).filter((rule) => !rule.trigger_type || rule.trigger_type === "inbound"));
+  const shared = organizationId ? await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(organizationId)}&scope=eq.organization&enabled=eq.true&trigger_type=eq.inbound&order=priority.asc,created_at.asc`).catch(async () => (await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(organizationId)}&scope=eq.organization&enabled=eq.true&order=priority.asc,created_at.asc`).catch(() => [])).filter((rule) => !rule.trigger_type || rule.trigger_type === "inbound")) : [];
+  const rules = [...personal, ...shared].sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0));
   for (const rule of rules) {
     if (!ruleMatches(rule, context)) continue;
     const actions = rule.actions || {};
     await applyRuleActions(env, ownerId, messageId, actions, forwardInbound);
     if (actions.stopProcessing === true) break;
+  }
+}
+
+async function applyEventRules(env: Env, ownerId: string, messageId: string, eventType: string, organizationId?: string | null): Promise<void> {
+  const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}&limit=1`);
+  const message = rows[0];
+  if (!message) return;
+  const context = { ...ruleContextFromMessage(message), eventType };
+  const personal = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&trigger_type=eq.event&order=priority.asc,created_at.asc`).catch(async () => (await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(ownerId)}&enabled=eq.true&order=priority.asc,created_at.asc`).catch(() => [])).filter((rule) => rule.trigger_type === "event"));
+  const shared = organizationId ? await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(organizationId)}&scope=eq.organization&enabled=eq.true&trigger_type=eq.event&order=priority.asc,created_at.asc`).catch(async () => (await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(organizationId)}&scope=eq.organization&enabled=eq.true&order=priority.asc,created_at.asc`).catch(() => [])).filter((rule) => rule.trigger_type === "event")) : [];
+  for (const rule of [...personal, ...shared].sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0))) {
+    if (!ruleMatches(rule, context)) continue;
+    await applyRuleActions(env, ownerId, messageId, rule.actions || {});
+    if (rule.actions?.stopProcessing === true) break;
   }
 }
 
@@ -1594,6 +1841,71 @@ function buildRuleConditions(conditions: unknown, exceptions: unknown): JsonReco
   if (Object.keys(exceptionObject).length) next.exceptions = exceptionObject;
   else delete next.exceptions;
   return next;
+}
+
+function automationTrigger(value: unknown): "inbound" | "event" | "scheduled" {
+  return value === "event" || value === "scheduled" ? value : "inbound";
+}
+
+function automationSchedule(value: unknown): JsonRecord {
+  const source = objectValue(value);
+  const frequency = ["hourly", "daily", "weekly"].includes(String(source.frequency)) ? String(source.frequency) : "daily";
+  const at = typeof source.at === "string" && !Number.isNaN(Date.parse(source.at)) ? new Date(source.at).toISOString() : null;
+  return { frequency, at };
+}
+
+function nextAutomationRun(schedule: JsonRecord, from = new Date()): string {
+  const next = new Date(from);
+  const frequency = String(schedule.frequency || "daily");
+  if (frequency === "hourly") next.setUTCHours(next.getUTCHours() + 1, 0, 0, 0);
+  else if (frequency === "weekly") next.setUTCDate(next.getUTCDate() + 7);
+  else next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString();
+}
+
+async function ruleForActor(env: Env, user: User, ruleId: string): Promise<{ rule: Rule; shared: boolean } | null> {
+  const personal = await dbRequest<Rule[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+  if (personal[0]) return { rule: personal[0], shared: false };
+  const access = await organizationAdmin(env, user).catch(() => null);
+  if (!access) return null;
+  const shared = await dbRequest<Rule[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleId)}&organization_id=eq.${encodeURIComponent(access.organization.id)}&scope=eq.organization&limit=1`).catch(() => []);
+  return shared[0] ? { rule: shared[0], shared: true } : null;
+}
+
+function sieveQuoted(value: string): string { return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`; }
+
+function ruleToSieve(rule: Rule): string {
+  const conditions = objectValue(rule.conditions);
+  const tests = Object.entries(conditions).filter(([key]) => key !== "exceptions" && typeof conditions[key] === "string").map(([key, value]) => {
+    const header = key === "fromContains" ? "from" : key === "toContains" ? "to" : key === "subjectContains" ? "subject" : key === "bodyContains" ? "body" : null;
+    return header ? `header :contains ${sieveQuoted(header)} ${sieveQuoted(String(value))}` : null;
+  }).filter((value): value is string => Boolean(value));
+  const actions = objectValue(rule.actions);
+  const commands: string[] = [];
+  if (typeof actions.folder === "string") commands.push(`fileinto ${sieveQuoted(String(actions.folder))};`);
+  if (actions.markRead === true) commands.push('addflag "\\Seen";');
+  if (actions.markRead === false) commands.push('removeflag "\\Seen";');
+  if (typeof actions.forwardTo === "string") commands.push(`redirect ${sieveQuoted(actions.forwardTo)};`);
+  if (actions.stopProcessing === true) commands.push("stop;");
+  const test = tests.length ? tests.length === 1 ? tests[0] : `allof (${tests.join(", ")})` : "true";
+  return `# Postveil rule: ${rule.name}\nif ${test} {\n  ${commands.join(" ")}\n}`;
+}
+
+function parseSieveRules(source: string): Array<{ name: string; conditions: JsonRecord; actions: JsonRecord; sieve_source: string }> {
+  const rules: Array<{ name: string; conditions: JsonRecord; actions: JsonRecord; sieve_source: string }> = [];
+  const blocks = source.split(/\n\s*\n/).map((value) => value.trim()).filter(Boolean);
+  for (const [index, block] of blocks.entries()) {
+    const conditions: JsonRecord = {};
+    for (const match of block.matchAll(/header\s*:contains\s+"(from|to|subject)"\s+"([^"]+)"/gi)) conditions[match[1].toLowerCase() === "from" ? "fromContains" : match[1].toLowerCase() === "to" ? "toContains" : "subjectContains"] = match[2];
+    const actions: JsonRecord = { stopProcessing: /\bstop\s*;/i.test(block) };
+    const fileinto = block.match(/fileinto\s+"([^"]+)"/i); if (fileinto) actions.folder = fileinto[1].toLowerCase();
+    const redirect = block.match(/redirect\s+"([^"\n]+)"/i); if (redirect) actions.forwardTo = redirect[1];
+    if (/addflag\s+"\\\\Seen"/i.test(block)) actions.markRead = true;
+    if (/removeflag\s+"\\\\Seen"/i.test(block)) actions.markRead = false;
+    if (!Object.keys(conditions).length || !Object.keys(actions).some((key) => key !== "stopProcessing")) continue;
+    rules.push({ name: `Imported Sieve rule ${index + 1}`, conditions, actions, sieve_source: block });
+  }
+  return rules;
 }
 
 type RuleMatch = { id: string; subject: string; fromAddress: string; snippet: string; folder: string; reasons: string[]; plannedActions: JsonRecord };
@@ -1895,30 +2207,44 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
 
   const finishInbound = async (): Promise<void> => {
     try {
-      const assessment = await assessInbound(env, ownerId, mailbox.id, envelopeFrom, headerFrom, subject, textBody, htmlBody, parsed);
+      const assessment = await assessInbound(env, ownerId, mailbox.id, envelopeFrom, headerFrom, subject, textBody, htmlBody, parsed, fromName, destination);
       const rawKey = `raw/${ownerId}/${messageId}.eml`;
       await putObject(env, rawKey, new Uint8Array(raw), "message/rfc822");
       const attachmentResult = await saveAttachments(env, ownerId, messageId, parsed.attachments ?? []);
+      const mailboxSettings = await getMailboxAdminSettings(env, mailbox);
+      const organizationId = mailboxSettings?.organization_id || null;
       const [blockedAddressRows, blockedDomainRows] = await Promise.all([
         dbRequest<JsonRecord[]>(env, `sender_blocks?owner_id=eq.${encodeURIComponent(ownerId)}&match_type=eq.address&match_value=eq.${encodeURIComponent(headerFrom)}&enabled=eq.true&limit=1`).catch(() => []),
         dbRequest<JsonRecord[]>(env, `sender_blocks?owner_id=eq.${encodeURIComponent(ownerId)}&match_type=eq.domain&match_value=eq.${encodeURIComponent(domainOf(headerFrom))}&enabled=eq.true&limit=1`).catch(() => []),
       ]);
-      const blockedSender = Boolean(blockedAddressRows[0] || blockedDomainRows[0]);
-      const reasons = [...assessment.reasons, ...(blockedSender ? ["sender is blocked"] : []), ...(attachmentResult.blocked.length ? [`blocked attachments: ${attachmentResult.blocked.join(", ")}`] : [])];
+      const [organizationBlockedAddressRows, organizationBlockedDomainRows] = organizationId ? await Promise.all([
+        dbRequest<JsonRecord[]>(env, `organization_sender_blocks?organization_id=eq.${encodeURIComponent(organizationId)}&match_type=eq.address&match_value=eq.${encodeURIComponent(headerFrom)}&enabled=eq.true&limit=1`).catch(() => []),
+        dbRequest<JsonRecord[]>(env, `organization_sender_blocks?organization_id=eq.${encodeURIComponent(organizationId)}&match_type=eq.domain&match_value=eq.${encodeURIComponent(domainOf(headerFrom))}&enabled=eq.true&limit=1`).catch(() => []),
+      ]) : [[], []] as [JsonRecord[], JsonRecord[]];
+      const organizationBlocked = Boolean(organizationBlockedAddressRows[0] || organizationBlockedDomainRows[0]);
+      const blockedSender = Boolean(blockedAddressRows[0] || blockedDomainRows[0] || organizationBlocked);
+      const reasons = [...assessment.reasons, ...(blockedSender ? [organizationBlocked ? "organization blocklist match" : "sender is blocked"] : []), ...(attachmentResult.blocked.length ? [`blocked attachments: ${attachmentResult.blocked.join(", ")}`] : [])];
       const explicitPolicy = blockedSender ? "spam" : assessment.policyAction;
       const effectiveScore = blockedSender ? 1 : assessment.score;
       const customFolderId = explicitPolicy === "folder" ? assessment.policyTargetFolderId : null;
       const folder = explicitPolicy === "screen" ? "inbox" : explicitPolicy === "archive" && effectiveScore < SPAM_THRESHOLD ? "archive" : explicitPolicy === "folder" && customFolderId && effectiveScore < SPAM_THRESHOLD ? "custom" : effectiveScore >= SPAM_THRESHOLD || explicitPolicy === "spam" ? "spam" : "inbox";
       const screeningStatus = explicitPolicy === "screen" || (effectiveScore >= 0.35 && effectiveScore < SPAM_THRESHOLD) ? "review" : folder === "spam" ? "blocked" : "none";
-      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, custom_folder_id: folder === "custom" ? customFolderId : null, status: "received", delivery_status: "received", screening_status: screeningStatus, screening_policy_id: assessment.policyId, raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), unsubscribe_url: unsubscribeUrl, spam_score: effectiveScore, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, auth_spf: assessment.authResults.spf, auth_dkim: assessment.authResults.dkim, auth_dmarc: assessment.authResults.dmarc, auth_arc: assessment.authResults.arc, auth_tls: assessment.authResults.tls, trust_score: assessment.trustScore, trust_reasons: reasons, trust_evidence: { ...assessment.trustEvidence, blocked_attachments: attachmentResult.blocked, blocked_sender: blockedSender }, received_auth_at: assessment.receivedAuthAt, sender_first_seen: assessment.senderFirstSeen, known_contact: assessment.knownContact, reply_to_mismatch: assessment.replyToMismatch, link_count: assessment.linkCount, tracking_pixel_count: assessment.trackingPixelCount, updated_at: new Date().toISOString() }) });
+      await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(ownerId)}`, { method: "PATCH", body: JSON.stringify({ folder, custom_folder_id: folder === "custom" ? customFolderId : null, status: "received", delivery_status: "received", screening_status: screeningStatus, screening_policy_id: assessment.policyId, raw_object_key: rawKey, has_attachment: Boolean(parsed.attachments?.length), unsubscribe_url: unsubscribeUrl, spam_score: effectiveScore, spam_reasons: reasons, focused_score: assessment.focusedScore, focused_category: assessment.focusedCategory, auth_results: assessment.authResults, auth_spf: assessment.authResults.spf, auth_dkim: assessment.authResults.dkim, auth_dmarc: assessment.authResults.dmarc, auth_arc: assessment.authResults.arc, auth_tls: assessment.authResults.tls, trust_score: assessment.trustScore, trust_reasons: reasons, trust_evidence: { ...assessment.trustEvidence, blocked_attachments: attachmentResult.blocked, blocked_sender: blockedSender, organization_blocked: organizationBlocked, malware_scanner: "static_only" }, received_auth_at: assessment.receivedAuthAt, sender_first_seen: assessment.senderFirstSeen, known_contact: assessment.knownContact, reply_to_mismatch: assessment.replyToMismatch, link_count: assessment.linkCount, tracking_pixel_count: assessment.trackingPixelCount, updated_at: new Date().toISOString() }) });
       await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: ownerId, message_id: messageId, policy_id: assessment.policyId, decision: screeningStatus === "blocked" ? "blocked" : screeningStatus === "review" ? "screened" : "allowed", previous_folder: "inbox" }) }).catch(() => undefined);
       if (attachmentResult.stored.length) await dbRequest(env, "attachments", { method: "POST", body: JSON.stringify(attachmentResult.stored.map((attachment) => ({ ...attachment, owner_id: ownerId, message_id: messageId }))) });
-      const mailboxSettings = await getMailboxAdminSettings(env, mailbox);
       if (mailboxSettings && attachmentResult.stored.length) {
         const storedBytes = attachmentResult.stored.reduce((total, attachment) => total + Math.max(0, Number(attachment.byte_size || 0)), 0);
         await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, { method: "PATCH", body: JSON.stringify({ storage_used_bytes: mailboxSettings.storage_used_bytes + storedBytes, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
       }
       await dbRequest(env, `threads?id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ last_message_at: new Date().toISOString() }) });
+      if (organizationId) {
+        const collaboration = await ensureCollaborationThread(env, ownerId, organizationId, threadId, "normal").catch(() => null);
+        if (collaboration) {
+          await dbRequest(env, `collaboration_threads?id=eq.${encodeURIComponent(String(collaboration.id || ""))}`, { method: "PATCH", body: JSON.stringify({ last_customer_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
+          await collaborationActivity(env, { ownerId, organizationId, threadId }, ownerId, "message_received", { messageId, from: headerFrom });
+          await applyCollaborationPolicies(env, { ownerId, organizationId, threadId }, ownerId, "message_received", collaboration).catch(() => undefined);
+        }
+      }
       await markInboundReply(env, ownerId, threadId, messageId, headerFrom);
       await applyInboundRules(env, ownerId, messageId, {
         from: headerFrom,
@@ -1932,7 +2258,7 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
         isPinned: false,
         priority: 0,
         folder,
-      }, forwardInbound);
+      }, forwardInbound, organizationId);
       const autoReplies = await dbRequest<Array<{ enabled: boolean; subject: string; body: string; starts_at: string | null; ends_at: string | null }>>(env, `auto_replies?owner_id=eq.${encodeURIComponent(ownerId)}&mailbox_id=eq.${encodeURIComponent(mailbox.id)}&enabled=eq.true&limit=1`);
       const autoReply = autoReplies[0];
       const now = Date.now();
@@ -2273,6 +2599,7 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   }
   const idempotencyKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() ? body.idempotencyKey.trim().slice(0, 200) : crypto.randomUUID();
   const mailboxOwnerId = mailbox?.owner_id || ownerId;
+  if (composeMetadata.confidentialMode === true && !(await ensurePrivacySettings(env, mailboxOwnerId)).external_portal_enabled) return error("Protected external-message delivery is disabled in privacy settings", 403);
   const duplicate = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(mailboxOwnerId)}&send_idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&select=id,status,folder,send_after,scheduled_at&limit=1`);
   if (duplicate[0]) return json({ ok: true, replayed: true, id: duplicate[0].id, status: duplicate[0].status, scheduled: duplicate[0].status === "scheduled" });
   const mergeRequested = composeMetadata.mailMerge === true || composeMetadata.personalizedBulk === true;
@@ -2433,6 +2760,27 @@ async function processScheduled(env: Env): Promise<void> {
   for (const message of snoozed) await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}`, { method: "PATCH", body: JSON.stringify({ folder: message.previous_folder || "inbox", previous_folder: null, snoozed_until: null }) }).catch(() => undefined);
   await processDueFollowUps(env, now);
   await processDueReminders(env, now);
+  await processScheduledRules(env, now);
+}
+
+async function processScheduledRules(env: Env, now = new Date().toISOString()): Promise<void> {
+  const rules = await dbRequest<Rule[]>(env, `mail_rules?enabled=eq.true&trigger_type=eq.scheduled&next_run_at=lte.${encodeURIComponent(now)}&order=next_run_at.asc&limit=25`).catch(() => []);
+  for (const rule of rules) {
+    const ownerId = String(rule.owner_id || "");
+    if (!ownerId) continue;
+    const sourceRows = await existingRuleMessages(env, ownerId);
+    const analysis = matchRuleMessages(sourceRows, rule);
+    let runId = "";
+    try {
+      runId = await createRuleRun(env, ownerId, rule.id, "replay", analysis.matches);
+      const result = await applyExistingRuleMatches(env, ownerId, rule, runId, analysis.matches, sourceRows);
+      await finishRuleRun(env, ownerId, runId, { status: result.failures.length ? "failed" : "completed", matched_count: analysis.matches.length, changed_count: result.changedCount, sample: analysis.matches.slice(0, 20), error_message: result.failures[0]?.error || null });
+      await dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(rule.id)}`, { method: "PATCH", body: JSON.stringify({ last_run_at: now, last_run_count: result.changedCount, last_error: result.failures[0]?.error || null, next_run_at: nextAutomationRun(automationSchedule(rule.schedule), new Date(now)) }) });
+    } catch (scheduledError) {
+      if (runId) await finishRuleRun(env, ownerId, runId, { status: "failed", error_message: scheduledError instanceof Error ? scheduledError.message.slice(0, 500) : "Scheduled rule failed" }).catch(() => undefined);
+      await dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(rule.id)}`, { method: "PATCH", body: JSON.stringify({ last_run_at: now, last_error: scheduledError instanceof Error ? scheduledError.message.slice(0, 500) : "Scheduled rule failed", next_run_at: nextAutomationRun(automationSchedule(rule.schedule), new Date(now)) }) }).catch(() => undefined);
+    }
+  }
 }
 
 async function processDueFollowUps(env: Env, now = new Date().toISOString()): Promise<void> {
@@ -3077,6 +3425,7 @@ async function processDeliveryEvent(env: Env, event: DeliveryEvent): Promise<{ m
   const receiptKind = eventName.includes("open") || eventName.includes("read") ? "read" : eventName.includes("confirm") || eventName.includes("receipt") ? "confirmation" : state?.deliveryStatus === "delivered" ? "delivery" : null;
   if (receiptKind) await recordReceiptEvent(env, String(message.owner_id), String(message.id), receiptKind, event.recipient, provider, event.eventId || claim.hash, event.payload);
   const organizationId = message.mailbox_id ? (await dbRequest<MailboxAdminSettings[]>(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(String(message.mailbox_id))}&limit=1`).catch(() => []))[0]?.organization_id : undefined;
+  await applyEventRules(env, String(message.owner_id), String(message.id), event.eventType, organizationId).catch((eventRuleError) => console.error("Event rule processing failed", eventRuleError));
   if (state?.deliveryStatus === "delivered") await recordDomainOutcome(env, organizationId, domainOf(String(message.from_address || "")), "delivered");
   if (state?.deliveryStatus === "bounced" || state?.deliveryStatus === "complained") {
     const recipient = event.recipient || (Array.isArray(message.to_addresses) ? String(message.to_addresses[0] || "") : "");
@@ -3188,7 +3537,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   let organization: Organization | null = null;
   try {
     organization = await ensureOrganization(env, user);
-    const mfaSetupRoute = url.pathname === "/api/recovery-methods" || url.pathname.startsWith("/api/recovery-methods/") || url.pathname === "/api/recovery-codes" || url.pathname === "/api/recovery-codes/status" || url.pathname === "/api/admin/organization" || url.pathname === "/api/admin/overview";
+    const mfaSetupRoute = url.pathname === "/api/recovery-methods" || url.pathname.startsWith("/api/recovery-methods/") || url.pathname === "/api/recovery-codes" || url.pathname === "/api/recovery-codes/status" || url.pathname === "/api/security/overview" || url.pathname === "/api/privacy-settings" || url.pathname === "/api/admin/organization" || url.pathname === "/api/admin/overview";
     if (!mfaSetupRoute && await organizationMfaBlocked(env, user, organization)) return error("Your workspace requires two-step verification before continuing", 401);
     ctx.waitUntil(recordSecurityEvent(env, organization, user, request, ctx));
   } catch {
@@ -3512,6 +3861,193 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
   }
 
+  const collaborationThreadMatch = url.pathname.match(/^\/api\/collaboration\/threads\/([^/]+)$/);
+  if (collaborationThreadMatch && request.method === "GET") {
+    const threadId = decodeURIComponent(collaborationThreadMatch[1]);
+    const context = await collaborationThreadContext(env, user, threadId);
+    if (!context) return error("Conversation not found or not shared with you", 404);
+    let state = await ensureCollaborationThread(env, context.ownerId, context.organization.id, threadId);
+    if (collaborationSlaBreached(state.sla_due_at) && !state.sla_breached_at) {
+      const breachedAt = new Date().toISOString();
+      const rows = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?id=eq.${encodeURIComponent(String(state.id || ""))}&owner_id=eq.${encodeURIComponent(context.ownerId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ sla_breached_at: breachedAt, updated_at: breachedAt }) }).catch(() => []);
+      state = rows[0] || { ...state, sla_breached_at: breachedAt };
+      await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "sla_breached", { priority: state.priority, dueAt: state.sla_due_at });
+    }
+    const [comments, activity, presence, members, assignment] = await Promise.all([
+      dbRequest<JsonRecord[]>(env, `thread_comments?thread_id=eq.${encodeURIComponent(threadId)}&organization_id=eq.${encodeURIComponent(context.organization.id)}&order=created_at.asc&limit=200`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `collaboration_activity?thread_id=eq.${encodeURIComponent(threadId)}&organization_id=eq.${encodeURIComponent(context.organization.id)}&order=created_at.asc&limit=200`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `collaboration_presence?thread_id=eq.${encodeURIComponent(threadId)}&organization_id=eq.${encodeURIComponent(context.organization.id)}&last_seen_at=gte.${encodeURIComponent(new Date(Date.now() - 45_000).toISOString())}&order=last_seen_at.desc`).catch(() => []),
+      collaborationMembers(env, context.organization.id),
+      dbRequest<JsonRecord[]>(env, `thread_assignments?owner_id=eq.${encodeURIComponent(context.ownerId)}&thread_id=eq.${encodeURIComponent(threadId)}&limit=1`).catch(() => []),
+    ]);
+    const memberMap = new Map(members.map((member) => [member.user_id, member]));
+    const canSeePrivate = context.member.role === "owner" || context.member.role === "admin";
+    const visibleComments = comments.filter((comment) => comment.visibility !== "private" || canSeePrivate || String(comment.author_id || "") === user.id).map((comment) => ({ ...comment, author: memberMap.get(String(comment.author_id || "")) || null, mentioned_user_ids: Array.isArray(comment.mentioned_user_ids) ? comment.mentioned_user_ids : [] }));
+    return json({ thread: state, assignment: assignment[0] || null, comments: visibleComments, activity: activity.map((item) => ({ ...item, actor: memberMap.get(String(item.actor_id || "")) || null })), presence: presence.map((item) => ({ ...item, member: memberMap.get(String(item.user_id || "")) || null })), members });
+  }
+
+  const collaborationCommentMatch = url.pathname.match(/^\/api\/collaboration\/threads\/([^/]+)\/comments(?:\/([^/]+))?$/);
+  if (collaborationCommentMatch) {
+    const threadId = decodeURIComponent(collaborationCommentMatch[1]);
+    const commentId = collaborationCommentMatch[2] ? decodeURIComponent(collaborationCommentMatch[2]) : "";
+    const context = await collaborationThreadContext(env, user, threadId);
+    if (!context) return error("Conversation not found or not shared with you", 404);
+    await ensureCollaborationThread(env, context.ownerId, context.organization.id, threadId);
+    if (request.method === "POST" && !commentId) {
+      const body = (await request.json()) as JsonRecord;
+      const text = cleanCollaborationText(body.body, 4000);
+      if (!text) return error("Comment text is required");
+      const kind = collaborationCommentKind(body.kind);
+      const visibility = collaborationVisibility(body.visibility);
+      const requestedIds = Array.isArray(body.mentionedUserIds) ? body.mentionedUserIds.map(String).filter((id) => /^[0-9a-f-]{20,}$/i.test(id)).slice(0, 20) : [];
+      const members = await collaborationMembers(env, context.organization.id);
+      const memberIds = new Set(members.map((member) => member.user_id));
+      const mentionedUserIds = requestedIds.filter((id) => memberIds.has(id));
+      const rows = await dbRequest<JsonRecord[]>(env, "thread_comments", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: context.ownerId, organization_id: context.organization.id, thread_id: threadId, author_id: user.id, body: text, kind, visibility, mentioned_user_ids: mentionedUserIds }) });
+      await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, kind === "note" ? "internal_note_added" : "comment_added", { commentId: rows[0]?.id || null, visibility, mentionedUserIds, mentionedEmails: collaborationMentionEmails(text) });
+      const state = await ensureCollaborationThread(env, context.ownerId, context.organization.id, threadId);
+      await applyCollaborationPolicies(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "comment_added", state).catch(() => undefined);
+      return json(rows[0] || null, 201);
+    }
+    if (commentId && (request.method === "PATCH" || request.method === "DELETE")) {
+      const existing = await dbRequest<JsonRecord[]>(env, `thread_comments?id=eq.${encodeURIComponent(commentId)}&thread_id=eq.${encodeURIComponent(threadId)}&organization_id=eq.${encodeURIComponent(context.organization.id)}&limit=1`);
+      if (!existing[0]) return error("Comment not found", 404);
+      const canManage = String(existing[0].author_id || "") === user.id || context.member.role === "owner" || context.member.role === "admin";
+      if (!canManage) return error("Only the author or a workspace administrator can change this comment", 403);
+      if (request.method === "DELETE") {
+        await dbRequest(env, `thread_comments?id=eq.${encodeURIComponent(commentId)}&thread_id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", body: JSON.stringify({ deleted_at: new Date().toISOString(), body: "Comment removed", updated_at: new Date().toISOString() }) });
+        await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "comment_removed", { commentId });
+        return json({ ok: true });
+      }
+      const body = (await request.json()) as JsonRecord;
+      const text = cleanCollaborationText(body.body, 4000);
+      if (!text) return error("Comment text is required");
+      const rows = await dbRequest<JsonRecord[]>(env, `thread_comments?id=eq.${encodeURIComponent(commentId)}&thread_id=eq.${encodeURIComponent(threadId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ body: text, updated_at: new Date().toISOString() }) });
+      await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "comment_edited", { commentId });
+      return json(rows[0] || null);
+    }
+    return error("Comment route not found", 404);
+  }
+
+  const collaborationAssignmentMatch = url.pathname.match(/^\/api\/collaboration\/threads\/([^/]+)\/(assignment|presence)$/);
+  if (collaborationAssignmentMatch) {
+    const threadId = decodeURIComponent(collaborationAssignmentMatch[1]);
+    const operation = collaborationAssignmentMatch[2];
+    const context = await collaborationThreadContext(env, user, threadId);
+    if (!context) return error("Conversation not found or not shared with you", 404);
+    let state = await ensureCollaborationThread(env, context.ownerId, context.organization.id, threadId);
+    if (operation === "presence") {
+      if (request.method === "POST") {
+        const body = (await request.json()) as JsonRecord;
+        const presenceState = body.state === "composing" || body.state === "idle" ? body.state : "viewing";
+        await dbRequest(env, "collaboration_presence", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ organization_id: context.organization.id, thread_id: threadId, user_id: user.id, state: presenceState, last_seen_at: new Date().toISOString() }) });
+        return json({ ok: true, state: presenceState });
+      }
+      return error("Presence route requires POST", 405);
+    }
+    if (request.method !== "PATCH" && request.method !== "POST") return error("Assignment route requires PATCH or POST", 405);
+    const body = (await request.json()) as JsonRecord;
+    const members = await collaborationMembers(env, context.organization.id);
+    const assigneeId = body.assigneeId === null || body.assigneeId === "" || body.assigneeId === "unassigned" ? null : String(body.assigneeId || "");
+    if (assigneeId && !members.some((member) => member.user_id === assigneeId)) return error("Assignee must be an active workspace member", 400);
+    const nextPriority = body.priority === undefined ? state.priority : collaborationPriority(body.priority);
+    const nextStatus = body.status === undefined ? state.status : collaborationStatus(body.status);
+    const dueAt = body.slaDueAt === null ? null : typeof body.slaDueAt === "string" && Date.parse(body.slaDueAt) > Date.now() ? body.slaDueAt : body.slaMinutes !== undefined ? collaborationSlaDueAt(nextPriority, Date.now(), Number(body.slaMinutes)) : state.sla_due_at || collaborationSlaDueAt(nextPriority);
+    const patch: JsonRecord = { assignee_id: assigneeId, status: nextStatus, priority: nextPriority, sla_due_at: dueAt, sla_breached_at: null, updated_at: new Date().toISOString() };
+    const rows = await dbRequest<CollaborationThread[]>(env, `collaboration_threads?id=eq.${encodeURIComponent(String(state.id || ""))}&owner_id=eq.${encodeURIComponent(context.ownerId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    state = rows[0] || { ...state, ...patch } as CollaborationThread;
+    await dbRequest(env, "thread_assignments", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: context.ownerId, organization_id: context.organization.id, thread_id: threadId, assignee_id: assigneeId, assigned_by: user.id, status: ["resolved", "closed"].includes(nextStatus) ? "done" : nextStatus === "pending" ? "open" : "in_progress", due_at: dueAt, updated_at: new Date().toISOString() }) }).catch(() => undefined);
+    await collaborationActivity(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, "thread_assignment_updated", { assigneeId, status: nextStatus, priority: nextPriority, slaDueAt: dueAt });
+    const event: CollaborationEvent = body.priority !== undefined ? "priority_changed" : body.status !== undefined ? "status_changed" : "assignment_changed";
+    state = await applyCollaborationPolicies(env, { ownerId: context.ownerId, organizationId: context.organization.id, threadId }, user.id, event, state);
+    return json(state);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/collaboration/overview") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const [members, sharedItems, policies, threads, activity] = await Promise.all([
+      collaborationMembers(env, organization.id),
+      dbRequest<JsonRecord[]>(env, `collaboration_shared_items?organization_id=eq.${encodeURIComponent(organization.id)}&enabled=eq.true&order=kind.asc,name.asc&limit=500`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `collaboration_policies?organization_id=eq.${encodeURIComponent(organization.id)}&order=priority.asc,created_at.asc&limit=100`).catch(() => []),
+      dbRequest<CollaborationThread[]>(env, `collaboration_threads?organization_id=eq.${encodeURIComponent(organization.id)}&order=updated_at.desc&limit=1000`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `collaboration_activity?organization_id=eq.${encodeURIComponent(organization.id)}&order=created_at.desc&limit=100`).catch(() => []),
+    ]);
+    const statusCounts = threads.reduce<Record<string, number>>((result, row) => { result[row.status] = (result[row.status] || 0) + 1; return result; }, {});
+    const priorityCounts = threads.reduce<Record<string, number>>((result, row) => { result[row.priority] = (result[row.priority] || 0) + 1; return result; }, {});
+    return json({ organization: { id: organization.id, name: organization.name }, members, sharedItems, policies, activity, analytics: { totalThreads: threads.length, assignedThreads: threads.filter((row) => row.assignee_id).length, unassignedThreads: threads.filter((row) => !row.assignee_id).length, slaBreached: threads.filter((row) => collaborationSlaBreached(row.sla_due_at) || row.sla_breached_at).length, statusCounts, priorityCounts } });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/collaboration/shared-items") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    return json(await dbRequest(env, `collaboration_shared_items?organization_id=eq.${encodeURIComponent(organization.id)}&enabled=eq.true&order=kind.asc,name.asc&limit=500`));
+  }
+  if (request.method === "POST" && url.pathname === "/api/collaboration/shared-items") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const admin = await organizationAdmin(env, user);
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const body = (await request.json()) as JsonRecord;
+    const kind = ["template", "contact", "signature", "calendar", "label"].includes(String(body.kind)) ? String(body.kind) : "template";
+    const name = cleanCollaborationText(body.name, 120);
+    const payload = objectValue(body.payload);
+    if (!name) return error("A shared item name is required");
+    if (JSON.stringify(payload).length > 100_000) return error("Shared item data is too large");
+    const rows = await dbRequest<JsonRecord[]>(env, "collaboration_shared_items", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ organization_id: organization.id, created_by: user.id, kind, name, payload, enabled: true }) });
+    await collaborationActivity(env, { ownerId: organization.owner_id, organizationId: organization.id, threadId: null }, user.id, "shared_item_created", { kind, name }).catch(() => undefined);
+    return json(rows[0] || null, 201);
+  }
+  const collaborationSharedItemMatch = url.pathname.match(/^\/api\/collaboration\/shared-items\/([^/]+)$/);
+  if (collaborationSharedItemMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const admin = await organizationAdmin(env, user);
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const id = decodeURIComponent(collaborationSharedItemMatch[1]);
+    if (request.method === "DELETE") { await dbRequest(env, `collaboration_shared_items?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "DELETE" }); return json({ ok: true }); }
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (body.name !== undefined) patch.name = cleanCollaborationText(body.name, 120);
+    if (body.payload !== undefined) patch.payload = objectValue(body.payload);
+    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+    const rows = await dbRequest<JsonRecord[]>(env, `collaboration_shared_items?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/collaboration/policies") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    return json(await dbRequest(env, `collaboration_policies?organization_id=eq.${encodeURIComponent(organization.id)}&order=priority.asc,created_at.asc&limit=100`));
+  }
+  if (request.method === "POST" && url.pathname === "/api/collaboration/policies") {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const admin = await organizationAdmin(env, user);
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const body = (await request.json()) as JsonRecord;
+    const name = cleanCollaborationText(body.name, 120);
+    const kind = body.kind === "approval" ? "approval" : "escalation";
+    if (!name) return error("A policy name is required");
+    const conditions = objectValue(body.conditions);
+    const actions = objectValue(body.actions);
+    if (JSON.stringify(conditions).length > 10_000 || JSON.stringify(actions).length > 10_000) return error("Policy data is too large");
+    const rows = await dbRequest<JsonRecord[]>(env, "collaboration_policies", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ organization_id: organization.id, created_by: user.id, name, kind, priority: Math.max(0, Math.min(10_000, Number(body.priority || 100))), enabled: body.enabled !== false, conditions, actions }) });
+    return json(rows[0] || null, 201);
+  }
+  const collaborationPolicyMatch = url.pathname.match(/^\/api\/collaboration\/policies\/([^/]+)$/);
+  if (collaborationPolicyMatch && (request.method === "PATCH" || request.method === "DELETE")) {
+    if (!organization) return error("Workspace collaboration is unavailable", 503);
+    const admin = await organizationAdmin(env, user);
+    if (!admin) return error("Workspace administrator access is required", 403);
+    const id = decodeURIComponent(collaborationPolicyMatch[1]);
+    if (request.method === "DELETE") { await dbRequest(env, `collaboration_policies?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "DELETE" }); return json({ ok: true }); }
+    const body = (await request.json()) as JsonRecord;
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    if (body.name !== undefined) patch.name = cleanCollaborationText(body.name, 120);
+    if (body.conditions !== undefined) patch.conditions = objectValue(body.conditions);
+    if (body.actions !== undefined) patch.actions = objectValue(body.actions);
+    if (body.kind === "approval" || body.kind === "escalation") patch.kind = body.kind;
+    if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+    if (body.priority !== undefined) patch.priority = Math.max(0, Math.min(10_000, Number(body.priority)));
+    const rows = await dbRequest<JsonRecord[]>(env, `collaboration_policies?id=eq.${encodeURIComponent(id)}&organization_id=eq.${encodeURIComponent(organization.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/work") {
     const requestedState = url.searchParams.get("state");
     if (requestedState && !normalizeWorkState(requestedState)) return error("Work state is invalid", 400);
@@ -3778,9 +4314,16 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (!messageId || !reportType) return error("Message and report type are required");
     const message = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
     if (!message[0]) return error("Message not found", 404);
-    await dbRequest(env, "message_reports", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: messageId, report_type: reportType }) });
-    await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ folder: reportType === "phishing" ? "quarantine" : "spam", previous_folder: message[0].folder, updated_at: new Date().toISOString() }) });
-    return json({ ok: true, reportType });
+    const previousFolder = String(message[0].folder || "inbox");
+    await dbRequest(env, "message_reports", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: messageId, report_type: reportType, details: reportType === "phishing" ? "User reported suspected phishing; escalated to quarantine." : "User reported suspected spam." }) });
+    const existingReasons = Array.isArray(message[0].spam_reasons) ? message[0].spam_reasons.map(String) : [];
+    const existingEvidence = objectValue(message[0].trust_evidence);
+    const patch: JsonRecord = reportType === "phishing"
+      ? { folder: "quarantine", screening_status: "blocked", previous_folder: previousFolder, spam_score: Math.max(1, Number(message[0].spam_score || 0)), spam_reasons: [...new Set([...existingReasons, "user reported phishing", "automatic phishing escalation"])], trust_evidence: { ...existingEvidence, phishing_reported: true, phishing_escalated: true }, updated_at: new Date().toISOString() }
+      : { folder: "spam", screening_status: "blocked", previous_folder: previousFolder, spam_reasons: [...new Set([...existingReasons, "user reported spam"])], updated_at: new Date().toISOString() };
+    await dbRequest(env, `messages?id=eq.${encodeURIComponent(messageId)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify(patch) });
+    await dbRequest(env, "screening_events", { method: "POST", body: JSON.stringify({ owner_id: user.id, message_id: messageId, decision: reportType === "phishing" ? "blocked" : "screened", previous_folder: previousFolder }) }).catch(() => undefined);
+    return json({ ok: true, reportType, escalated: reportType === "phishing" });
   }
   if (request.method === "GET" && url.pathname === "/api/contacts") { const q = url.searchParams.get("q")?.trim(); const path = `contacts?owner_id=eq.${encodeURIComponent(user.id)}&order=display_name.asc${q ? `&or=${encodeURIComponent(`email.ilike.*${q}*,display_name.ilike.*${q}*`)}` : ""}`; return json(await dbRequest(env, path)); }
   if (request.method === "POST" && url.pathname === "/api/contacts") { const body = (await request.json()) as JsonRecord; const email = cleanAddress(String(body.email || "")); if (!email.includes("@")) return error("A valid email is required"); const avatarUrl = typeof body.avatarUrl === "string" && body.avatarUrl.trim() ? body.avatarUrl.trim() : null; if (avatarUrl && !/^https:\/\//i.test(avatarUrl)) return error("Profile image URL must use https://"); const rows = await dbRequest<JsonRecord[]>(env, "contacts", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, email, display_name: String(body.displayName || email.split("@")[0]), avatar_url: avatarUrl, company: body.company || null, notes: body.notes || null }) }); return json(rows[0], 201); }
@@ -3869,11 +4412,33 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
       const validation = validateRuleInput(normalized);
       if (validation.length) { failures.push({ index, error: validation.join("; ") }); continue; }
       try {
-        const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: normalized.name, priority: normalized.priority, enabled: normalized.enabled, conditions: normalized.conditions, actions: normalized.actions }) });
+        const triggerType = automationTrigger(objectValue(value).triggerType ?? objectValue(value).trigger_type);
+        const schedule = triggerType === "scheduled" ? automationSchedule(objectValue(value).schedule) : {};
+        const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: normalized.name, priority: normalized.priority, enabled: normalized.enabled, conditions: normalized.conditions, actions: normalized.actions, scope: "personal", organization_id: null, trigger_type: triggerType, schedule, next_run_at: triggerType === "scheduled" ? nextAutomationRun(schedule) : null }) });
         if (rows[0]) created.push(rows[0]);
       } catch (importError) {
         failures.push({ index, error: importError instanceof Error ? importError.message : "Could not import rule" });
       }
+    }
+    return json({ ok: failures.length === 0, imported: created.length, failures, rules: created }, failures.length && !created.length ? 400 : 200);
+  }
+  if (request.method === "GET" && url.pathname === "/api/rules/sieve") {
+    const rows = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`);
+    return new Response(rows.map(ruleToSieve).join("\n\n"), { headers: { "content-type": "application/sieve; charset=utf-8", "content-disposition": "attachment; filename=postveil-rules.sieve", "cache-control": "no-store" } });
+  }
+  if (request.method === "POST" && url.pathname === "/api/rules/sieve") {
+    const body = (await request.json()) as JsonRecord;
+    const source = String(body.sieve || "").slice(0, 100_000);
+    const parsed = parseSieveRules(source).slice(0, 100);
+    const created: JsonRecord[] = [];
+    const failures: Array<{ index: number; error: string }> = [];
+    for (const [index, rule] of parsed.entries()) {
+      const validation = validateRuleInput(rule);
+      if (validation.length) { failures.push({ index, error: validation.join("; ") }); continue; }
+      try {
+        const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, name: rule.name, priority: (index + 1) * 100, enabled: true, conditions: rule.conditions, actions: rule.actions, scope: "personal", organization_id: null, trigger_type: "inbound", schedule: {}, next_run_at: null, sieve_source: rule.sieve_source }) });
+        if (rows[0]) created.push(rows[0]);
+      } catch (sieveError) { failures.push({ index, error: sieveError instanceof Error ? sieveError.message : "Could not import Sieve rule" }); }
     }
     return json({ ok: failures.length === 0, imported: created.length, failures, rules: created }, failures.length && !created.length ? 400 : 200);
   }
@@ -3886,12 +4451,27 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const messageId = url.searchParams.get("messageId");
     return json(await dbRequest(env, `message_audit_log?owner_id=eq.${encodeURIComponent(user.id)}${messageId ? `&message_id=eq.${encodeURIComponent(messageId)}` : ""}&order=created_at.desc&limit=100`));
   }
-  if (request.method === "GET" && url.pathname === "/api/rules") return json(await dbRequest(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`));
+  if (request.method === "GET" && url.pathname === "/api/rules") {
+    const personal = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&scope=eq.personal&order=priority.asc,created_at.asc`).catch(() => dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`).catch(() => []));
+    const access = await organizationAdmin(env, user).catch(() => null);
+    const shared = access ? await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(access.organization.id)}&scope=eq.organization&order=priority.asc,created_at.asc`).catch(() => []) : [];
+    return json([...personal, ...shared].sort((left, right) => Number(left.priority || 0) - Number(right.priority || 0)));
+  }
   if (request.method === "POST" && url.pathname === "/api/rules") {
     const body = (await request.json()) as JsonRecord;
     const normalized = normalizeRuleRecord({ ...body, conditions: buildRuleConditions(body.conditions, body.exceptions) });
     const validation = validateRuleInput(normalized);
     if (validation.length) return error(validation.join("; "), 400);
+    const scope = body.scope === "organization" ? "organization" : "personal";
+    const triggerType = automationTrigger(body.triggerType ?? body.trigger_type);
+    const schedule = triggerType === "scheduled" ? automationSchedule(body.schedule) : {};
+    const nextRunAt = triggerType === "scheduled" ? (schedule.at && Date.parse(String(schedule.at)) > Date.now() ? schedule.at : nextAutomationRun(schedule)) : null;
+    let organizationId: string | null = null;
+    if (scope === "organization") {
+      const access = await organizationAdmin(env, user).catch(() => null);
+      if (!access) return error("Workspace administrator access is required for shared rules", 403);
+      organizationId = access.organization.id;
+    }
     const rows = await dbRequest<JsonRecord[]>(env, "mail_rules", {
       method: "POST",
       headers: { Prefer: "return=representation" },
@@ -3902,6 +4482,11 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
         enabled: normalized.enabled,
         conditions: normalized.conditions,
         actions: normalized.actions,
+        scope,
+        organization_id: organizationId,
+        trigger_type: triggerType,
+        schedule,
+        next_run_at: nextRunAt,
       }),
     });
     return json(rows[0], 201);
@@ -3910,10 +4495,12 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (ruleActionMatch && (request.method === "POST" || (request.method === "GET" && ruleActionMatch[2] === "conflicts"))) {
     const ruleId = ruleActionMatch[1];
     const action = ruleActionMatch[2];
-    const rows = await dbRequest<Rule[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleId)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
-    if (!rows[0]) return error("Rule not found", 404);
-    const rule = rows[0];
-    const allRules = await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`);
+    const lookup = await ruleForActor(env, user, ruleId);
+    if (!lookup) return error("Rule not found", 404);
+    const rule = lookup.rule;
+    const allRules = lookup.shared && rule.organization_id
+      ? await dbRequest<Rule[]>(env, `mail_rules?organization_id=eq.${encodeURIComponent(rule.organization_id)}&scope=eq.organization&order=priority.asc,created_at.asc`).catch(() => [rule])
+      : await dbRequest<Rule[]>(env, `mail_rules?owner_id=eq.${encodeURIComponent(user.id)}&order=priority.asc,created_at.asc`);
     const conflicts = ruleConflicts(rule, allRules);
     if (action === "conflicts") return json({ ruleId, conflicts });
     const sourceRows = await existingRuleMessages(env, user.id);
@@ -3938,13 +4525,12 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
     const result = await applyExistingRuleMatches(env, user.id, rule, runId, analysis.matches, sourceRows);
     await finishRuleRun(env, user.id, runId, { status: result.failures.length ? "failed" : "completed", matched_count: analysis.matches.length, changed_count: result.changedCount, sample: analysis.matches.slice(0, 20), error_message: result.failures[0]?.error || null });
-    await dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(rule.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ last_run_at: new Date().toISOString(), last_run_count: result.changedCount, last_error: result.failures[0]?.error || null }) });
+    await dbRequest(env, `mail_rules?id=eq.${encodeURIComponent(rule.id)}`, { method: "PATCH", body: JSON.stringify({ last_run_at: new Date().toISOString(), last_run_count: result.changedCount, last_error: result.failures[0]?.error || null }) });
     return json({ ok: result.failures.length === 0, runId, mode: "apply", matchedCount: analysis.matches.length, changedCount: result.changedCount, failures: result.failures, conflicts, undoable: result.changedCount > 0 });
   }
   const ruleRunsMatch = url.pathname.match(/^\/api\/rules\/([^/]+)\/runs$/);
   if (ruleRunsMatch && request.method === "GET") {
-    const exists = await dbRequest<Array<{ id: string }>>(env, `mail_rules?id=eq.${encodeURIComponent(ruleRunsMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
-    if (!exists[0]) return error("Rule not found", 404);
+    if (!(await ruleForActor(env, user, ruleRunsMatch[1]))) return error("Rule not found", 404);
     return json(await dbRequest(env, `mail_rule_runs?owner_id=eq.${encodeURIComponent(user.id)}&rule_id=eq.${encodeURIComponent(ruleRunsMatch[1])}&order=started_at.desc&limit=50`));
   }
   const ruleRunUndoMatch = url.pathname.match(/^\/api\/rule-runs\/([^/]+)\/undo$/);
@@ -3981,8 +4567,9 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   const ruleMatch = url.pathname.match(/^\/api\/rules\/([^/]+)$/);
   if (ruleMatch && request.method === "PATCH") {
     const body = (await request.json()) as JsonRecord;
-    const existing = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
-    if (!existing[0]) return error("Rule not found", 404);
+    const lookup = await ruleForActor(env, user, ruleMatch[1]);
+    if (!lookup) return error("Rule not found", 404);
+    const existing = [lookup.rule as JsonRecord];
     const candidateConditions = body.conditions !== undefined || body.exceptions !== undefined
       ? buildRuleConditions(body.conditions ?? existing[0].conditions, body.exceptions ?? objectValue(existing[0].conditions).exceptions)
       : existing[0].conditions;
@@ -3995,11 +4582,24 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (typeof body.priority === "number" && Number.isFinite(body.priority)) patch.priority = body.priority;
     if (body.conditions !== undefined || body.exceptions !== undefined) patch.conditions = candidate.conditions;
     if (body.actions !== undefined) patch.actions = objectValue(body.actions);
-    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    if (body.scope !== undefined || body.triggerType !== undefined || body.schedule !== undefined) {
+      if (lookup.shared && body.scope === "personal") return error("Shared rules cannot be changed into personal rules");
+      if (!lookup.shared && body.scope === "organization") {
+        const access = await organizationAdmin(env, user).catch(() => null);
+        if (!access) return error("Workspace administrator access is required for shared rules", 403);
+        patch.scope = "organization"; patch.organization_id = access.organization.id;
+      }
+      const triggerType = automationTrigger(body.triggerType ?? lookup.rule.trigger_type);
+      const schedule = triggerType === "scheduled" ? automationSchedule(body.schedule ?? lookup.rule.schedule) : {};
+      patch.trigger_type = triggerType; patch.schedule = schedule; patch.next_run_at = triggerType === "scheduled" ? nextAutomationRun(schedule) : null;
+    }
+    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
     return json(rows[0] || null);
   }
   if (ruleMatch && request.method === "DELETE") {
-    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE", headers: { Prefer: "return=representation" } });
+    const lookup = await ruleForActor(env, user, ruleMatch[1]);
+    if (!lookup) return error("Rule not found", 404);
+    const rows = await dbRequest<JsonRecord[]>(env, `mail_rules?id=eq.${encodeURIComponent(ruleMatch[1])}`, { method: "DELETE", headers: { Prefer: "return=representation" } });
     return json({ ok: true, deleted: rows.length });
   }
   if (ruleMatch && request.method === "POST" && ruleMatch[1].endsWith(":run")) {
@@ -4024,7 +4624,13 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (request.method === "GET" && url.pathname === "/api/compose-library") {
     const rows = await dbRequest<Array<{ id: string; payload?: JsonRecord }>>(env, `mail_events?owner_id=eq.${encodeURIComponent(user.id)}&event_type=eq.compose_library_item&order=created_at.desc&limit=100&select=id,payload`).catch(() => []);
-    return json(rows.map((row) => ({ ...objectValue(row.payload), id: row.id })));
+    const sharedRows = organization ? await dbRequest<Array<{ id: string; name: string; kind: string; payload?: JsonRecord }>>(env, `collaboration_shared_items?organization_id=eq.${encodeURIComponent(organization.id)}&kind=eq.template&enabled=eq.true&order=name.asc&limit=100&select=id,name,kind,payload`).catch(() => []) : [];
+    const shared = sharedRows.map((row) => {
+      const payload = objectValue(row.payload);
+      const text = String(payload.text_body || payload.text || "");
+      return { ...payload, id: `shared:${row.id}`, kind: "template", name: row.name, text_body: text, html_body: typeof payload.html_body === "string" ? payload.html_body : null, shared: true };
+    }).filter((row) => row.text_body || row.html_body);
+    return json([...rows.map((row) => ({ ...objectValue(row.payload), id: row.id })), ...shared]);
   }
   if (request.method === "POST" && url.pathname === "/api/compose-library") {
     const body = (await request.json()) as JsonRecord;
@@ -4042,6 +4648,96 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (request.method === "GET" && url.pathname === "/api/signatures") return json(await dbRequest(env, `signatures?owner_id=eq.${encodeURIComponent(user.id)}&order=name.asc`));
   if (request.method === "POST" && url.pathname === "/api/signatures") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "signatures", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: body.mailboxId || mailbox.id, name: String(body.name || "Default"), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, is_default: body.isDefault === true }) }); return json(rows[0], 201); }
+  if (request.method === "GET" && url.pathname === "/api/security/overview") {
+    const [privacy, events] = await Promise.all([
+      ensurePrivacySettings(env, user.id),
+      dbRequest<SecurityEvent[]>(env, `account_security_events?subject_user_id=eq.${encodeURIComponent(user.id)}&order=created_at.desc&limit=50`).catch(() => []),
+    ]);
+    return json({
+      privacy: privacySettingsView(privacy),
+      activity: events.map((event) => ({
+        id: event.id,
+        eventType: event.event_type,
+        sessionId: event.session_id,
+        ipFingerprint: event.ip_hash ? `${event.ip_hash.slice(0, 12)}…` : null,
+        userAgent: event.user_agent,
+        suspicious: event.is_suspicious,
+        details: event.details,
+        createdAt: event.created_at,
+      })),
+    });
+  }
+  if (request.method === "GET" && url.pathname === "/api/privacy-settings") return json(privacySettingsView(await ensurePrivacySettings(env, user.id)));
+  if (request.method === "PATCH" && url.pathname === "/api/privacy-settings") {
+    const body = (await request.json()) as JsonRecord;
+    const current = await ensurePrivacySettings(env, user.id);
+    const patch: JsonRecord = { updated_at: new Date().toISOString() };
+    const booleanKeys = [
+      "ai_processing_enabled",
+      "login_alerts_enabled",
+      "remote_images_enabled",
+      "privacy_analytics_enabled",
+      "metadata_minimization_enabled",
+      "external_portal_enabled",
+      "no_training_ai_policy_acknowledged",
+    ];
+    for (const key of booleanKeys) if (typeof body[key] === "boolean") patch[key] = body[key];
+    if (body.storage_region !== undefined) {
+      const region = String(body.storage_region || "default");
+      if (!["default", "ap-southeast-1", "us-east-1", "eu-west-1", "custom"].includes(region)) return error("Choose a supported storage region", 400);
+      patch.storage_region = region;
+    }
+    if (patch.ai_processing_enabled === true && patch.no_training_ai_policy_acknowledged !== true && current.no_training_ai_policy_acknowledged !== true) return error("Acknowledge the no-training AI policy before enabling AI processing", 409);
+    const rows = await dbRequest<PrivacySettings[]>(env, `user_privacy_settings?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    await dbRequest(env, "account_security_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ organization_id: null, actor_id: user.id, subject_user_id: user.id, event_type: "privacy_settings_updated", event_key: `privacy:${user.id}:${crypto.randomUUID()}`, details: { fields: Object.keys(patch).filter((key) => key !== "updated_at") } }) }).catch(() => undefined);
+    return json(privacySettingsView(rows[0] || { ...current, ...patch } as PrivacySettings));
+  }
+  if (request.method === "GET" && url.pathname === "/api/account/export") {
+    const owner = encodeURIComponent(user.id);
+    const [profile, settings, privacy, mailboxes, messages, attachments, folders, labels, contacts, rules, events] = await Promise.all([
+      dbRequest<JsonRecord[]>(env, `profiles?id=eq.${owner}&limit=1`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${owner}&limit=1`).catch(() => []),
+      dbRequest<PrivacySettings[]>(env, `user_privacy_settings?owner_id=eq.${owner}&limit=1`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `mailboxes?owner_id=eq.${owner}&order=created_at.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${owner}&order=created_at.asc&limit=10000`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `attachments?owner_id=eq.${owner}&order=created_at.asc&limit=10000`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `mail_folders?owner_id=eq.${owner}&order=sort_order.asc,name.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `labels?owner_id=eq.${owner}&order=name.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `contacts?owner_id=eq.${owner}&order=display_name.asc`).catch(() => []),
+      dbRequest<JsonRecord[]>(env, `mail_rules?owner_id=eq.${owner}&order=priority.asc,created_at.asc`).catch(() => []),
+      dbRequest<SecurityEvent[]>(env, `account_security_events?subject_user_id=eq.${owner}&order=created_at.desc&limit=1000`).catch(() => []),
+    ]);
+    await dbRequest(env, "account_security_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ actor_id: user.id, subject_user_id: user.id, event_type: "account_exported", event_key: `export:${user.id}:${crypto.randomUUID()}`, details: { messageCount: messages.length, attachmentCount: attachments.length } }) }).catch(() => undefined);
+    const payload = {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      account: { id: user.id, email: user.email || null },
+      profile: profile[0] || null,
+      settings: settings[0] || null,
+      privacy: privacySettingsView(privacy[0] || await ensurePrivacySettings(env, user.id)),
+      mailboxes,
+      messages,
+      attachments,
+      folders,
+      labels,
+      contacts,
+      rules,
+      securityEvents: events,
+      note: "Object-storage binaries are not embedded. Attachment metadata and object keys are included so a controlled export worker can stream them separately.",
+    };
+    return new Response(JSON.stringify(payload), { headers: { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="postveil-account-export-${new Date().toISOString().slice(0, 10)}.json"`, "cache-control": "no-store" } });
+  }
+  if (request.method === "POST" && url.pathname === "/api/account/delete") {
+    const body = (await request.json()) as JsonRecord;
+    const confirmation = String(body.confirmation || "");
+    const email = normalizeRecoveryEmail(String(body.email || ""));
+    if (confirmation !== "DELETE MY ACCOUNT" || !user.email || email !== normalizeRecoveryEmail(user.email)) return error("Type DELETE MY ACCOUNT and your sign-in email to continue", 400);
+    await dbRequest(env, "account_security_events", { method: "POST", headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }, body: JSON.stringify({ actor_id: user.id, subject_user_id: user.id, event_type: "account_deletion_requested", event_key: `delete:${user.id}:${crypto.randomUUID()}`, details: { confirmed: true } }) }).catch(() => undefined);
+    await purgeOwnerObjects(env, user.id);
+    const deleted = await adminAuthClient(env).auth.admin.deleteUser(user.id);
+    if (deleted.error) return error("The account could not be deleted", 502);
+    return json({ ok: true, deleted: true });
+  }
   if (request.method === "GET" && url.pathname === "/api/settings") { const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); return json({ ...(rows[0] || { owner_id: user.id }), send_undo_seconds: normalizeUndoSeconds(objectValue(mailbox.settings).send_undo_seconds, 0) }); }
   if (request.method === "PATCH" && url.pathname === "/api/settings") { const body = (await request.json()) as JsonRecord; const allowed = ["theme", "density", "reading_pane", "language", "timezone", "focused_inbox_enabled", "desktop_notifications", "push_subscription"]; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of allowed) if (key in body) patch[key] = body[key]; let undoSeconds = normalizeUndoSeconds(objectValue(mailbox.settings).send_undo_seconds, 0); if ("send_undo_seconds" in body) { undoSeconds = normalizeUndoSeconds(body.send_undo_seconds, undoSeconds); const currentMailboxSettings = objectValue(mailbox.settings); await dbRequest(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ settings: { ...currentMailboxSettings, send_undo_seconds: undoSeconds } }) }); } const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json({ ...(rows[0] || patch), send_undo_seconds: undoSeconds }); }
   if (request.method === "GET" && url.pathname === "/api/calendar") return json(await dbRequest(env, `calendar_events?owner_id=eq.${encodeURIComponent(user.id)}&order=starts_at.asc`));

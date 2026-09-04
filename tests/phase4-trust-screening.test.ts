@@ -48,6 +48,31 @@ test("records mismatch, first-seen, link-host, and tracking-pixel evidence", () 
   assert.ok(evidence.link_hosts.some((item) => item.host === "bit.ly" && item.shortened));
 });
 
+test("records anti-phishing identity, QR, attachment, and brand signals", () => {
+  const auth = normalizeAuthenticationResults([
+    { key: "Authentication-Results", value: "mx; spf=fail; dkim=pass; dmarc=fail; arc=pass; tls=pass" },
+    { key: "BIMI-Location", value: "https://brand.invalid/logo.svg" },
+    { key: "BIMI-Selector", value: "default" },
+  ]);
+  const evidence = extractTrustEvidence({
+    sender: "micros0ft-alerts@micros0ft.example",
+    fromName: "Microsoft account security",
+    mailboxAddress: "james@example.com",
+    replyTo: "help@credential.example",
+    htmlBody: '<img src="https://example.invalid/qr-code.png" alt="scan QR code"><a href="https://bit.ly/abc">Continue</a>',
+    authentication: auth,
+    attachments: [{ filename: "invoice.xlsm", mimeType: "application/vnd.ms-excel.sheet.macroEnabled.12" }],
+  });
+  assert.equal(auth.bimi_location, "https://brand.invalid/logo.svg");
+  assert.equal(auth.bimi_selector, "default");
+  assert.equal(evidence.lookalike_domain, "Microsoft");
+  assert.equal(evidence.display_name_spoof, true);
+  assert.equal(evidence.suspicious_reply_to, true);
+  assert.equal(evidence.qr_code_count, 1);
+  assert.equal(evidence.attachment_reputation[0]?.status, "suspicious");
+  assert.equal(evidence.brand_indicator.present, true);
+});
+
 test("policy precedence favors exact mailbox address over global domain", () => {
   const selected = selectSenderPolicy([
     { id: "domain", mailbox_id: null, match_type: "domain", match_value: "example.com", action: "spam", enabled: true },

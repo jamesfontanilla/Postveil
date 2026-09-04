@@ -227,6 +227,12 @@ type SenderPolicy = {
   target_folder_id?: string | null;
   enabled: boolean;
 };
+type OrganizationBlock = {
+  id: string;
+  match_type: "address" | "domain";
+  match_value: string;
+  enabled: boolean;
+};
 type RetentionPolicy = {
   id: string;
   name: string;
@@ -256,6 +262,7 @@ type ComposeLibraryItem = {
   id: string;
   kind: "template" | "canned" | "snippet";
   name: string;
+  shared?: boolean;
   subject?: string;
   text_body: string;
   html_body?: string | null;
@@ -270,7 +277,10 @@ type RuleConditionType =
   | "hasAttachment"
   | "isRead"
   | "isFlagged"
-  | "isPinned";
+  | "isPinned"
+  | "priority"
+  | "folder"
+  | "eventTypeContains";
 type RuleCondition = { type: RuleConditionType; value: string };
 type Rule = {
   id: string;
@@ -279,6 +289,11 @@ type Rule = {
   enabled: boolean;
   conditions: Record<string, unknown>;
   actions: Record<string, unknown>;
+  scope?: "personal" | "organization";
+  organization_id?: string | null;
+  trigger_type?: "inbound" | "event" | "scheduled";
+  schedule?: Record<string, unknown>;
+  next_run_at?: string | null;
 };
 type RuleLabMatch = {
   id: string;
@@ -300,6 +315,17 @@ type RuleLabResult = {
   failures?: Array<{ id: string; error: string }>;
   undoable?: boolean;
 };
+type RuleRun = {
+  id: string;
+  rule_id: string;
+  mode: "preview" | "dry_run" | "apply" | "replay";
+  status: string;
+  matched_count: number;
+  changed_count: number;
+  error_message?: string | null;
+  started_at: string;
+  completed_at?: string | null;
+};
 type AutoReply = {
   id?: string;
   mailbox_id?: string;
@@ -318,6 +344,28 @@ type AppSettings = {
   desktop_notifications?: boolean;
   send_undo_seconds?: 0 | 10 | 20 | 30;
 };
+type PrivacySettings = {
+  owner_id: string;
+  ai_processing_enabled: boolean;
+  login_alerts_enabled: boolean;
+  remote_images_enabled: boolean;
+  privacy_analytics_enabled: boolean;
+  metadata_minimization_enabled: boolean;
+  external_portal_enabled: boolean;
+  storage_region: string;
+  no_training_ai_policy_acknowledged: boolean;
+};
+type SecurityActivity = {
+  id: string;
+  eventType: string;
+  sessionId?: string | null;
+  ipFingerprint?: string | null;
+  userAgent?: string | null;
+  suspicious: boolean;
+  details?: Record<string, unknown>;
+  createdAt: string;
+};
+type SecurityOverview = { privacy: PrivacySettings; activity: SecurityActivity[] };
 type AdminMailbox = Mailbox & {
   owner_id: string;
   status: "active" | "suspended" | "archived" | string;
@@ -388,6 +436,13 @@ type WorkSummary = {
   overdue: number;
   total: number;
 };
+type CollaborationMember = { user_id: string; email: string; display_name: string; role: string; status: string };
+type CollaborationThreadState = { id?: string; owner_id: string; organization_id: string; thread_id: string; status: "new" | "open" | "pending" | "resolved" | "closed"; priority: "low" | "normal" | "high" | "urgent"; assignee_id?: string | null; sla_due_at?: string | null; sla_breached_at?: string | null };
+type CollaborationComment = { id: string; body: string; kind: "comment" | "note"; visibility: "team" | "private"; author_id?: string; author?: CollaborationMember | null; mentioned_user_ids?: string[]; created_at: string; deleted_at?: string | null };
+type CollaborationActivity = { id: string; event_type: string; payload?: Record<string, unknown>; actor?: CollaborationMember | null; created_at: string };
+type CollaborationPresence = { user_id: string; state: "viewing" | "composing" | "idle"; last_seen_at: string; member?: CollaborationMember | null };
+type CollaborationData = { thread: CollaborationThreadState; assignment?: Record<string, unknown> | null; comments: CollaborationComment[]; activity: CollaborationActivity[]; presence: CollaborationPresence[]; members: CollaborationMember[] };
+type CollaborationOverview = { organization: { id: string; name: string }; members: CollaborationMember[]; sharedItems: Array<{ id: string; kind: string; name: string; payload: Record<string, unknown> }>; policies: Array<{ id: string; name: string; kind: string; priority: number; enabled: boolean; conditions: Record<string, unknown>; actions: Record<string, unknown> }>; activity: CollaborationActivity[]; analytics: { totalThreads: number; assignedThreads: number; unassignedThreads: number; slaBreached: number; statusCounts: Record<string, number>; priorityCounts: Record<string, number> } };
 type CalendarEvent = {
   id: string;
   title: string;
@@ -630,7 +685,7 @@ type AppDialogOptions = {
 type AppPromptOptions = AppDialogOptions & {
   defaultValue?: string;
   placeholder?: string;
-  inputType?: "text" | "number";
+  inputType?: "text" | "number" | "email";
 };
 
 type AppDialogRequest =
@@ -651,7 +706,7 @@ type AppDialogRequest =
       danger: boolean;
       defaultValue: string;
       placeholder: string;
-      inputType: "text" | "number";
+      inputType: "text" | "number" | "email";
     };
 
 type AppDialogResult = boolean | string | null;
@@ -834,9 +889,36 @@ function AuthScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
+  const [ssoDomain, setSsoDomain] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  async function startSocialLogin(provider: "google" | "azure" | "github") {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await requireSupabase().auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } });
+      if (result.error) throw result.error;
+      if (result.data?.url) window.location.assign(result.data.url);
+    } catch (oauthError) {
+      setError(oauthError instanceof Error ? oauthError.message : "That sign-in provider is not available");
+      setBusy(false);
+    }
+  }
+  async function startOrganizationSso() {
+    const domain = ssoDomain.trim().toLowerCase().replace(/^@/, "");
+    if (!domain || !domain.includes(".")) { setError("Enter your organization email domain, such as company.com"); return; }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await requireSupabase().auth.signInWithSSO({ domain });
+      if (result.error) throw result.error;
+      if (result.data?.url) window.location.assign(result.data.url);
+    } catch (ssoError) {
+      setError(ssoError instanceof Error ? ssoError.message : "Organization SSO is not configured for that domain");
+      setBusy(false);
+    }
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -921,6 +1003,21 @@ function AuthScreen() {
             {busy ? "Working…" : mode === "forgot" ? "Send reset link" : mode === "recovery" ? "Request recovery link" : mode === "signin" ? "Open mailbox" : "Create account"}
           </button>
         </form>
+        {mode === "signin" && (
+          <div className="auth-sso" aria-label="Single sign-on options">
+            <div className="auth-divider"><span>OR CONTINUE WITH</span></div>
+            <div className="auth-provider-grid">
+              <button type="button" className="secondary-button" onClick={() => void startSocialLogin("google")} disabled={busy}>Google</button>
+              <button type="button" className="secondary-button" onClick={() => void startSocialLogin("azure")} disabled={busy}>Microsoft</button>
+              <button type="button" className="secondary-button" onClick={() => void startSocialLogin("github")} disabled={busy}>GitHub</button>
+            </div>
+            <div className="auth-sso-domain">
+              <label>Organization SSO domain<input value={ssoDomain} onChange={(event) => setSsoDomain(event.target.value)} placeholder="company.com" autoComplete="organization" /></label>
+              <button type="button" className="text-button" onClick={() => void startOrganizationSso()} disabled={busy || !ssoDomain.trim()}>Use SAML / custom OIDC SSO</button>
+            </div>
+            <small className="auth-sso-note">Providers must be enabled in the project’s Supabase Auth settings. Postveil never receives provider passwords.</small>
+          </div>
+        )}
         {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("forgot"); setError(""); setNotice(""); }}>Forgot your password?</button>}
         {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("recovery"); setError(""); setNotice(""); }}>Use a recovery code</button>}
         {mode !== "forgot" && mode !== "recovery" && <button className="text-button" onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setNotice(""); }}>
@@ -1698,7 +1795,7 @@ function Compose({
       {composeMode !== "plain" && <div className="compose-preview"><div className="compose-preview-label">Live preview</div><div dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(previewHtml || "<p>Preview appears here.</p>") }} /></div>}
       <div className="compose-variable-row"><span>Insert variable</span>{["first_name", "company", "email"].map((variable) => <button type="button" key={variable} onClick={() => insertVariable(variable)}>{`{{${variable}}}`}</button>)}</div>
     </div>
-    <div className="compose-option-row compose-studio-options"><button type="button" className="compose-option-button" onClick={() => setShowLibrary((current) => !current)} aria-expanded={showLibrary}>Templates & snippets</button>{showLibrary && <div className="compose-library"><div className="compose-library-head"><select value={libraryKind} onChange={(event) => setLibraryKind(event.target.value as ComposeLibraryItem["kind"])}><option value="template">Templates</option><option value="canned">Canned replies</option><option value="snippet">Snippets</option></select><button type="button" onClick={() => void saveLibraryItem()}>Save current</button></div>{library.filter((item) => item.kind === libraryKind).map((item) => <button type="button" key={item.id} onClick={() => applyLibraryItem(item)}><strong>{item.name}</strong><small>{item.subject || item.text_body.slice(0, 70)}</small></button>)}</div>}
+    <div className="compose-option-row compose-studio-options"><button type="button" className="compose-option-button" onClick={() => setShowLibrary((current) => !current)} aria-expanded={showLibrary}>Templates & snippets</button>{showLibrary && <div className="compose-library"><div className="compose-library-head"><select value={libraryKind} onChange={(event) => setLibraryKind(event.target.value as ComposeLibraryItem["kind"])}><option value="template">Templates</option><option value="canned">Canned replies</option><option value="snippet">Snippets</option></select><button type="button" onClick={() => void saveLibraryItem()}>Save current</button></div>{library.filter((item) => item.kind === libraryKind).map((item) => <button type="button" key={item.id} onClick={() => applyLibraryItem(item)}><strong>{item.name}{item.shared ? " · Team" : ""}</strong><small>{item.subject || item.text_body.slice(0, 70)}</small></button>)}</div>}
       {availableSignatures.length > 0 && <label className="compose-signature-select"><Tag size={14} aria-hidden="true" /><select value={signatureId} onChange={(event) => chooseSignature(event.target.value)} aria-label="Add signature"><option value="">Signature</option>{availableSignatures.map((signature) => <option key={signature.id} value={signature.id}>{signature.name}</option>)}</select></label>}
       <label className="schedule-field"><Clock3 size={14} aria-hidden="true" /><span>{scheduledAt ? "Scheduled" : "Deliver"}</span><select value={delayMinutes} onChange={(event) => setDelayMinutes(event.target.value)} aria-label="Delayed delivery"><option value="0">Now</option><option value="5">In 5 min</option><option value="15">In 15 min</option><option value="30">In 30 min</option><option value="60">In 1 hour</option></select></label><label className="schedule-field"><span>Send at</span><input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} aria-label="Schedule send" /></label><label className="schedule-field"><span>Zone</span><select value={timeZone} onChange={(event) => setTimeZone(event.target.value)} aria-label="Scheduling time zone"><option>{timeZone}</option><option>UTC</option><option>Asia/Manila</option><option>America/New_York</option><option>Europe/London</option><option>Australia/Sydney</option></select></label>
       <button type="button" className={`compose-option-button${showMoreOptions ? " is-active" : ""}`} onClick={() => setShowMoreOptions((current) => !current)} aria-expanded={showMoreOptions}>Delivery & privacy</button></div>
@@ -1721,6 +1818,9 @@ const ruleConditionLabels: Record<RuleConditionType, string> = {
   isRead: "Read status",
   isFlagged: "Flagged",
   isPinned: "Pinned",
+  priority: "Priority",
+  folder: "Folder",
+  eventTypeContains: "Event type contains",
 };
 const ruleConditionTypes = Object.keys(ruleConditionLabels) as RuleConditionType[];
 
@@ -1738,7 +1838,7 @@ function ruleConditionRecord(rows: RuleCondition[]): Record<string, unknown> {
     if (!value) return result;
     result[row.type] = ["hasAttachment", "isRead", "isFlagged", "isPinned"].includes(row.type)
       ? value === "true"
-      : value;
+      : row.type === "priority" ? Number(value) : value;
     return result;
   }, {});
 }
@@ -2073,6 +2173,94 @@ function csvLines(value: string): string[][] {
   });
 }
 
+function CollaborationPanel() {
+  const [overview, setOverview] = useState<CollaborationOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [sharedKind, setSharedKind] = useState("template");
+  const [sharedName, setSharedName] = useState("");
+  const [sharedContent, setSharedContent] = useState("");
+  const [policyName, setPolicyName] = useState("");
+  const [policyKind, setPolicyKind] = useState("escalation");
+  const [policyEvent, setPolicyEvent] = useState("message_received");
+  const [policyPriority, setPolicyPriority] = useState("normal");
+  const [policyStatus, setPolicyStatus] = useState("open");
+  const [policyAssignee, setPolicyAssignee] = useState("");
+  const [policySlaMinutes, setPolicySlaMinutes] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try { setOverview(await apiFetch<CollaborationOverview>("/api/collaboration/overview")); }
+    catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Collaboration workspace unavailable"); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function createShared(event: FormEvent) {
+    event.preventDefault();
+    if (!sharedName.trim() || !sharedContent.trim()) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await apiFetch("/api/collaboration/shared-items", { method: "POST", body: JSON.stringify({ kind: sharedKind, name: sharedName.trim(), payload: { text: sharedContent.trim() } }) });
+      setSharedName(""); setSharedContent(""); setNotice("Shared resource added to the workspace library"); await load();
+    } catch (createError) { setError(createError instanceof Error ? createError.message : "Shared resource could not be added"); }
+    finally { setBusy(false); }
+  }
+  async function removeShared(id: string) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/collaboration/shared-items/${id}`, { method: "DELETE" }); setNotice("Shared resource removed"); await load(); }
+    catch (removeError) { setError(removeError instanceof Error ? removeError.message : "Shared resource could not be removed"); }
+    finally { setBusy(false); }
+  }
+  async function createPolicy(event: FormEvent) {
+    event.preventDefault();
+    if (!policyName.trim()) return;
+    setBusy(true); setError(""); setNotice("");
+    const actions: Record<string, unknown> = { status: policyStatus, priority: policyPriority };
+    if (policyAssignee) actions.assigneeId = policyAssignee;
+    if (policySlaMinutes) actions.slaMinutes = Number(policySlaMinutes);
+    try {
+      await apiFetch("/api/collaboration/policies", { method: "POST", body: JSON.stringify({ name: policyName.trim(), kind: policyKind, conditions: { event: policyEvent }, actions, priority: (overview?.policies.length || 0) * 100 + 100 }) });
+      setPolicyName(""); setPolicyAssignee(""); setPolicySlaMinutes(""); setNotice("Workspace workflow saved"); await load();
+    } catch (policyError) { setError(policyError instanceof Error ? policyError.message : "Workflow could not be saved"); }
+    finally { setBusy(false); }
+  }
+  async function togglePolicy(policy: CollaborationOverview["policies"][number]) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/collaboration/policies/${policy.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !policy.enabled }) }); setNotice(policy.enabled ? "Workflow paused" : "Workflow enabled"); await load(); }
+    catch (toggleError) { setError(toggleError instanceof Error ? toggleError.message : "Workflow could not be updated"); }
+    finally { setBusy(false); }
+  }
+  async function removePolicy(id: string) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/collaboration/policies/${id}`, { method: "DELETE" }); setNotice("Workflow removed"); await load(); }
+    catch (removeError) { setError(removeError instanceof Error ? removeError.message : "Workflow could not be removed"); }
+    finally { setBusy(false); }
+  }
+
+  if (loading) return <div className="admin-loading" role="status">Loading team collaboration…</div>;
+  if (!overview) return <div className="settings-alert settings-error" role="alert">{error || "Team collaboration is unavailable"}</div>;
+  const resources = overview.sharedItems || [];
+  return <div className="collaboration-console">
+    <div className="admin-toolbar">
+      <div><p className="eyebrow">TEAM COLLABORATION</p><h3>{overview.organization.name}</h3><p>Coordinate shared inbox work with clear ownership, private notes, and a traceable activity trail.</p></div>
+      <button className="secondary-button" onClick={() => void load()} disabled={busy}><RefreshCcw size={14} /> Refresh</button>
+    </div>
+    {error && <div className="settings-alert settings-error" role="alert">{error}</div>}
+    {notice && <div className="form-notice" role="status">{notice}</div>}
+    <div className="collaboration-stats"><div><strong>{overview.analytics.totalThreads}</strong><span>Tracked conversations</span></div><div><strong>{overview.analytics.assignedThreads}</strong><span>Assigned</span></div><div><strong>{overview.analytics.unassignedThreads}</strong><span>Unassigned</span></div><div className={overview.analytics.slaBreached ? "is-warning" : ""}><strong>{overview.analytics.slaBreached}</strong><span>SLA breaches</span></div></div>
+    <div className="collaboration-grid">
+      <section className="setting-card"><div className="setting-card-head"><div><h3>Workspace members</h3><p>Members can collaborate on delegated or shared mailbox conversations.</p></div><Users size={18} /></div><div className="collaboration-member-list">{overview.members.map((member) => <div className="collaboration-member" key={member.user_id}><span className="collaboration-avatar">{(member.display_name || member.email).slice(0, 1).toUpperCase()}</span><div><strong>{member.display_name || member.email}</strong><small>{member.email}</small></div><span className={`admin-badge ${member.role === "owner" || member.role === "admin" ? "active" : "member"}`}>{member.role}</span></div>)}</div></section>
+      <section className="setting-card"><div className="setting-card-head"><div><h3>Shared library</h3><p>Team templates, contacts, signatures, labels, and calendar resources.</p></div><Tag size={18} /></div><form className="collaboration-form" onSubmit={(event) => void createShared(event)}><div className="admin-form-row"><label>Resource type<select value={sharedKind} onChange={(event) => setSharedKind(event.target.value)}><option value="template">Team template</option><option value="contact">Shared contact</option><option value="signature">Shared signature</option><option value="label">Shared label</option><option value="calendar">Shared calendar item</option></select></label><label>Name<input value={sharedName} onChange={(event) => setSharedName(event.target.value)} placeholder="Support reply" required /></label></div><label>Content or resource details<textarea value={sharedContent} onChange={(event) => setSharedContent(event.target.value)} placeholder="Reusable text, contact details, or calendar information" rows={3} required /></label><button className="primary-button" disabled={busy}><Plus size={15} /> Add shared resource</button></form><div className="collaboration-resource-list">{resources.map((item) => <div className="collaboration-resource" key={item.id}><div><span className="collaboration-resource-kind">{item.kind}</span><strong>{item.name}</strong><small>{String(item.payload?.text || "Shared with the workspace")}</small></div><button className="text-button danger-text-button" onClick={() => void removeShared(item.id)} disabled={busy} aria-label={`Remove ${item.name}`}><Trash2 size={14} /></button></div>)}{!resources.length && <div className="rule-empty">No shared resources yet.</div>}</div></section>
+      <section className="setting-card collaboration-workflow-card"><div className="setting-card-head"><div><h3>Approval and escalation rules</h3><p>Automate assignment, priorities, status, and SLA deadlines for workspace events.</p></div><ShieldAlert size={18} /></div><form className="collaboration-form" onSubmit={(event) => void createPolicy(event)}><div className="admin-form-row"><label>Rule name<input value={policyName} onChange={(event) => setPolicyName(event.target.value)} placeholder="Urgent inbound triage" required /></label><label>Rule type<select value={policyKind} onChange={(event) => setPolicyKind(event.target.value)}><option value="escalation">Escalation</option><option value="approval">Approval</option></select></label></div><div className="admin-form-row"><label>When<select value={policyEvent} onChange={(event) => setPolicyEvent(event.target.value)}><option value="message_received">A message arrives</option><option value="comment_added">A team comment is added</option><option value="assignment_changed">Assignment changes</option><option value="status_changed">Status changes</option><option value="priority_changed">Priority changes</option></select></label><label>Priority<select value={policyPriority} onChange={(event) => setPolicyPriority(event.target.value)}><option value="urgent">Urgent</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label></div><div className="admin-form-row"><label>Set status<select value={policyStatus} onChange={(event) => setPolicyStatus(event.target.value)}><option value="new">New</option><option value="open">Open</option><option value="pending">Pending</option><option value="resolved">Resolved</option></select></label><label>Assign to<select value={policyAssignee} onChange={(event) => setPolicyAssignee(event.target.value)}><option value="">Leave unassigned</option>{overview.members.filter((member) => member.status === "active").map((member) => <option key={member.user_id} value={member.user_id}>{member.display_name || member.email}</option>)}</select></label></div><label>SLA minutes<input type="number" min="0" max="10080" value={policySlaMinutes} onChange={(event) => setPolicySlaMinutes(event.target.value)} placeholder="Default by priority" /></label><button className="primary-button" disabled={busy}><Plus size={15} /> Add workflow</button></form><div className="collaboration-policy-list">{overview.policies.map((policy) => <div className="collaboration-policy" key={policy.id}><div><strong>{policy.name}</strong><small>{policy.kind} · {String(policy.conditions?.event || "event")} · {policy.enabled ? "enabled" : "paused"}</small></div><div className="security-actions"><button className="text-button" onClick={() => void togglePolicy(policy)} disabled={busy}>{policy.enabled ? "Pause" : "Enable"}</button><button className="text-button danger-text-button" onClick={() => void removePolicy(policy.id)} disabled={busy}>Remove</button></div></div>)}{!overview.policies.length && <div className="rule-empty">No workspace workflows configured.</div>}</div></section>
+      <section className="setting-card"><div className="setting-card-head"><div><h3>Team activity</h3><p>Recent assignments, comments, SLA events, and shared-resource changes.</p></div><History size={18} /></div><div className="collaboration-activity-list">{overview.activity.slice(0, 12).map((item) => <div className="collaboration-activity" key={item.id}><span className="collaboration-activity-dot" /><div><strong>{item.event_type.replace(/_/g, " ")}</strong><small>{item.actor?.display_name || item.actor?.email || "Workspace member"} · {new Date(item.created_at).toLocaleString()}</small></div></div>)}{!overview.activity.length && <div className="rule-empty">No collaboration activity yet.</div>}</div></section>
+    </div>
+  </div>;
+}
+
 function SettingsPanel({
   session,
   settings,
@@ -2104,10 +2292,12 @@ function SettingsPanel({
   const [tab, setTab] = useState<
     | "appearance"
     | "security"
+    | "privacy"
     | "organize"
     | "contacts"
     | "spam"
     | "automation"
+    | "collaboration"
     | "mailboxes"
     | "integrations"
     | "administration"
@@ -2129,6 +2319,11 @@ function SettingsPanel({
   const [policyBusy, setPolicyBusy] = useState(false);
   const [screeningQueue, setScreeningQueue] = useState<Message[]>([]);
   const [screeningBusy, setScreeningBusy] = useState<string | null>(null);
+  const [organizationBlocklist, setOrganizationBlocklist] = useState<OrganizationBlock[]>([]);
+  const [organizationBlocklistAvailable, setOrganizationBlocklistAvailable] = useState(false);
+  const [organizationBlockType, setOrganizationBlockType] = useState<OrganizationBlock["match_type"]>("domain");
+  const [organizationBlockValue, setOrganizationBlockValue] = useState("");
+  const [organizationBlockBusy, setOrganizationBlockBusy] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleName, setRuleName] = useState("");
   const [ruleConditions, setRuleConditions] = useState<RuleCondition[]>([
@@ -2144,6 +2339,18 @@ function SettingsPanel({
   const [rulePriorityAction, setRulePriorityAction] = useState("ignore");
   const [ruleLabel, setRuleLabel] = useState("");
   const [ruleForwardTo, setRuleForwardTo] = useState("");
+  const [ruleSnoozeMinutes, setRuleSnoozeMinutes] = useState("");
+  const [ruleAssignTo, setRuleAssignTo] = useState("");
+  const [ruleAutoReply, setRuleAutoReply] = useState(false);
+  const [ruleWebhookUrl, setRuleWebhookUrl] = useState("");
+  const [ruleWebhookSecret, setRuleWebhookSecret] = useState("");
+  const [ruleCreateTask, setRuleCreateTask] = useState("");
+  const [ruleCreateCalendarEvent, setRuleCreateCalendarEvent] = useState(false);
+  const [ruleStoreInB2, setRuleStoreInB2] = useState(false);
+  const [ruleScope, setRuleScope] = useState<"personal" | "organization">("personal");
+  const [ruleTriggerType, setRuleTriggerType] = useState<"inbound" | "event" | "scheduled">("inbound");
+  const [ruleSchedule, setRuleSchedule] = useState<"hourly" | "daily" | "weekly">("daily");
+  const [ruleScheduleAt, setRuleScheduleAt] = useState("");
   const [ruleStop, setRuleStop] = useState(true);
   const [ruleEnabled, setRuleEnabled] = useState(true);
   const [rulePosition, setRulePosition] = useState(100);
@@ -2173,13 +2380,19 @@ function SettingsPanel({
   const [passkeyBusy, setPasskeyBusy] = useState(false);
   const [recoveryCodeCount, setRecoveryCodeCount] = useState(0);
   const [generatedRecoveryCodes, setGeneratedRecoveryCodes] = useState<string[]>([]);
+  const [securityOverview, setSecurityOverview] = useState<SecurityOverview | null>(null);
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings | null>(null);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [accountExportBusy, setAccountExportBusy] = useState(false);
   const [retentionPolicies, setRetentionPolicies] = useState<RetentionPolicy[]>([]);
   const [retentionName, setRetentionName] = useState("");
   const [retentionScope, setRetentionScope] = useState<RetentionPolicy["scope"]>("all");
   const [retentionDays, setRetentionDays] = useState("365");
   const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
   const [ruleLabBusy, setRuleLabBusy] = useState(false);
+  const [ruleRuns, setRuleRuns] = useState<RuleRun[]>([]);
   const ruleImportRef = useRef<HTMLInputElement>(null);
+  const sieveImportRef = useRef<HTMLInputElement>(null);
   async function updateSettings(patch: JsonSettings) {
     await apiFetch("/api/settings", {
       method: "PATCH",
@@ -2291,6 +2504,53 @@ function SettingsPanel({
     try { setScreeningQueue(await apiFetch<Message[]>("/api/screening/queue")); }
     catch (caught) { setNotice(caught instanceof Error ? caught.message : "Screening queue unavailable"); }
   }
+  async function loadRuleRuns() {
+    try { setRuleRuns(await apiFetch<RuleRun[]>("/api/rule-runs")); }
+    catch (caught) { setNotice(caught instanceof Error ? caught.message : "Rule history unavailable"); }
+  }
+  async function loadOrganizationBlocklist() {
+    try {
+      setOrganizationBlocklist(await apiFetch<OrganizationBlock[]>("/api/admin/organization-blocklist"));
+      setOrganizationBlocklistAvailable(true);
+    } catch {
+      setOrganizationBlocklistAvailable(false);
+    }
+  }
+  async function createOrganizationBlock() {
+    if (!organizationBlockValue.trim()) {
+      setNotice(`Enter a ${organizationBlockType === "domain" ? "domain" : "sender address"}`);
+      return;
+    }
+    setOrganizationBlockBusy(true);
+    try {
+      await apiFetch<OrganizationBlock>("/api/admin/organization-blocklist", { method: "POST", body: JSON.stringify({ matchType: organizationBlockType, matchValue: organizationBlockValue }) });
+      setOrganizationBlockValue("");
+      setNotice("Organization block saved");
+      await loadOrganizationBlocklist();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Organization block could not be saved");
+    } finally {
+      setOrganizationBlockBusy(false);
+    }
+  }
+  async function toggleOrganizationBlock(block: OrganizationBlock) {
+    try {
+      await apiFetch(`/api/admin/organization-blocklist/${block.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !block.enabled }) });
+      await loadOrganizationBlocklist();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Organization block could not be updated");
+    }
+  }
+  async function deleteOrganizationBlock(block: OrganizationBlock) {
+    if (!(await confirm({ title: "Remove organization block?", message: `New mail matching ${block.match_value} will follow normal screening rules.`, confirmLabel: "Remove block", danger: true }))) return;
+    try {
+      await apiFetch(`/api/admin/organization-blocklist/${block.id}`, { method: "DELETE" });
+      setNotice("Organization block removed");
+      await loadOrganizationBlocklist();
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "Organization block could not be removed");
+    }
+  }
   async function decideScreening(message: Message, decision: "approve" | "block" | "reroute") {
     setScreeningBusy(message.id);
     try {
@@ -2342,6 +2602,18 @@ function SettingsPanel({
     setRulePriorityAction("ignore");
     setRuleLabel("");
     setRuleForwardTo("");
+    setRuleSnoozeMinutes("");
+    setRuleAssignTo("");
+    setRuleAutoReply(false);
+    setRuleWebhookUrl("");
+    setRuleWebhookSecret("");
+    setRuleCreateTask("");
+    setRuleCreateCalendarEvent(false);
+    setRuleStoreInB2(false);
+    setRuleScope("personal");
+    setRuleTriggerType("inbound");
+    setRuleSchedule("daily");
+    setRuleScheduleAt("");
     setRuleStop(true);
     setRuleEnabled(true);
     setRulePosition(Math.max(100, ...rules.map((rule) => rule.priority + 100)));
@@ -2365,6 +2637,18 @@ function SettingsPanel({
     setRulePriorityAction(typeof actions.priority === "number" ? String(actions.priority) : "ignore");
     setRuleLabel(typeof actions.label === "string" ? actions.label : "");
     setRuleForwardTo(typeof actions.forwardTo === "string" ? actions.forwardTo : "");
+    setRuleSnoozeMinutes(typeof actions.snoozeMinutes === "number" ? String(actions.snoozeMinutes) : "");
+    setRuleAssignTo(typeof actions.assignTo === "string" ? actions.assignTo : "");
+    setRuleAutoReply(actions.autoReply === true);
+    setRuleWebhookUrl(typeof actions.webhookUrl === "string" ? actions.webhookUrl : "");
+    setRuleWebhookSecret(typeof actions.webhookSecret === "string" ? actions.webhookSecret : "");
+    setRuleCreateTask(typeof actions.createTask === "string" ? actions.createTask : "");
+    setRuleCreateCalendarEvent(actions.createCalendarEvent === true);
+    setRuleStoreInB2(actions.storeInB2 === true);
+    setRuleScope(rule.scope === "organization" ? "organization" : "personal");
+    setRuleTriggerType(rule.trigger_type === "event" || rule.trigger_type === "scheduled" ? rule.trigger_type : "inbound");
+    setRuleSchedule(rule.schedule?.frequency === "hourly" || rule.schedule?.frequency === "weekly" ? rule.schedule.frequency : "daily");
+    setRuleScheduleAt(typeof rule.schedule?.at === "string" ? String(rule.schedule.at).slice(0, 16) : "");
     setRuleStop(actions.stopProcessing !== false);
     setRuleEnabled(rule.enabled);
     setRulePosition(rule.priority);
@@ -2391,6 +2675,14 @@ function SettingsPanel({
     if (rulePriorityAction !== "ignore") actions.priority = Number(rulePriorityAction);
     if (ruleLabel.trim()) actions.label = ruleLabel.trim();
     if (ruleForwardTo.trim()) actions.forwardTo = ruleForwardTo.trim();
+    if (ruleSnoozeMinutes.trim()) actions.snoozeMinutes = Number(ruleSnoozeMinutes);
+    if (ruleAssignTo.trim()) actions.assignTo = ruleAssignTo.trim();
+    if (ruleAutoReply) actions.autoReply = true;
+    if (ruleWebhookUrl.trim()) actions.webhookUrl = ruleWebhookUrl.trim();
+    if (ruleWebhookSecret.trim()) actions.webhookSecret = ruleWebhookSecret.trim();
+    if (ruleCreateTask.trim()) actions.createTask = ruleCreateTask.trim();
+    if (ruleCreateCalendarEvent) actions.createCalendarEvent = true;
+    if (ruleStoreInB2) actions.storeInB2 = true;
     if (!ruleName.trim()) {
       setNotice("Name the rule before saving");
       return;
@@ -2418,6 +2710,9 @@ function SettingsPanel({
           conditions,
           exceptions,
           actions,
+          scope: ruleScope,
+          triggerType: ruleTriggerType,
+          schedule: ruleTriggerType === "scheduled" ? { frequency: ruleSchedule, at: ruleScheduleAt ? new Date(ruleScheduleAt).toISOString() : null } : {},
         }),
       });
       resetRuleEditor();
@@ -2537,6 +2832,23 @@ function SettingsPanel({
       setNotice(caught instanceof Error ? caught.message : "Rules file could not be imported");
     }
   }
+  async function exportSieve() {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch("/api/rules/sieve", { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) throw new Error(`Sieve export failed (${response.status})`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "postveil-rules.sieve"; link.click(); URL.revokeObjectURL(url);
+      setNotice("Sieve rules exported");
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Sieve rules could not be exported"); }
+  }
+  async function importSieve(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
+    try {
+      const result = await apiFetch<{ imported: number; failures: Array<{ index: number; error: string }> }>("/api/rules/sieve", { method: "POST", body: JSON.stringify({ sieve: await file.text() }) });
+      setNotice(`${result.imported} Sieve rule${result.imported === 1 ? "" : "s"} imported${result.failures.length ? ` · ${result.failures.length} skipped` : ""}`); onChanged();
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Sieve rules could not be imported"); }
+  }
   async function createSignature() {
     if (!signatureName.trim()) return;
     await apiFetch("/api/signatures", {
@@ -2609,8 +2921,63 @@ function SettingsPanel({
       setPasskeys((passkeyResult.data || []) as Passkey[]);
       const recoveryCodeStatus = await apiFetch<{ remaining: number }>("/api/recovery-codes/status");
       setRecoveryCodeCount(recoveryCodeStatus.remaining);
+      const overview = await apiFetch<SecurityOverview>("/api/security/overview");
+      setSecurityOverview(overview);
+      setPrivacySettings(overview.privacy);
+      onLoadRemoteImagesChange(overview.privacy.remote_images_enabled);
     } catch (loadError) {
       setSecurityError(loadError instanceof Error ? loadError.message : "Security settings unavailable");
+    }
+  }
+  async function updatePrivacy(patch: Partial<PrivacySettings>) {
+    setPrivacyBusy(true);
+    setSecurityError("");
+    try {
+      const next = await apiFetch<PrivacySettings>("/api/privacy-settings", { method: "PATCH", body: JSON.stringify(patch) });
+      setPrivacySettings(next);
+      if ("remote_images_enabled" in patch) onLoadRemoteImagesChange(next.remote_images_enabled);
+      setNotice("Privacy preferences saved");
+      const overview = await apiFetch<SecurityOverview>("/api/security/overview");
+      setSecurityOverview(overview);
+    } catch (privacyError) {
+      setSecurityError(privacyError instanceof Error ? privacyError.message : "Privacy preferences could not be saved");
+    } finally {
+      setPrivacyBusy(false);
+    }
+  }
+  async function exportAccountData() {
+    setAccountExportBusy(true);
+    setSecurityError("");
+    try {
+      const authSession = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch("/api/account/export", { headers: authSession?.access_token ? { authorization: `Bearer ${authSession.access_token}` } : {} });
+      if (!response.ok) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || `Export failed (${response.status})`); }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a"); link.href = url; link.download = `postveil-account-export-${new Date().toISOString().slice(0, 10)}.json`; link.click(); URL.revokeObjectURL(url);
+      setNotice("Account export downloaded");
+      const overview = await apiFetch<SecurityOverview>("/api/security/overview"); setSecurityOverview(overview);
+    } catch (exportError) {
+      setSecurityError(exportError instanceof Error ? exportError.message : "Account export could not be downloaded");
+    } finally {
+      setAccountExportBusy(false);
+    }
+  }
+  async function deleteAccount() {
+    const email = await prompt({ title: "Delete your Postveil account?", message: "This permanently removes your mailbox data and cannot be undone. Enter your sign-in email to continue.", placeholder: session.user.email || "you@example.com", inputType: "email", confirmLabel: "Continue", danger: true });
+    if (!email || email.trim().toLowerCase() !== (session.user.email || "").toLowerCase()) { if (email) setSecurityError("The sign-in email did not match."); return; }
+    const phrase = await prompt({ title: "Confirm permanent deletion", message: "Type DELETE MY ACCOUNT exactly. Your mailbox and tracked storage objects will be removed.", placeholder: "DELETE MY ACCOUNT", confirmLabel: "Delete account", danger: true });
+    if (phrase !== "DELETE MY ACCOUNT") { if (phrase !== null) setSecurityError("The confirmation phrase did not match."); return; }
+    setSecurityBusy(true);
+    setSecurityError("");
+    try {
+      await apiFetch("/api/account/delete", { method: "POST", body: JSON.stringify({ email, confirmation: phrase }) });
+      await requireSupabase().auth.signOut({ scope: "global" });
+      window.location.reload();
+    } catch (deleteError) {
+      setSecurityError(deleteError instanceof Error ? deleteError.message : "The account could not be deleted");
+    } finally {
+      setSecurityBusy(false);
     }
   }
   async function registerPasskey() {
@@ -2859,8 +3226,9 @@ function SettingsPanel({
       );
   }, [tab]);
   useEffect(() => {
-    if (tab === "security") void loadSecurity();
-    if (tab === "spam") void loadScreeningQueue();
+    if (tab === "security" || tab === "privacy") void loadSecurity();
+    if (tab === "spam") { void loadScreeningQueue(); void loadOrganizationBlocklist(); }
+    if (tab === "automation") void loadRuleRuns();
     if (tab === "organize") void loadRetentionPolicies();
   }, [tab]);
   useEffect(() => {
@@ -2875,6 +3243,28 @@ function SettingsPanel({
       document.body.style.overflow = previousOverflow;
     };
   }, [onClose]);
+  const activePrivacy: PrivacySettings = privacySettings || {
+    owner_id: session.user.id,
+    ai_processing_enabled: false,
+    login_alerts_enabled: true,
+    remote_images_enabled: loadRemoteImages,
+    privacy_analytics_enabled: false,
+    metadata_minimization_enabled: true,
+    external_portal_enabled: true,
+    storage_region: "default",
+    no_training_ai_policy_acknowledged: false,
+  };
+  const securityChecks = [
+    { label: "Passkey or hardware security key", enabled: passkeys.length > 0 },
+    { label: "Authenticator app (TOTP)", enabled: mfaFactors.length > 0 },
+    { label: "Recovery codes saved", enabled: recoveryCodeCount > 0 },
+    { label: "Verified recovery email", enabled: recoveryMethods.some((method) => Boolean(method.verified_at)) },
+    { label: "Login alerts", enabled: activePrivacy.login_alerts_enabled },
+    { label: "Remote images blocked", enabled: !activePrivacy.remote_images_enabled },
+    { label: "Metadata minimization", enabled: activePrivacy.metadata_minimization_enabled },
+    { label: "AI processing off by default", enabled: !activePrivacy.ai_processing_enabled },
+  ];
+  const securityScore = Math.round((securityChecks.filter((check) => check.enabled).length / securityChecks.length) * 100);
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -2896,10 +3286,12 @@ function SettingsPanel({
             [
               ["appearance", "Appearance"],
               ["security", "Security & access"],
+              ["privacy", "Privacy & encryption"],
               ["organize", "Folders & labels"],
               ["contacts", "Contacts"],
               ["spam", "Spam & trust"],
               ["automation", "Rules & signatures"],
+              ["collaboration", "Team collaboration"],
               ["mailboxes", "Mailboxes"],
               ["administration", "Administration"],
               ["integrations", "Integrations"],
@@ -2915,6 +3307,7 @@ function SettingsPanel({
           ))}
         </div>
         {tab === "security" && securityError && <div className="settings-alert settings-error" role="alert">{securityError}</div>}
+        {tab === "collaboration" && <CollaborationPanel />}
         {tab === "security" && (
           <div className="settings-grid security-settings-grid">
             <div className="setting-card">
@@ -2984,6 +3377,55 @@ function SettingsPanel({
               <p>Postveil keeps your recovery addresses separate from your sign-in email. A recovery request never reveals whether an account exists, and every reset link is one-time.</p>
               <small className="field-help">Keep at least one recovery address available and store your authenticator app on a device you control. Recovery email can reset access; it cannot bypass an enabled authenticator challenge.</small>
             </div>
+          </div>
+        )}
+        {tab === "privacy" && (
+          <div className="privacy-center">
+            <div className="privacy-hero">
+              <div>
+                <p className="eyebrow">SECURITY CHECKLIST</p>
+                <h3>Your account protection</h3>
+                <p>Review the controls that protect sign-in, mailbox content, and external sharing.</p>
+              </div>
+              <div className={`security-score security-score-${securityScore >= 80 ? "good" : securityScore >= 50 ? "fair" : "low"}`} aria-label={`Security score ${securityScore} out of 100`}><strong>{securityScore}</strong><span>/ 100</span><small>security score</small></div>
+            </div>
+            <div className="setting-card privacy-checklist-card">
+              <div className="setting-card-head"><div><h3>Checklist</h3><p>Complete the high-value controls first. Hardware keys are supported through passkeys.</p></div><ShieldAlert size={18} aria-hidden="true" /></div>
+              <div className="security-checklist">{securityChecks.map((check) => <div className={`security-check ${check.enabled ? "is-complete" : ""}`} key={check.label}><span aria-hidden="true">{check.enabled ? "✓" : "·"}</span><strong>{check.label}</strong><small>{check.enabled ? "Protected" : "Recommended"}</small></div>)}</div>
+            </div>
+            <div className="setting-card privacy-controls-card">
+              <div className="setting-card-head"><div><h3>Privacy controls</h3><p>These choices are stored per account. Postveil does not use mailbox content for analytics.</p></div><ShieldAlert size={18} aria-hidden="true" /></div>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.login_alerts_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ login_alerts_enabled: event.target.checked })} /><span><strong>Login alerts</strong><small>Notify this mailbox when a new sign-in looks unfamiliar.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={!activePrivacy.remote_images_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ remote_images_enabled: !event.target.checked })} /><span><strong>Block remote images by default</strong><small>Inline images still work. Remote images load only through the privacy proxy after you allow them.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.metadata_minimization_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ metadata_minimization_enabled: event.target.checked })} /><span><strong>Minimize metadata</strong><small>Keep diagnostic details limited to what is needed for delivery, abuse prevention, and your security history.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.privacy_analytics_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ privacy_analytics_enabled: event.target.checked })} /><span><strong>Privacy-preserving product analytics</strong><small>Off by default. Only aggregate, non-message interaction counts may be collected when enabled.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.no_training_ai_policy_acknowledged} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ no_training_ai_policy_acknowledged: event.target.checked })} /><span><strong>Acknowledge the no-training AI policy</strong><small>AI providers must be configured with a no-training setting before mailbox text can be sent to them.</small></span></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.ai_processing_enabled} disabled={privacyBusy || !activePrivacy.no_training_ai_policy_acknowledged} onChange={(event) => void updatePrivacy({ ai_processing_enabled: event.target.checked })} /><span><strong>Allow AI processing</strong><small>Disabled by default. When enabled, only the minimum requested text should be sent for an on-demand feature.</small></span></label>
+              <label className="privacy-select-row"><span><strong>Storage region preference</strong><small>This preference is saved now; actual routing requires a matching storage deployment.</small></span><select value={activePrivacy.storage_region} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ storage_region: event.target.value })}><option value="default">Deployment default</option><option value="ap-southeast-1">Asia Pacific</option><option value="us-east-1">United States</option><option value="eu-west-1">European Union</option><option value="custom">Custom organization region</option></select></label>
+              <label className="privacy-toggle"><input type="checkbox" checked={activePrivacy.external_portal_enabled} disabled={privacyBusy} onChange={(event) => void updatePrivacy({ external_portal_enabled: event.target.checked })} /><span><strong>Protected external-message portal</strong><small>Allow expiring, optionally password-protected links for recipients outside Postveil.</small></span></label>
+            </div>
+            <div className="setting-card encryption-boundary-card">
+              <div className="setting-card-head"><div><h3>Encryption boundary</h3><p>These labels describe what is actually protected in the current deployment.</p></div><ShieldAlert size={18} aria-hidden="true" /></div>
+              <div className="capability-row"><div><strong>Transport encryption</strong><small>TLS is required for the application and provider callbacks.</small></div><span className="capability-status ready">Active</span></div>
+              <div className="capability-row"><div><strong>Protected message portal</strong><small>Payloads are encrypted at rest with a Worker secret and expire automatically.</small></div><span className="capability-status ready">Active</span></div>
+              <div className="capability-row"><div><strong>Client-side E2EE, PGP, key transparency, and user-held keys</strong><small>Not active. Ordinary SMTP cannot provide universal E2EE, and this server-side mailbox path still handles plaintext for delivery.</small></div><span className="capability-status pending">Not enabled</span></div>
+              <div className="capability-row"><div><strong>Encrypted attachments, encrypted backups, key escrow, and automatic rotation</strong><small>Requires a dedicated envelope-key service and migration of existing stored objects before it can be enabled safely.</small></div><span className="capability-status pending">Architecture required</span></div>
+            </div>
+            <div className="setting-card enterprise-identity-card">
+              <div className="setting-card-head"><div><h3>Identity providers</h3><p>Social OAuth buttons and domain-based SAML/custom OIDC sign-in are available on the login screen when enabled in Supabase Auth.</p></div><Users size={18} aria-hidden="true" /></div>
+              <div className="capability-row"><div><strong>Google, Microsoft, and GitHub</strong><small>OAuth credentials and redirect URLs must be configured in Supabase before users can sign in.</small></div><span className="capability-status setup">Project setup</span></div>
+              <div className="capability-row"><div><strong>SAML 2.0 and custom OIDC</strong><small>Organization domain-based SSO is supported by Supabase Auth. Register the provider and domain before advertising it to members.</small></div><span className="capability-status setup">Organization setup</span></div>
+            </div>
+            <div className="setting-card data-rights-card">
+              <div className="setting-card-head"><div><h3>Your data</h3><p>Export your mailbox data or permanently remove the account. Exported JSON includes message content and attachment metadata, not binary object-storage files.</p></div><Download size={18} aria-hidden="true" /></div>
+              <div className="security-actions"><button className="secondary-button" onClick={() => void exportAccountData()} disabled={accountExportBusy}>{accountExportBusy ? "Preparing export…" : "Export my data"}</button><button className="danger-outline-button" onClick={() => void deleteAccount()} disabled={securityBusy}>Delete account</button></div>
+            </div>
+            <div className="setting-card security-activity-card">
+              <div className="setting-card-head"><div><h3>Recent security activity</h3><p>IP addresses are shown as short fingerprints rather than stored in readable form.</p></div><History size={18} aria-hidden="true" /></div>
+              {(securityOverview?.activity || []).slice(0, 12).map((event) => <div className="settings-item" key={event.id}><div><strong>{event.eventType.replace(/_/g, " ")}</strong><small>{new Date(event.createdAt).toLocaleString()} · {event.ipFingerprint || "no IP fingerprint"}</small></div>{event.suspicious && <span className="admin-badge security"><ShieldAlert size={12} /> Review</span>}</div>)}
+              {!securityOverview?.activity.length && <div className="rule-empty">No security events recorded yet.</div>}
+            </div>
+            <div className="privacy-disclosure"><strong>Important:</strong> Postveil does not claim universal end-to-end encryption. Use the protected portal or compatible PGP clients for recipients who cannot receive encrypted mail directly.</div>
           </div>
         )}
         {tab === "appearance" && (
@@ -3274,6 +3716,33 @@ function SettingsPanel({
                 </div>
               ))}
             </div>
+            {organizationBlocklistAvailable && <div className="setting-card policy-list-card organization-blocklist-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Organization blocklist</h3>
+                  <p>Administrators can stop a sender or domain for every mailbox in this workspace.</p>
+                </div>
+                <ShieldAlert size={18} aria-hidden="true" />
+              </div>
+              <div className="policy-form">
+                <select value={organizationBlockType} onChange={(event) => setOrganizationBlockType(event.target.value as OrganizationBlock["match_type"])} aria-label="Organization block type">
+                  <option value="domain">This domain</option>
+                  <option value="address">This email address</option>
+                </select>
+                <input value={organizationBlockValue} onChange={(event) => setOrganizationBlockValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createOrganizationBlock(); }} placeholder={organizationBlockType === "domain" ? "example.com" : "sender@example.com"} aria-label="Organization block value" />
+                <button className="secondary-button" onClick={() => void createOrganizationBlock()} disabled={organizationBlockBusy}><ShieldAlert size={15} /> {organizationBlockBusy ? "Saving…" : "Block for workspace"}</button>
+              </div>
+              <small className="field-help">This runs before personal sender decisions. It never overrides confirmed malware blocking.</small>
+              {organizationBlocklist.length === 0 ? <div className="rule-empty">No organization-wide blocks yet.</div> : organizationBlocklist.map((block) => (
+                <div className={`settings-item policy-item ${block.enabled ? "" : "disabled"}`} key={block.id}>
+                  <div className="policy-copy"><strong>{block.match_value}</strong><small>{block.match_type} · workspace-wide</small></div>
+                  <div className="rule-list-actions">
+                    <label className="rule-toggle" title={block.enabled ? "Pause organization block" : "Enable organization block"}><input type="checkbox" checked={block.enabled} onChange={() => void toggleOrganizationBlock(block)} aria-label={`${block.enabled ? "Disable" : "Enable"} organization block for ${block.match_value}`} /><span /></label>
+                    <button className="icon-button compact-icon danger-icon" onClick={() => void deleteOrganizationBlock(block)} aria-label={`Remove organization block for ${block.match_value}`} title="Remove"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>}
             <div className="setting-card screening-queue-card">
               <div className="setting-card-head">
                 <div>
@@ -3463,6 +3932,7 @@ function SettingsPanel({
                     onChange={(event) => setRuleLabel(event.target.value)}
                     placeholder="Add label (optional)"
                     list="rule-labels"
+                    aria-label="Add label"
                   />
                   <datalist id="rule-labels">{labels.map((label) => <option key={label.id} value={label.name} />)}</datalist>
                   <input
@@ -3470,7 +3940,49 @@ function SettingsPanel({
                     onChange={(event) => setRuleForwardTo(event.target.value)}
                     placeholder="Forward to (optional)"
                     type="email"
+                    aria-label="Forward to"
                   />
+                  <input
+                    value={ruleSnoozeMinutes}
+                    onChange={(event) => setRuleSnoozeMinutes(event.target.value)}
+                    placeholder="Snooze minutes (optional)"
+                    type="number"
+                    min="1"
+                    max="43200"
+                    aria-label="Snooze minutes"
+                  />
+                  <input
+                    value={ruleAssignTo}
+                    onChange={(event) => setRuleAssignTo(event.target.value)}
+                    placeholder="Assign to account id or self"
+                    aria-label="Assign to account id or self"
+                  />
+                  <input
+                    value={ruleCreateTask}
+                    onChange={(event) => setRuleCreateTask(event.target.value)}
+                    placeholder="Create task (optional title)"
+                    aria-label="Create task title"
+                  />
+                  <input
+                    value={ruleWebhookUrl}
+                    onChange={(event) => setRuleWebhookUrl(event.target.value)}
+                    placeholder="Webhook URL (HTTPS)"
+                    type="url"
+                    aria-label="Webhook URL"
+                  />
+                  {ruleWebhookUrl && <input
+                    value={ruleWebhookSecret}
+                    onChange={(event) => setRuleWebhookSecret(event.target.value)}
+                    placeholder="Webhook signing secret (optional)"
+                    type="password"
+                    autoComplete="new-password"
+                    aria-label="Webhook signing secret"
+                  />}
+                </div>
+                <div className="rule-automation-options">
+                  <label className="toggle-row"><input type="checkbox" checked={ruleAutoReply} onChange={(event) => setRuleAutoReply(event.target.checked)} /> Send automatic reply</label>
+                  <label className="toggle-row"><input type="checkbox" checked={ruleCreateCalendarEvent} onChange={(event) => setRuleCreateCalendarEvent(event.target.checked)} /> Create calendar event</label>
+                  <label className="toggle-row"><input type="checkbox" checked={ruleStoreInB2} onChange={(event) => setRuleStoreInB2(event.target.checked)} /> Save a private copy to object storage</label>
                 </div>
                 <label className="toggle-row">
                   <input type="checkbox" checked={ruleStop} onChange={(event) => setRuleStop(event.target.checked)} /> Stop processing more rules
@@ -3478,6 +3990,16 @@ function SettingsPanel({
                 <label className="toggle-row">
                   <input type="checkbox" checked={ruleEnabled} onChange={(event) => setRuleEnabled(event.target.checked)} /> Rule is enabled
                 </label>
+              </div>
+              <div className="rule-builder-section rule-trigger-section">
+                <div className="rule-section-label">Run this automation</div>
+                <div className="rule-trigger-grid">
+                  <label>Scope<select value={ruleScope} onChange={(event) => setRuleScope(event.target.value as typeof ruleScope)}><option value="personal">My mailboxes</option><option value="organization">Shared with workspace</option></select></label>
+                  <label>Trigger<select value={ruleTriggerType} onChange={(event) => setRuleTriggerType(event.target.value as typeof ruleTriggerType)}><option value="inbound">When new mail arrives</option><option value="event">When a mail event occurs</option><option value="scheduled">On a schedule</option></select></label>
+                  {ruleTriggerType === "event" && <small className="rule-muted">Add an “Event type contains” condition above, such as delivered, bounced, or opened.</small>}
+                  {ruleTriggerType === "scheduled" && <><label>Frequency<select value={ruleSchedule} onChange={(event) => setRuleSchedule(event.target.value as typeof ruleSchedule)}><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label><label>First run<input type="datetime-local" value={ruleScheduleAt} onChange={(event) => setRuleScheduleAt(event.target.value)} /></label></>}
+                </div>
+                <small className="rule-muted">Organization rules require workspace administrator access. Scheduled and event rules are processed by the Worker queue.</small>
               </div>
               <div className="rule-builder-footer">
                 <small className="rule-muted">Rules are evaluated from top to bottom.</small>
@@ -3496,6 +4018,9 @@ function SettingsPanel({
                   <button className="text-button" onClick={() => void exportRules()} title="Download rules as JSON"><Download size={13} /> Export</button>
                   <button className="text-button" onClick={() => ruleImportRef.current?.click()} title="Import rules from JSON"><Upload size={13} /> Import</button>
                   <input ref={ruleImportRef} className="sr-only" type="file" accept="application/json,.json" onChange={(event) => void importRules(event)} />
+                  <button className="text-button" onClick={() => void exportSieve()} title="Download Sieve-compatible rules">Sieve export</button>
+                  <button className="text-button" onClick={() => sieveImportRef.current?.click()} title="Import basic Sieve rules">Sieve import</button>
+                  <input ref={sieveImportRef} className="sr-only" type="file" accept="text/plain,.sieve" onChange={(event) => void importSieve(event)} />
                   <span className="rule-count">{rules.length}</span>
                 </div>
               </div>
@@ -3530,6 +4055,16 @@ function SettingsPanel({
                   </article>
                 );
               })}
+            </div>
+            <div className="setting-card rule-history-card">
+              <div className="setting-card-head">
+                <div>
+                  <h3>Execution history</h3>
+                  <p>Preview, dry-run, scheduled, and applied runs stay visible for review.</p>
+                </div>
+                <span className="rule-count">{ruleRuns.length}</span>
+              </div>
+              {ruleRuns.length === 0 ? <div className="rule-empty">No rule runs yet.</div> : ruleRuns.slice(0, 12).map((run) => <div className="settings-item rule-history-item" key={run.id}><div><strong>{rules.find((rule) => rule.id === run.rule_id)?.name || "Rule run"}</strong><small>{run.mode.replace(/_/g, " ")} · {run.status} · {run.matched_count} matched · {run.changed_count} changed</small></div><time dateTime={run.started_at}>{new Date(run.started_at).toLocaleString()}</time></div>)}
             </div>
             {ruleLab && (
               <div className="setting-card rule-lab-panel" aria-live="polite">
@@ -3956,6 +4491,11 @@ function MailboxApp({ session }: { session: Session }) {
   const [selected, setSelected] = useState<Message | null>(null);
   const [inlineImageUrls, setInlineImageUrls] = useState<Record<string, string>>({});
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
+  const [collaborationData, setCollaborationData] = useState<CollaborationData | null>(null);
+  const [collaborationBusy, setCollaborationBusy] = useState(false);
+  const [collaborationComment, setCollaborationComment] = useState("");
+  const [collaborationCommentKind, setCollaborationCommentKind] = useState<"comment" | "note">("comment");
+  const [collaborationCommentVisibility, setCollaborationCommentVisibility] = useState<"team" | "private">("team");
   const [detailLoading, setDetailLoading] = useState(false);
   const detailRequestRef = useRef(0);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -4427,6 +4967,14 @@ function MailboxApp({ session }: { session: Session }) {
     return () => window.clearTimeout(timer);
   }, [query, filter, sort, folder, view, loadMessages]);
   useEffect(() => {
+    const threadId = selected?.thread_id;
+    if (!threadId) return;
+    void loadCollaboration(threadId);
+    void updateCollaborationPresence("viewing");
+    const timer = window.setInterval(() => { void loadCollaboration(threadId); void updateCollaborationPresence("viewing"); }, 15_000);
+    return () => { window.clearInterval(timer); void updateCollaborationPresence("idle"); };
+  }, [selected?.thread_id]);
+  useEffect(() => {
     if (!searchFocused) return;
     const timer = window.setTimeout(() => {
       void apiFetch<SearchSuggestion[]>(`/api/search/suggestions?q=${encodeURIComponent(query)}`)
@@ -4435,6 +4983,32 @@ function MailboxApp({ session }: { session: Session }) {
     }, 160);
     return () => window.clearTimeout(timer);
   }, [query, searchFocused]);
+  async function loadCollaboration(threadId: string) {
+    try { setCollaborationData(await apiFetch<CollaborationData>(`/api/collaboration/threads/${encodeURIComponent(threadId)}`)); }
+    catch { setCollaborationData(null); }
+  }
+  async function updateCollaboration(patch: Record<string, unknown>) {
+    if (!selected?.thread_id) return;
+    setCollaborationBusy(true); setError("");
+    try { await apiFetch<CollaborationThreadState>(`/api/collaboration/threads/${encodeURIComponent(selected.thread_id)}/assignment`, { method: "PATCH", body: JSON.stringify(patch) }); await loadCollaboration(selected.thread_id); }
+    catch (collaborationError) { setError(collaborationError instanceof Error ? collaborationError.message : "Collaboration update failed"); }
+    finally { setCollaborationBusy(false); }
+  }
+  async function addCollaborationComment() {
+    if (!selected?.thread_id || !collaborationComment.trim()) return;
+    setCollaborationBusy(true); setError("");
+    const mentionedUserIds = (collaborationData?.members || []).filter((member) => collaborationComment.toLowerCase().includes(member.email.toLowerCase())).map((member) => member.user_id);
+    try {
+      await apiFetch(`/api/collaboration/threads/${encodeURIComponent(selected.thread_id)}/comments`, { method: "POST", body: JSON.stringify({ body: collaborationComment, kind: collaborationCommentKind, visibility: collaborationCommentVisibility, mentionedUserIds }) });
+      setCollaborationComment("");
+      await loadCollaboration(selected.thread_id);
+    } catch (commentError) { setError(commentError instanceof Error ? commentError.message : "Comment could not be posted"); }
+    finally { setCollaborationBusy(false); }
+  }
+  async function updateCollaborationPresence(state: "viewing" | "composing" | "idle") {
+    if (!selected?.thread_id) return;
+    await apiFetch(`/api/collaboration/threads/${encodeURIComponent(selected.thread_id)}/presence`, { method: "POST", body: JSON.stringify({ state }) }).catch(() => undefined);
+  }
   async function openMessage(message: Message) {
     const requestId = detailRequestRef.current + 1;
     detailRequestRef.current = requestId;
@@ -4447,6 +5021,8 @@ function MailboxApp({ session }: { session: Session }) {
     setDetailLoading(true);
     setError("");
     setShowAllThreadMessages(false);
+    setCollaborationData(null);
+    setCollaborationComment("");
     setShowMessageDetails(false);
     setThreadMessages([]);
     setTrustLensOpen(false);
@@ -4458,6 +5034,9 @@ function MailboxApp({ session }: { session: Session }) {
       const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
       if (detailRequestRef.current !== requestId) return;
       setSelected(detail);
+      void apiFetch<TrustData>(`/api/mail/${message.id}/trust`).then((trust) => {
+        if (detailRequestRef.current === requestId) setTrustData(trust);
+      }).catch(() => undefined);
       const inlineAttachments = (detail.attachments || []).filter((attachment) => attachment.content_id);
       if (inlineAttachments.length) {
         const inlineResults = await Promise.all(inlineAttachments.map(async (attachment) => {
@@ -4475,6 +5054,7 @@ function MailboxApp({ session }: { session: Session }) {
       const thread = await apiFetch<Message[]>(`/api/threads/${message.thread_id}`);
       if (detailRequestRef.current !== requestId) return;
       setThreadMessages(thread);
+      void loadCollaboration(message.thread_id);
       if (!message.is_read) {
         await apiFetch(`/api/mail/${message.id}`, {
           method: "POST",
@@ -4734,6 +5314,12 @@ function MailboxApp({ session }: { session: Session }) {
   }
   async function reportSelectedMessage(reportType: "spam" | "phishing") {
     if (!selected) return;
+    if (reportType === "phishing" && !(await confirm({
+      title: "Report this message as phishing?",
+      message: "This will move the message to Quarantine and escalate it as a suspected phishing attempt. You can still review it there.",
+      confirmLabel: "Report phishing",
+      danger: true,
+    }))) return;
     try {
       await apiFetch("/api/mail/report", { method: "POST", body: JSON.stringify({ messageId: selected.id, reportType }) });
       setBulkNotice(reportType === "phishing" ? "Reported as phishing and moved to Quarantine" : "Reported as spam");
@@ -5542,6 +6128,7 @@ function MailboxApp({ session }: { session: Session }) {
                     <div><span className="eyebrow">HISTORY</span><strong>{messages.filter((item) => item.from_address.toLowerCase() === detailIdentity?.email.toLowerCase()).length} visible messages</strong><small>{selectedContact ? "Saved contact" : "Not saved as a contact"}</small></div>
                   </div>
                 </details>
+                {collaborationData && <section className="collaboration-thread-card" aria-label="Team workspace"><div className="collaboration-thread-head"><div><p className="eyebrow">TEAM WORKSPACE</p><h3>Conversation collaboration</h3><small>{collaborationData.presence.some((item) => item.user_id !== session.user.id && item.state === "composing") ? "Someone is replying right now" : collaborationData.presence.some((item) => item.user_id !== session.user.id) ? "A teammate is viewing this conversation" : "Only you are viewing this conversation"}</small></div><Users size={17} /></div><div className="collaboration-thread-controls"><label>Status<select value={collaborationData.thread.status} onChange={(event) => void updateCollaboration({ status: event.target.value })} disabled={collaborationBusy}><option value="new">New</option><option value="open">Open</option><option value="pending">Pending</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><label>Priority<select value={collaborationData.thread.priority} onChange={(event) => void updateCollaboration({ priority: event.target.value })} disabled={collaborationBusy}><option value="urgent">Urgent</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label><label>Owner<select value={collaborationData.thread.assignee_id || ""} onChange={(event) => void updateCollaboration({ assigneeId: event.target.value || null })} disabled={collaborationBusy}><option value="">Unassigned</option>{collaborationData.members.filter((member) => member.status === "active").map((member) => <option key={member.user_id} value={member.user_id}>{member.display_name || member.email}</option>)}</select></label></div><div className={`collaboration-sla ${collaborationData.thread.sla_breached_at ? "is-breached" : ""}`}><Clock3 size={14} /><span><strong>{collaborationData.thread.sla_breached_at ? "SLA breached" : "SLA target"}</strong><small>{collaborationData.thread.sla_due_at ? new Date(collaborationData.thread.sla_due_at).toLocaleString() : "Not set"}</small></span></div>{collaborationData.presence.filter((item) => item.user_id !== session.user.id).length > 0 && <div className="collaboration-presence-list">{collaborationData.presence.filter((item) => item.user_id !== session.user.id).map((item) => <span key={item.user_id}><span className="presence-dot" />{item.member?.display_name || item.member?.email || "Teammate"}{item.state === "composing" ? " is replying…" : " is viewing"}</span>)}</div>}<div className="collaboration-comment-form"><div className="collaboration-comment-options"><select value={collaborationCommentKind} onChange={(event) => setCollaborationCommentKind(event.target.value as "comment" | "note")} aria-label="Collaboration message type"><option value="comment">Team comment</option><option value="note">Internal note</option></select><select value={collaborationCommentVisibility} onChange={(event) => setCollaborationCommentVisibility(event.target.value as "team" | "private")} aria-label="Comment visibility"><option value="team">Visible to team</option><option value="private">Private to admins and author</option></select></div><textarea value={collaborationComment} onChange={(event) => { setCollaborationComment(event.target.value); void updateCollaborationPresence("composing"); }} onFocus={() => void updateCollaborationPresence("composing")} onBlur={() => void updateCollaborationPresence("viewing")} placeholder="Add a comment or internal note… Mention a teammate by email." rows={3} /><button className="secondary-button" onClick={() => void addCollaborationComment()} disabled={collaborationBusy || !collaborationComment.trim()}><Send size={14} /> Post to team</button></div>{collaborationData.comments.length > 0 && <div className="collaboration-comments">{collaborationData.comments.filter((comment) => !comment.deleted_at).slice(-8).map((comment) => <article className={`collaboration-comment ${comment.kind === "note" ? "is-note" : ""}`} key={comment.id}><div className="collaboration-comment-meta"><strong>{comment.author?.display_name || comment.author?.email || "Workspace member"}</strong><span>{comment.kind === "note" ? "Internal note" : "Comment"} · {comment.visibility === "private" ? "Private" : "Team"}</span><time>{new Date(comment.created_at).toLocaleString()}</time></div><p>{comment.body}</p></article>)}</div>}{collaborationData.activity.length > 0 && <details className="collaboration-thread-history"><summary><History size={14} /> Conversation activity</summary><div>{collaborationData.activity.slice(-8).reverse().map((item) => <p key={item.id}><strong>{item.event_type.replace(/_/g, " ")}</strong><small>{item.actor?.display_name || item.actor?.email || "Workspace member"} · {new Date(item.created_at).toLocaleString()}</small></p>)}</div></details>}</section>}
                 {selected.spam_reasons && selected.spam_reasons.length > 0 && (
                   <div className="signal-box">
                     <ShieldAlert size={15} />
@@ -5551,6 +6138,35 @@ function MailboxApp({ session }: { session: Session }) {
                     </div>
                   </div>
                 )}
+                {(() => {
+                  const evidence = selected.trust_evidence || {};
+                  const auth = selected.auth_results || {};
+                  const authStatus = (key: "spf" | "dkim" | "dmarc" | "arc" | "tls") => String(selected[`auth_${key}` as keyof Message] || auth[key] || "missing").toLowerCase();
+                  const warnings: string[] = [];
+                  const notes: string[] = [];
+                  (["spf", "dkim", "dmarc"] as const).forEach((key) => { const value = authStatus(key); if (["fail", "softfail", "permerror", "temperror"].includes(value)) warnings.push(`${key.toUpperCase()} ${value}`); });
+                  if (authStatus("arc") === "fail") warnings.push("ARC failed");
+                  if (authStatus("tls") === "fail") warnings.push("TLS failed");
+                  if (evidence.external_sender === true) notes.push("External sender");
+                  if (selected.sender_first_seen || evidence.first_seen_sender === true) notes.push("First-time sender");
+                  if (evidence.display_name_spoof === true) warnings.push("Display name resembles a known brand");
+                  if (typeof evidence.lookalike_domain === "string" && evidence.lookalike_domain) warnings.push(`Lookalike ${evidence.lookalike_domain} domain`);
+                  if (evidence.suspicious_reply_to === true) warnings.push("Reply-To points to a different domain");
+                  const linkReputation = Array.isArray(evidence.link_reputation) ? evidence.link_reputation as Array<{ host?: string; reputation?: string }> : [];
+                  if (linkReputation.some((link) => link.reputation === "suspicious")) warnings.push("Suspicious link reputation signal");
+                  if (Number(evidence.qr_code_count || 0) > 0) warnings.push("QR-code candidate detected — inspect before scanning");
+                  const attachmentReputation = Array.isArray(evidence.attachment_reputation) ? evidence.attachment_reputation as Array<{ filename?: string; status?: string }> : [];
+                  if (attachmentReputation.some((attachment) => attachment.status === "blocked")) warnings.push("Blocked attachment");
+                  else if (attachmentReputation.some((attachment) => attachment.status === "suspicious")) warnings.push("Attachment needs review");
+                  if (attachmentReputation.length > 0) notes.push("Static attachment checks only; malware sandbox is not configured");
+                  if (evidence.brand_indicator && typeof evidence.brand_indicator === "object" && (evidence.brand_indicator as Record<string, unknown>).present === true) notes.push("Brand indicator declared but not independently verified");
+                  if (evidence.phishing_escalated === true) warnings.push("Phishing report escalated to Quarantine");
+                  if (!warnings.length && !notes.length) return null;
+                  return <div className={`trust-warning-banner ${warnings.length ? "has-warnings" : ""}`} role={warnings.length ? "alert" : "status"}>
+                    <ShieldAlert size={16} aria-hidden="true" />
+                    <div><strong>{warnings.length ? "Review before interacting" : "Sender context"}</strong><span>{[...warnings, ...notes].join(" · ")}</span><small>These are advisory signals, not proof of malicious intent. Avoid links, attachments, and replies until the sender is verified.</small></div>
+                  </div>;
+                })()}
                 {trustLensOpen && <div className="trust-lens">
                   <button className="trust-lens-toggle" onClick={() => void toggleTrustLens()} aria-expanded={trustLensOpen}>
                     <span className="trust-lens-title"><ShieldAlert size={15} /><span><strong>Trust Lens</strong><small> Authentication and sender evidence</small></span></span>
@@ -5563,6 +6179,7 @@ function MailboxApp({ session }: { session: Session }) {
                     const statusClass = (value: string) => value === "pass" ? "trust-status-pass" : value === "missing" || value === "none" ? "trust-status-missing" : "trust-status-fail";
                     const hosts = Array.isArray(evidence.link_hosts) ? evidence.link_hosts as Array<{ host?: string; count?: number }> : [];
                     const history = trustData.screening_history || [];
+                    const brandIndicator = evidence.brand_indicator && typeof evidence.brand_indicator === "object" ? evidence.brand_indicator as Record<string, unknown> : null;
                     return <div className="trust-lens-body">
                       <p className="trust-lens-note">Advisory signals only. Authentication results describe what the receiving server observed; they do not guarantee that a message is safe.</p>
                       <div className="trust-lens-grid">
@@ -5573,8 +6190,13 @@ function MailboxApp({ session }: { session: Session }) {
                         <div className="trust-lens-item"><strong>Contact</strong><span>{trustData.known_contact ? "Known contact" : "Not in contacts"}</span></div>
                         <div className="trust-lens-item"><strong>Reply-To</strong><span className={trustData.reply_to_mismatch ? "trust-status-fail" : "trust-status-pass"}>{trustData.reply_to_mismatch ? "Different address" : "Matches sender"}</span></div>
                         <div className="trust-lens-item"><strong>Tracking pixels</strong><span>{trustData.tracking_pixel_count || 0} detected</span></div>
+                        <div className="trust-lens-item"><strong>Sender boundary</strong><span className={evidence.external_sender ? "trust-status-fail" : "trust-status-pass"}>{evidence.external_sender ? "External sender" : "Same domain"}</span></div>
+                        <div className="trust-lens-item"><strong>Identity signals</strong><span className={evidence.display_name_spoof || evidence.lookalike_domain ? "trust-status-fail" : "trust-status-missing"}>{evidence.display_name_spoof ? "Brand-like display name" : evidence.lookalike_domain ? `Lookalike ${String(evidence.lookalike_domain)}` : "No match detected"}</span></div>
+                        <div className="trust-lens-item"><strong>QR candidates</strong><span>{Number(evidence.qr_code_count || 0)} detected</span></div>
+                        <div className="trust-lens-item"><strong>Attachment checks</strong><span>{Array.isArray(evidence.attachment_reputation) && evidence.attachment_reputation.length ? "Static checks only" : "No attachments"}</span></div>
                       </div>
                       <div className="trust-lens-section"><strong>Link hosts · {trustData.link_count || 0} links</strong>{hosts.length ? <div className="trust-host-list">{hosts.map((item) => <span className="trust-host" key={item.host}>{item.host}{item.count && item.count > 1 ? ` · ${item.count}` : ""}</span>)}</div> : <p className="trust-lens-note">No web links detected.</p>}</div>
+                      {brandIndicator?.present === true && <div className="trust-lens-section"><strong>Brand indicator</strong><p className="trust-lens-note">A BIMI-style declaration was present, but Postveil has not independently verified the logo or domain.</p></div>}
                       {history.length > 0 && <div className="trust-lens-section"><strong>Screening history</strong><p className="trust-lens-note">{history.slice(0, 3).map((item) => `${item.decision} · ${new Date(item.created_at).toLocaleString()}`).join("  |  ")}</p></div>}
                     </div>;
                   })()}
