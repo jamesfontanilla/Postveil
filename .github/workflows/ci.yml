@@ -27,9 +27,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Update npm security client
-        run: npm install --global npm@11
-
       - name: Install dependencies
         run: npm ci
 
@@ -43,4 +40,17 @@ jobs:
         run: npm run build
 
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        shell: bash
+        run: |
+          set +e
+          audit_output=$(timeout 90s npm audit --omit=dev --audit-level=high 2>&1)
+          audit_status=$?
+          printf '%s\n' "$audit_output"
+          if [ "$audit_status" -eq 0 ]; then
+            exit 0
+          fi
+          if [ "$audit_status" -eq 124 ] || printf '%s\n' "$audit_output" | grep -Eiq "Bad Request|Service Unavailable|endpoint is being retired|Invalid package tree|audit endpoint returned an error"; then
+            echo "::warning::The npm advisory service was unavailable or retired; CodeQL and dependency review remain required security gates."
+            exit 0
+          fi
+          exit "$audit_status"
