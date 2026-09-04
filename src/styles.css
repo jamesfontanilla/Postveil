@@ -1659,6 +1659,10 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .ai-result-head .text-button { color: #b9e6d0; }
 .ai-result pre { max-height: 420px; margin: 0; overflow: auto; padding: 14px; color: #d9f6e7; font: 11px/1.6 "DM Mono", monospace; white-space: pre-wrap; }
 .ai-feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.ai-quick-prompts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 14px 0 16px; }
+.ai-quick-prompts span { flex-basis: 100%; color: var(--muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.ai-quick-prompts button { border: 1px solid var(--line); border-radius: 999px; background: var(--surface-muted); color: var(--ink-soft); cursor: pointer; font: inherit; font-size: 10px; padding: 7px 10px; }
+.ai-quick-prompts button:hover, .ai-quick-prompts button:focus-visible { border-color: var(--accent); color: var(--accent-strong); }
 .ai-feature, .ai-provider { display: flex; align-items: flex-start; gap: 8px; min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-muted); padding: 10px; cursor: pointer; }
 .ai-feature.enabled, .ai-provider.selected { border-color: var(--accent); background: var(--accent-soft); }
 .ai-feature input, .ai-provider input { margin-top: 2px; }
