@@ -427,6 +427,10 @@ type Task = {
   priority: number;
   completed: boolean;
   source_message_id?: string | null;
+  project_id?: string | null;
+  assignee_id?: string | null;
+  status?: "todo" | "in_progress" | "blocked" | "done";
+  position?: number;
 };
 type WorkItem = Message & { overdue?: boolean };
 type WorkSummary = {
@@ -451,7 +455,21 @@ type CalendarEvent = {
   ends_at: string;
   location?: string | null;
   all_day: boolean;
+  calendar_id?: string | null;
+  timezone?: string | null;
+  recurrence_rule?: string | null;
+  recurrence_until?: string | null;
+  reminders?: Array<{ minutes?: number; method?: string }>;
+  visibility?: "private" | "shared";
+  status?: "tentative" | "confirmed" | "cancelled";
+  conference_url?: string | null;
+  attendees?: Array<{ id?: string; email: string; display_name?: string; response?: string }>;
 };
+type WorkspaceCalendar = { id: string; owner_id: string; organization_id?: string | null; name: string; slug: string; color: string; timezone: string; visibility: "private" | "shared"; is_default: boolean };
+type ContactGroup = { id: string; name: string; color?: string; contact_ids?: string[] };
+type WorkspaceProject = { id: string; name: string; description: string; color: string; status: string; organization_id?: string | null };
+type SchedulingLink = { id: string; title: string; slug: string; description?: string; duration_minutes: number; timezone: string; active: boolean; calendar_id?: string | null };
+type WorkspaceOverview = { calendars: WorkspaceCalendar[]; events: CalendarEvent[]; contacts: Contact[]; groups: ContactGroup[]; projects: WorkspaceProject[]; tasks: Task[]; schedulingLinks: SchedulingLink[] };
 type ComposeSeed = {
   to?: string;
   cc?: string;
@@ -4286,14 +4304,14 @@ type JsonSettings = Record<string, unknown>;
 
 function Workspace({
   mode,
-  tasks,
-  events,
+  tasks: initialTasks,
+  events: initialEvents,
   workItems,
   workSummary,
   onOpenMessage,
   onRefresh,
 }: {
-  mode: "calendar" | "tasks";
+  mode: "calendar" | "tasks" | "contacts" | "projects";
   tasks: Task[];
   events: CalendarEvent[];
   workItems: WorkItem[];
@@ -4301,173 +4319,214 @@ function Workspace({
   onOpenMessage: (message: Message) => void;
   onRefresh: () => void;
 }) {
-  const [title, setTitle] = useState("");
-  const [date, setDate] = useState("");
+  const [overview, setOverview] = useState<WorkspaceOverview | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function addTask() {
-    if (!title.trim()) return;
+  const [calendarView, setCalendarView] = useState<"month" | "week" | "day" | "agenda">("month");
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
+  const [calendarSearch, setCalendarSearch] = useState("");
+  const [activeCalendarId, setActiveCalendarId] = useState("");
+  const [eventTitle, setEventTitle] = useState("");
+  const [eventStart, setEventStart] = useState("");
+  const [eventEnd, setEventEnd] = useState("");
+  const [eventLocation, setEventLocation] = useState("");
+  const [eventAttendees, setEventAttendees] = useState("");
+  const [eventRecurrence, setEventRecurrence] = useState("");
+  const [eventTimezone, setEventTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [newCalendarName, setNewCalendarName] = useState("");
+  const [availabilityEmail, setAvailabilityEmail] = useState("");
+  const [availability, setAvailability] = useState<Array<{ starts: string; ends: string }> | null>(null);
+  const [linkTitle, setLinkTitle] = useState("");
+  const [contactQuery, setContactQuery] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactCompany, setContactCompany] = useState("");
+  const [contactGroupId, setContactGroupId] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
+  const [activeProjectId, setActiveProjectId] = useState("");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDue, setTaskDue] = useState("");
+
+  const data = overview || {
+    calendars: [],
+    events: initialEvents,
+    contacts: [],
+    groups: [],
+    projects: [],
+    tasks: initialTasks,
+    schedulingLinks: [],
+  } satisfies WorkspaceOverview;
+  const calendars = data.calendars;
+  const selectedCalendarId = activeCalendarId || calendars.find((calendar) => calendar.is_default)?.id || calendars[0]?.id || "";
+  const events = data.events.filter((event) => !calendarSearch.trim() || `${event.title} ${event.description} ${event.location || ""}`.toLowerCase().includes(calendarSearch.trim().toLowerCase()));
+  const contacts = data.contacts.filter((contact) => !contactQuery.trim() || `${contact.display_name} ${contact.email} ${contact.company || ""}`.toLowerCase().includes(contactQuery.trim().toLowerCase()));
+  const activeProject = data.projects.find((project) => project.id === activeProjectId) || data.projects[0];
+  const projectTasks = data.tasks.filter((task) => task.project_id === activeProject?.id);
+  const monthStart = new Date(calendarDate.getFullYear(), calendarDate.getMonth(), 1);
+  const monthGridStart = new Date(monthStart);
+  monthGridStart.setDate(1 - monthStart.getDay());
+  const monthDays = Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(monthGridStart);
+    day.setDate(monthGridStart.getDate() + index);
+    return day;
+  });
+  function eventsOnDay(day: Date) {
+    return events.filter((event) => {
+      const starts = new Date(event.starts_at);
+      return starts.getFullYear() === day.getFullYear() && starts.getMonth() === day.getMonth() && starts.getDate() === day.getDate();
+    });
+  }
+  const refreshOverview = useCallback(async () => {
+    try {
+      const next = await apiFetch<WorkspaceOverview>("/api/workspace/overview");
+      setOverview(next);
+      if (!activeCalendarId && next.calendars[0]) setActiveCalendarId(next.calendars.find((calendar) => calendar.is_default)?.id || next.calendars[0].id);
+      if (!activeProjectId && next.projects[0]) setActiveProjectId(next.projects[0].id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Workspace unavailable");
+    }
+  }, [activeCalendarId, activeProjectId]);
+  useEffect(() => { void refreshOverview(); }, [refreshOverview]);
+  async function mutate(path: string, options: RequestInit, success?: string) {
+    setBusy(true);
     setError("");
     try {
-      await apiFetch("/api/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          title,
-          dueAt: date ? new Date(date).toISOString() : null,
-        }),
-      });
-      setTitle("");
-      setDate("");
+      await apiFetch(path, options);
+      if (success) setError(success);
+      await refreshOverview();
       onRefresh();
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Could not save the task",
-      );
+      setError(caught instanceof Error ? caught.message : "Workspace change could not be saved");
+    } finally {
+      setBusy(false);
     }
   }
   async function addEvent() {
-    if (!title.trim()) return;
-    setError("");
-    try {
-      const start = date
-        ? new Date(date)
-        : new Date(Date.now() + 60 * 60 * 1000);
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
-      await apiFetch("/api/calendar", {
-        method: "POST",
-        body: JSON.stringify({
-          title,
-          startsAt: start.toISOString(),
-          endsAt: end.toISOString(),
-        }),
-      });
-      setTitle("");
-      setDate("");
-      onRefresh();
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Could not save the event",
-      );
-    }
+    if (!eventTitle.trim()) return setError("Add an event title first");
+    const start = eventStart ? new Date(eventStart) : new Date(Date.now() + 3600000);
+    const end = eventEnd ? new Date(eventEnd) : new Date(start.getTime() + 3600000);
+    if (end <= start) return setError("The event must end after it starts");
+    await mutate("/api/calendar", { method: "POST", body: JSON.stringify({ calendarId: selectedCalendarId || undefined, title: eventTitle, startsAt: start.toISOString(), endsAt: end.toISOString(), location: eventLocation, timezone: eventTimezone, recurrenceRule: eventRecurrence || null, attendees: eventAttendees.split(/[,;\n]/).map((value) => value.trim()).filter(Boolean) }) }, "Event saved");
+    setEventTitle(""); setEventStart(""); setEventEnd(""); setEventLocation(""); setEventAttendees(""); setEventRecurrence("");
   }
-  async function toggleTask(task: Task) {
-    setError("");
-    try {
-      await apiFetch(`/api/tasks/${task.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ completed: !task.completed }),
-      });
-      onRefresh();
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Could not update the task",
-      );
-    }
+  async function addCalendar() {
+    if (!newCalendarName.trim()) return;
+    await mutate("/api/calendars", { method: "POST", body: JSON.stringify({ name: newCalendarName, timezone: eventTimezone }) }, "Calendar created");
+    setNewCalendarName("");
   }
+  async function checkAvailability() {
+    setBusy(true); setError("");
+    try {
+      const params = new URLSearchParams({ from: new Date().toISOString(), email: availabilityEmail.trim() });
+      const result = await apiFetch<{ busy: Array<{ starts: string; ends: string }> }>(`/api/calendar/availability?${params.toString()}`);
+      setAvailability(result.busy);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Availability could not be checked"); }
+    finally { setBusy(false); }
+  }
+  async function addSchedulingLink() {
+    if (!linkTitle.trim()) return;
+    await mutate("/api/scheduling-links", { method: "POST", body: JSON.stringify({ title: linkTitle, calendarId: selectedCalendarId || undefined, timezone: eventTimezone }) }, "Scheduling link created");
+    setLinkTitle("");
+  }
+  async function addContact() {
+    if (!contactEmail.trim()) return setError("An email is required");
+    await mutate("/api/contacts", { method: "POST", body: JSON.stringify({ displayName: contactName, email: contactEmail, company: contactCompany, groupId: contactGroupId || undefined }) }, "Contact saved");
+    setContactName(""); setContactEmail(""); setContactCompany("");
+  }
+  async function addGroup() {
+    if (!groupName.trim()) return;
+    await mutate("/api/contact-groups", { method: "POST", body: JSON.stringify({ name: groupName }) }, "Group created");
+    setGroupName("");
+  }
+  async function importContacts(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    await mutate("/api/contacts/import", { method: "POST", body: JSON.stringify({ csv: await file.text(), groupId: contactGroupId || undefined }) }, "Contacts imported");
+    event.currentTarget.value = "";
+  }
+  async function exportContacts() {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch("/api/contacts/export", { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) throw new Error("Contacts could not be exported");
+      const blob = await response.blob(); const anchor = document.createElement("a"); anchor.href = URL.createObjectURL(blob); anchor.download = "postveil-contacts.csv"; anchor.click(); URL.revokeObjectURL(anchor.href);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Contacts could not be exported"); }
+  }
+  async function downloadContact(contact: Contact) {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch(`/api/contacts/${contact.id}.vcf`, { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) throw new Error("Contact export failed");
+      const anchor = document.createElement("a"); anchor.href = URL.createObjectURL(await response.blob()); anchor.download = `${(contact.display_name || "contact").replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "contact"}.vcf`; anchor.click(); URL.revokeObjectURL(anchor.href);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Contact export failed"); }
+  }
+  async function addProject() {
+    if (!projectName.trim()) return;
+    await mutate("/api/projects", { method: "POST", body: JSON.stringify({ name: projectName, description: projectDescription }) }, "Project created");
+    setProjectName(""); setProjectDescription("");
+  }
+  async function addProjectTask() {
+    if (!activeProject?.id || !taskTitle.trim()) return;
+    await mutate(`/api/projects/${activeProject.id}/tasks`, { method: "POST", body: JSON.stringify({ title: taskTitle, dueAt: taskDue ? new Date(taskDue).toISOString() : null }) }, "Task added");
+    setTaskTitle(""); setTaskDue("");
+  }
+  async function setTaskStatus(task: Task, status: NonNullable<Task["status"]>) {
+    await mutate(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+  }
+  async function makeTaskFromMessage(item: WorkItem) {
+    await mutate(`/api/messages/${item.id}/task`, { method: "POST", body: JSON.stringify({ projectId: activeProject?.id || null, title: item.subject || "Follow up on message" }) }, "Task created from email");
+  }
+  async function assignMessage(item: WorkItem, projectId: string) {
+    await mutate(`/api/messages/${item.id}/project`, { method: "POST", body: JSON.stringify({ projectId: projectId || null }) }, "Email assigned to project");
+  }
+  async function downloadEvent(event: CalendarEvent) {
+    try {
+      const session = (await requireSupabase().auth.getSession()).data.session;
+      const response = await fetch(`/api/calendar/${event.id}.ics`, { headers: session?.access_token ? { authorization: `Bearer ${session.access_token}` } : {} });
+      if (!response.ok) throw new Error("Event export failed");
+      const anchor = document.createElement("a"); anchor.href = URL.createObjectURL(await response.blob()); anchor.download = `${event.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "event"}.ics`; anchor.click(); URL.revokeObjectURL(anchor.href);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Event export failed"); }
+  }
+  const title = mode === "calendar" ? "Calendar" : mode === "contacts" ? "Contacts" : mode === "projects" ? "Projects" : "Work";
   return (
     <section className="workspace-view">
       <div className="workspace-head">
-        <div>
-          <p className="eyebrow">YOUR WORKSPACE</p>
-          <h1>
-            {mode === "calendar" ? (
-              <>
-                <CalendarDays size={23} /> Calendar
-              </>
-            ) : (
-              <>
-                <Briefcase size={23} /> Work
-              </>
-            )}
-          </h1>
-        </div>
-        <div className="workspace-stamp">
-          {mode === "calendar"
-            ? "Events from email can become appointments."
-            : "Keep promises, follow-ups, and next actions in one queue."}
-        </div>
+        <div><p className="eyebrow">POSTVEIL WORKSPACE</p><h1>{mode === "calendar" ? <CalendarDays size={23} /> : mode === "contacts" ? <Users size={23} /> : mode === "projects" ? <Briefcase size={23} /> : <ListTodo size={23} />} {title}</h1></div>
+        <div className="workspace-stamp">A private, email-connected workspace for dates, people, tasks, and project momentum.</div>
       </div>
-      {error && <div className="inline-error workspace-error">{error}</div>}
-      {mode === "tasks" && (
-        <div className="work-summary" aria-label="Work summary">
-          <div className="work-summary-card"><span>Reply later</span><strong>{workSummary.reply_later}</strong></div>
-          <div className="work-summary-card"><span>Waiting on</span><strong>{workSummary.waiting_on}</strong></div>
-          <div className="work-summary-card"><span>I owe</span><strong>{workSummary.i_owe}</strong></div>
-          <div className={`work-summary-card ${workSummary.overdue ? "overdue" : ""}`}><span>Overdue</span><strong>{workSummary.overdue}</strong></div>
+      {error && <div className={`inline-error workspace-error ${error.endsWith("saved") || error.endsWith("created") || error.endsWith("imported") || error.endsWith("assigned") ? "workspace-success" : ""}`}>{error}</div>}
+
+      {mode === "calendar" && <>
+        <div className="workspace-toolbar"><div className="workspace-view-switcher" role="group" aria-label="Calendar view">{(["month", "week", "day", "agenda"] as const).map((view) => <button key={view} className={calendarView === view ? "selected" : ""} onClick={() => setCalendarView(view)}>{view[0].toUpperCase() + view.slice(1)}</button>)}</div><div className="calendar-nav"><button className="secondary-button" onClick={() => setCalendarDate(new Date())}>Today</button><button className="icon-button" onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1))} aria-label="Previous month"><ArrowLeft size={15} /></button><strong>{calendarDate.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong><button className="icon-button" onClick={() => setCalendarDate(new Date(calendarDate.getFullYear(), calendarDate.getMonth() + 1, 1))} aria-label="Next month"><ArrowDown size={15} className="rotate-90" /></button></div><label className="calendar-search"><Search size={14} /><input value={calendarSearch} onChange={(event) => setCalendarSearch(event.target.value)} placeholder="Search events" /></label></div>
+        <div className="workspace-grid calendar-workspace-grid">
+          <div className="workspace-stack">
+            <div className="setting-card workspace-create"><div className="card-heading"><div><p className="eyebrow">NEW APPOINTMENT</p><h3>Schedule an event</h3></div><CalendarDays size={18} /></div><input value={eventTitle} onChange={(event) => setEventTitle(event.target.value)} placeholder="Meeting title" aria-label="Event title" /><div className="workspace-field-grid"><label>Starts<input type="datetime-local" value={eventStart} onChange={(event) => setEventStart(event.target.value)} /></label><label>Ends<input type="datetime-local" value={eventEnd} onChange={(event) => setEventEnd(event.target.value)} /></label></div><div className="workspace-field-grid"><label>Calendar<select value={selectedCalendarId} onChange={(event) => setActiveCalendarId(event.target.value)}><option value="">Personal calendar</option>{calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.name} · {calendar.timezone}</option>)}</select></label><label>Time zone<select value={eventTimezone} onChange={(event) => setEventTimezone(event.target.value)}><option>UTC</option><option>Asia/Manila</option><option>America/New_York</option><option>Europe/London</option><option>Australia/Sydney</option></select></label></div><input value={eventLocation} onChange={(event) => setEventLocation(event.target.value)} placeholder="Location or video link (optional)" /><input value={eventAttendees} onChange={(event) => setEventAttendees(event.target.value)} placeholder="Invitees, separated by commas" /><div className="workspace-field-grid"><label>Repeat<select value={eventRecurrence} onChange={(event) => setEventRecurrence(event.target.value)}><option value="">Does not repeat</option><option value="FREQ=DAILY">Daily</option><option value="FREQ=WEEKLY">Weekly</option><option value="FREQ=MONTHLY">Monthly</option></select></label><label>Reminder<select defaultValue="15"><option value="5">5 minutes before</option><option value="15">15 minutes before</option><option value="60">1 hour before</option></select></label></div><button className="primary-button" onClick={() => void addEvent()} disabled={busy}><Plus size={15} /> Add event</button></div>
+            <div className="setting-card"><div className="card-heading"><div><p className="eyebrow">CALENDARS</p><h3>Personal and shared</h3></div><Users size={18} /></div>{calendars.map((calendar) => <button className={`workspace-resource-row ${selectedCalendarId === calendar.id ? "active" : ""}`} key={calendar.id} onClick={() => setActiveCalendarId(calendar.id)}><span className="color-dot" style={{ background: calendar.color }} /><span><strong>{calendar.name}</strong><small>{calendar.visibility} · {calendar.timezone}</small></span></button>)}<div className="inline-form"><input value={newCalendarName} onChange={(event) => setNewCalendarName(event.target.value)} placeholder="New calendar" /><button className="secondary-button" onClick={() => void addCalendar()} disabled={busy}><Plus size={14} /> Add</button></div></div>
+            <div className="setting-card"><div className="card-heading"><div><p className="eyebrow">AVAILABILITY</p><h3>Find a clear time</h3></div><Clock3 size={18} /></div><input value={availabilityEmail} onChange={(event) => setAvailabilityEmail(event.target.value)} placeholder="Workspace member email (optional)" /><button className="secondary-button" onClick={() => void checkAvailability()} disabled={busy}>Check next 7 days</button>{availability && <small className="field-help">{availability.length ? `${availability.length} busy block${availability.length === 1 ? "" : "s"} found.` : "No busy blocks found."}</small>}</div>
+            <div className="setting-card"><div className="card-heading"><div><p className="eyebrow">SCHEDULING LINKS</p><h3>Let people book time</h3></div><Share2Icon /></div><div className="inline-form"><input value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} placeholder="e.g. 30-minute intro" /><button className="secondary-button" onClick={() => void addSchedulingLink()} disabled={busy}><Plus size={14} /> Create</button></div>{data.schedulingLinks.map((link) => <div className="workspace-resource-row" key={link.id}><span><strong>{link.title}</strong><small>/{link.slug} · {link.duration_minutes} min · {link.timezone}</small></span><button className="icon-button compact-icon" onClick={() => void navigator.clipboard?.writeText(`${window.location.origin}/book/${link.slug}`)} aria-label={`Copy ${link.title} link`}><CopyIcon /></button></div>)}</div>
+          </div>
+          <div className="workspace-list"><div className="workspace-calendar-panel"><div className="calendar-weekdays">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day}</span>)}</div>{calendarView === "month" ? <div className="calendar-month-grid">{monthDays.map((day) => <div className={`calendar-day ${day.getMonth() !== calendarDate.getMonth() ? "muted" : ""} ${day.toDateString() === new Date().toDateString() ? "today" : ""}`} key={day.toISOString()}><span>{day.getDate()}</span>{eventsOnDay(day).slice(0, 3).map((event) => <button className="calendar-event-chip" key={event.id} onClick={() => void downloadEvent(event)} title="Download calendar event">{event.title}</button>)}{eventsOnDay(day).length > 3 && <small>+{eventsOnDay(day).length - 3} more</small>}</div>)}</div> : <div className={`calendar-agenda-list ${calendarView}`}><div className="calendar-list-heading"><div><p className="eyebrow">{calendarView.toUpperCase()} VIEW</p><h3>{calendarView === "agenda" ? "Upcoming events" : `${calendarDate.toLocaleDateString(undefined, { month: "long", day: "numeric" })} schedule`}</h3></div><label className="calendar-search"><Search size={14} /><input value={calendarSearch} onChange={(event) => setCalendarSearch(event.target.value)} placeholder="Search calendar" /></label></div>{events.length ? events.map((event) => <article className="event-card" key={event.id}><div className="event-time">{formatDate(event.starts_at)}</div><div className="event-copy"><strong>{event.title}</strong><p>{new Date(event.starts_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} · {event.timezone || "UTC"}</p>{event.location && <small>{event.location}</small>}{event.recurrence_rule && <small>Repeats · {event.recurrence_rule.replace("FREQ=", "").toLowerCase()}</small>}</div><button className="secondary-button" onClick={() => void downloadEvent(event)}><Download size={13} /> .ics</button></article>) : <div className="list-empty"><CalendarDays size={25} /><p>No events match this view.</p></div>}</div>}</div></div>
         </div>
-      )}
-      <div className="workspace-grid">
-        <div className="setting-card workspace-create">
-          <h3>{mode === "calendar" ? "Add an event" : "Add a task"}</h3>
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder={mode === "calendar" ? "Event title" : "Task title"}
-          />
-          <input
-            type={mode === "calendar" ? "datetime-local" : "datetime-local"}
-            value={date}
-            onChange={(event) => setDate(event.target.value)}
-          />
-          <button
-            className="primary-button"
-            onClick={() => void (mode === "calendar" ? addEvent() : addTask())}
-          >
-            <Plus size={15} /> Add {mode === "calendar" ? "event" : "task"}
-          </button>
-        </div>
-        <div className="workspace-list">
-          {mode === "calendar" ? (
-            events.length ? (
-              events.map((event) => (
-                <article className="event-card" key={event.id}>
-                  <div className="event-time">
-                    {formatDate(event.starts_at)}
-                  </div>
-                  <div>
-                    <strong>{event.title}</strong>
-                    <p>{new Date(event.starts_at).toLocaleString()}</p>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <div className="list-empty">
-                <CalendarDays size={25} />
-                <p>No events yet.</p>
-              </div>
-            )
-          ) : (
-            <>
-              <div className="work-queue-head"><div><p className="eyebrow">MESSAGE QUEUE</p><h3>Follow-ups</h3></div><span>{workItems.length} open</span></div>
-              {workItems.length ? workItems.map((item) => (
-                <article className={`work-item ${item.overdue ? "overdue" : ""}`} key={item.id}>
-                  <button onClick={() => onOpenMessage(item)} className="work-item-main">
-                    <span className="work-state-label">{workStateLabel(item.work_state)}</span>
-                    <strong>{item.subject || "(no subject)"}</strong>
-                    <small>{item.from_address} · {workDueLabel(item.follow_up_at)}</small>
-                    {item.work_note && <em>{item.work_note}</em>}
-                  </button>
-                  <button className="icon-button compact-icon" onClick={() => onOpenMessage(item)} aria-label={`Open ${item.subject || "message"}`} title="Open message"><ArrowDown size={14} className="open-work-icon" /></button>
-                </article>
-              )) : <div className="list-empty compact-empty"><Briefcase size={25} /><p>No message follow-ups yet.</p><small>Use Reply later, Waiting on, or I owe from a message.</small></div>}
-              <div className="work-queue-head task-queue-head"><div><p className="eyebrow">TASKS</p><h3>To Do</h3></div><span>{tasks.filter((task) => !task.completed).length} open</span></div>
-              {tasks.length ? tasks.map((task) => (
-                <label className={`task-card ${task.completed ? "completed" : ""}`} key={task.id}>
-                  <input type="checkbox" checked={task.completed} onChange={() => void toggleTask(task)} />
-                  <span><strong>{task.title}</strong><small>{task.due_at ? `Due ${new Date(task.due_at).toLocaleString()}` : "No due date"}</small></span>
-                </label>
-              )) : <div className="list-empty compact-empty"><ListTodo size={25} /><p>No tasks yet.</p></div>}
-            </>
-          )}
-        </div>
-      </div>
+      </>}
+
+      {mode === "contacts" && <div className="workspace-grid contacts-workspace-grid"><div className="workspace-stack"><div className="setting-card workspace-create"><div className="card-heading"><div><p className="eyebrow">ADDRESS BOOK</p><h3>Add a contact</h3></div><Users size={18} /></div><input value={contactName} onChange={(event) => setContactName(event.target.value)} placeholder="Full name" /><input value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} placeholder="Email address" type="email" /><input value={contactCompany} onChange={(event) => setContactCompany(event.target.value)} placeholder="Company (optional)" /><select value={contactGroupId} onChange={(event) => setContactGroupId(event.target.value)}><option value="">No group</option>{data.groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select><button className="primary-button" onClick={() => void addContact()} disabled={busy}><Plus size={15} /> Save contact</button></div><div className="setting-card"><div className="card-heading"><div><p className="eyebrow">GROUPS</p><h3>Contact groups</h3></div><Tag size={18} /></div>{data.groups.map((group) => <div className="workspace-resource-row" key={group.id}><span className="color-dot" style={{ background: group.color }} /><strong>{group.name}</strong><small>{group.contact_ids?.length || 0} contacts</small></div>)}<div className="inline-form"><input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="New group" /><button className="secondary-button" onClick={() => void addGroup()} disabled={busy}><Plus size={14} /> Add</button></div></div><div className="setting-card"><div className="card-heading"><div><p className="eyebrow">PORTABILITY</p><h3>Bring your address book</h3></div><Upload size={18} /></div><label className="file-button"><Upload size={14} /> Import CSV<input type="file" accept=".csv,text/csv" onChange={(event) => void importContacts(event)} /></label><button className="secondary-button" onClick={() => void exportContacts()}><Download size={13} /> Export CSV</button><small className="field-help">CSV headers: name, email, company. Duplicate email addresses are updated, not duplicated.</small></div></div><div className="workspace-list"><div className="workspace-list-toolbar"><div><p className="eyebrow">CONTACTS</p><h3>{contacts.length} people</h3></div><label className="calendar-search"><Search size={14} /><input value={contactQuery} onChange={(event) => setContactQuery(event.target.value)} placeholder="Search people" /></label></div>{contacts.length ? contacts.map((contact) => <article className="contact-card" key={contact.id}><div className="row-avatar">{(contact.display_name || contact.email).slice(0, 1).toUpperCase()}</div><div><strong>{contact.display_name || contact.email}</strong><p>{contact.email}</p>{contact.company && <small>{contact.company}</small>}</div><span className="contact-card-actions"><button className="secondary-button" onClick={() => void downloadContact(contact)}><Download size={13} /> vCard</button></span></article>) : <div className="list-empty"><Users size={25} /><p>No contacts match your search.</p></div>}</div></div>}
+
+      {mode === "projects" && <div className="projects-workspace"><div className="setting-card project-create-row"><div><p className="eyebrow">PROJECTS</p><h3>Turn conversations into momentum</h3></div><div className="inline-form"><input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Project name" /><input value={projectDescription} onChange={(event) => setProjectDescription(event.target.value)} placeholder="Short description" /><button className="primary-button" onClick={() => void addProject()} disabled={busy}><Plus size={15} /> New project</button></div></div><div className="project-tabs">{data.projects.map((project) => <button key={project.id} className={activeProject?.id === project.id ? "active" : ""} onClick={() => setActiveProjectId(project.id)}><span className="color-dot" style={{ background: project.color }} />{project.name}<small>{data.tasks.filter((task) => task.project_id === project.id).length}</small></button>)}{!data.projects.length && <div className="list-empty compact-empty"><Briefcase size={22} /><p>Create your first project.</p></div>}</div>{activeProject && <><div className="workspace-board-head"><div><p className="eyebrow">PROJECT BOARD</p><h2>{activeProject.name}</h2><p>{activeProject.description || "Organize email, tasks, and follow-ups in one shared queue."}</p></div><div className="inline-form"><input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="Add a task" /><input type="datetime-local" value={taskDue} onChange={(event) => setTaskDue(event.target.value)} /><button className="secondary-button" onClick={() => void addProjectTask()} disabled={busy}><Plus size={14} /> Add task</button></div></div><div className="kanban-board">{(["todo", "in_progress", "blocked", "done"] as const).map((status) => <section className="kanban-column" key={status}><div className="kanban-column-head"><h3>{status === "in_progress" ? "In progress" : status[0].toUpperCase() + status.slice(1)}</h3><span>{projectTasks.filter((task) => (task.status || (task.completed ? "done" : "todo")) === status).length}</span></div>{projectTasks.filter((task) => (task.status || (task.completed ? "done" : "todo")) === status).map((task) => <article className="kanban-card" key={task.id}><strong>{task.title}</strong>{task.due_at && <small>Due {new Date(task.due_at).toLocaleDateString()}</small>}<select value={task.status || (task.completed ? "done" : "todo")} onChange={(event) => void setTaskStatus(task, event.target.value as NonNullable<Task["status"]>)} aria-label={`Status for ${task.title}`}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="blocked">Blocked</option><option value="done">Done</option></select></article>)}</section>)}</div></>}{workItems.length > 0 && <div className="setting-card project-message-queue"><div className="card-heading"><div><p className="eyebrow">FROM YOUR INBOX</p><h3>Assign follow-ups to {activeProject?.name || "a project"}</h3></div><Mail size={18} /></div>{workItems.slice(0, 8).map((item) => <div className="project-message-row" key={item.id}><button className="text-button" onClick={() => onOpenMessage(item)}>{item.subject || "(no subject)"}</button><button className="secondary-button" onClick={() => void assignMessage(item, activeProject?.id || "")} disabled={!activeProject || busy}>Assign</button><button className="secondary-button" onClick={() => void makeTaskFromMessage(item)} disabled={!activeProject || busy}>Create task</button></div>)}</div>}</div>}
+
+      {mode === "tasks" && <div className="workspace-grid"><div className="workspace-stack"><div className="work-summary" aria-label="Work summary"><div className="work-summary-card"><span>Reply later</span><strong>{workSummary.reply_later}</strong></div><div className="work-summary-card"><span>Waiting on</span><strong>{workSummary.waiting_on}</strong></div><div className="work-summary-card"><span>I owe</span><strong>{workSummary.i_owe}</strong></div><div className={`work-summary-card ${workSummary.overdue ? "overdue" : ""}`}><span>Overdue</span><strong>{workSummary.overdue}</strong></div></div><div className="setting-card"><div className="card-heading"><div><p className="eyebrow">QUICK TASK</p><h3>Capture the next action</h3></div><ListTodo size={18} /></div><input id="quick-task-title" placeholder="Task title" onKeyDown={(event) => { if (event.key === "Enter" && event.currentTarget.value.trim()) void mutate("/api/tasks", { method: "POST", body: JSON.stringify({ title: event.currentTarget.value.trim() }) }, "Task added").then(() => { event.currentTarget.value = ""; }); }} /><small className="field-help">Press Enter to save. Put longer work into a project board.</small></div></div><div className="workspace-list"><div className="work-queue-head"><div><p className="eyebrow">MESSAGE QUEUE</p><h3>Follow-ups</h3></div><span>{workItems.length} open</span></div>{workItems.length ? workItems.map((item) => <article className={`work-item ${item.overdue ? "overdue" : ""}`} key={item.id}><button onClick={() => onOpenMessage(item)} className="work-item-main"><span className="work-state-label">{workStateLabel(item.work_state)}</span><strong>{item.subject || "(no subject)"}</strong><small>{item.from_address} · {workDueLabel(item.follow_up_at)}</small>{item.work_note && <em>{item.work_note}</em>}</button></article>) : <div className="list-empty compact-empty"><Briefcase size={25} /><p>No message follow-ups yet.</p><small>Use Reply later, Waiting on, or I owe from a message.</small></div>}<div className="work-queue-head task-queue-head"><div><p className="eyebrow">TASKS</p><h3>Personal task list</h3></div><span>{data.tasks.filter((task) => !task.completed).length} open</span></div>{data.tasks.length ? data.tasks.map((task) => <label className={`task-card ${task.completed ? "completed" : ""}`} key={task.id}><input type="checkbox" checked={task.completed} onChange={() => void setTaskStatus(task, task.completed ? "todo" : "done")} /><span><strong>{task.title}</strong><small>{task.due_at ? `Due ${new Date(task.due_at).toLocaleString()}` : "No due date"}{task.project_id ? " · In a project" : ""}</small></span></label>) : <div className="list-empty compact-empty"><ListTodo size={25} /><p>No tasks yet.</p></div>}</div></div>}
     </section>
   );
 }
 
+function Share2Icon() { return <span className="workspace-share-icon" aria-hidden="true">↗</span>; }
+function CopyIcon() { return <span aria-hidden="true">⧉</span>; }
+
 function MailboxApp({ session }: { session: Session }) {
   const { confirm, prompt } = useAppDialog();
   const imagePreferenceKey = `postveil.load_remote_images:${session.user.id}`;
-  const [view, setView] = useState<"mail" | "calendar" | "tasks">("mail");
+  const [view, setView] = useState<"mail" | "calendar" | "tasks" | "contacts" | "projects">("mail");
   const [folder, setFolder] = useState<ViewKey>("inbox");
   const [messages, setMessages] = useState<Message[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
@@ -5635,6 +5694,20 @@ function MailboxApp({ session }: { session: Session }) {
             <span>Work</span>
             {workSummary.total > 0 && <em className="nav-count">{workSummary.total}</em>}
             {workSummary.overdue > 0 && <em className="nav-overdue">{workSummary.overdue} due</em>}
+          </button>
+          <button
+            className={view === "contacts" ? "active folder-link" : "folder-link"}
+            onClick={() => setView("contacts")}
+          >
+            <Users size={17} />
+            <span>Contacts</span>
+          </button>
+          <button
+            className={view === "projects" ? "active folder-link" : "folder-link"}
+            onClick={() => setView("projects")}
+          >
+            <Briefcase size={17} />
+            <span>Projects</span>
           </button>
         </nav>
         <div className="sidebar-spacer" />
