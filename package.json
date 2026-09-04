@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:security && npm run test:collaboration && npm run test:workspace && npm run test:phase1 && npm run test:phase2 && npm run test:phase3 && npm run test:phase4 && npm run test:phase5 && npm run test:delivery && npm run test:input && npm run test:renderer",
+    "test": "npm run test:security && npm run test:collaboration && npm run test:workspace && npm run test:phase1 && npm run test:phase2 && npm run test:phase3 && npm run test:phase4 && npm run test:phase5 && npm run test:delivery && npm run test:input && npm run test:renderer && npm run test:ai",
     "test:security": "node --experimental-strip-types --test tests/account-security.test.ts",
     "test:collaboration": "node --experimental-strip-types --test tests/collaboration.test.ts",
     "test:workspace": "node --experimental-strip-types --test tests/workspace.test.ts",
@@ -20,7 +20,8 @@
     "test:phase5": "node --experimental-strip-types --test tests/phase5-automation.test.ts",
     "test:delivery": "node --experimental-strip-types --test tests/delivery.test.ts",
     "test:input": "node --experimental-strip-types --test tests/input-security.test.ts",
-    "test:renderer": "node --experimental-strip-types --test tests/email-renderer.test.ts"
+    "test:renderer": "node --experimental-strip-types --test tests/email-renderer.test.ts",
+    "test:ai": "node --experimental-strip-types --test tests/ai.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.879.0",
