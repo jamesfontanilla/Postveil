@@ -117,6 +117,8 @@ SES_WEBHOOK_SECRET (optional)
 SMTP_WEBHOOK_SECRET (optional)
 CONFIDENTIAL_LINK_SECRET (required for confidential mode)
 CONFIDENTIAL_ENCRYPTION_KEY (required for confidential mode)
+GROQ_MODEL (optional, defaults to openai/gpt-oss-120b)
+GROQ_API_KEY (required only when the Groq provider is enabled; Worker secret)
 ```
 
 `APP_DOMAIN` and `DEFAULT_FROM_EMAIL` must use a domain that is verified with your email provider. `ALLOWED_SENDER_DOMAINS` may contain additional verified domains separated by commas. The default mailbox is `DEFAULT_FROM_EMAIL`, or `postmaster@APP_DOMAIN` when no default is set.
