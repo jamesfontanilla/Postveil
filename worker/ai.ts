@@ -89,8 +89,8 @@ export function promptInjectionSignals(text: string): string[] {
 
 export function cleanAiText(value: unknown, maxChars = 12000): string {
   return String(value || "")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script\s*>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim()
