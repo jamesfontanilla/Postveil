@@ -10,6 +10,9 @@ binding = "ASSETS"
 [observability]
 enabled = true
 
+[vars]
+GROQ_MODEL = "openai/gpt-oss-120b"
+
 [[ratelimits]]
 name = "API_RATE_LIMITER"
 namespace_id = "1001"
