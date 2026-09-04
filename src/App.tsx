@@ -262,6 +262,7 @@ type ComposeLibraryItem = {
   id: string;
   kind: "template" | "canned" | "snippet";
   name: string;
+  shared?: boolean;
   subject?: string;
   text_body: string;
   html_body?: string | null;
@@ -435,6 +436,13 @@ type WorkSummary = {
   overdue: number;
   total: number;
 };
+type CollaborationMember = { user_id: string; email: string; display_name: string; role: string; status: string };
+type CollaborationThreadState = { id?: string; owner_id: string; organization_id: string; thread_id: string; status: "new" | "open" | "pending" | "resolved" | "closed"; priority: "low" | "normal" | "high" | "urgent"; assignee_id?: string | null; sla_due_at?: string | null; sla_breached_at?: string | null };
+type CollaborationComment = { id: string; body: string; kind: "comment" | "note"; visibility: "team" | "private"; author_id?: string; author?: CollaborationMember | null; mentioned_user_ids?: string[]; created_at: string; deleted_at?: string | null };
+type CollaborationActivity = { id: string; event_type: string; payload?: Record<string, unknown>; actor?: CollaborationMember | null; created_at: string };
+type CollaborationPresence = { user_id: string; state: "viewing" | "composing" | "idle"; last_seen_at: string; member?: CollaborationMember | null };
+type CollaborationData = { thread: CollaborationThreadState; assignment?: Record<string, unknown> | null; comments: CollaborationComment[]; activity: CollaborationActivity[]; presence: CollaborationPresence[]; members: CollaborationMember[] };
+type CollaborationOverview = { organization: { id: string; name: string }; members: CollaborationMember[]; sharedItems: Array<{ id: string; kind: string; name: string; payload: Record<string, unknown> }>; policies: Array<{ id: string; name: string; kind: string; priority: number; enabled: boolean; conditions: Record<string, unknown>; actions: Record<string, unknown> }>; activity: CollaborationActivity[]; analytics: { totalThreads: number; assignedThreads: number; unassignedThreads: number; slaBreached: number; statusCounts: Record<string, number>; priorityCounts: Record<string, number> } };
 type CalendarEvent = {
   id: string;
   title: string;
@@ -1787,7 +1795,7 @@ function Compose({
       {composeMode !== "plain" && <div className="compose-preview"><div className="compose-preview-label">Live preview</div><div dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(previewHtml || "<p>Preview appears here.</p>") }} /></div>}
       <div className="compose-variable-row"><span>Insert variable</span>{["first_name", "company", "email"].map((variable) => <button type="button" key={variable} onClick={() => insertVariable(variable)}>{`{{${variable}}}`}</button>)}</div>
     </div>
-    <div className="compose-option-row compose-studio-options"><button type="button" className="compose-option-button" onClick={() => setShowLibrary((current) => !current)} aria-expanded={showLibrary}>Templates & snippets</button>{showLibrary && <div className="compose-library"><div className="compose-library-head"><select value={libraryKind} onChange={(event) => setLibraryKind(event.target.value as ComposeLibraryItem["kind"])}><option value="template">Templates</option><option value="canned">Canned replies</option><option value="snippet">Snippets</option></select><button type="button" onClick={() => void saveLibraryItem()}>Save current</button></div>{library.filter((item) => item.kind === libraryKind).map((item) => <button type="button" key={item.id} onClick={() => applyLibraryItem(item)}><strong>{item.name}</strong><small>{item.subject || item.text_body.slice(0, 70)}</small></button>)}</div>}
+    <div className="compose-option-row compose-studio-options"><button type="button" className="compose-option-button" onClick={() => setShowLibrary((current) => !current)} aria-expanded={showLibrary}>Templates & snippets</button>{showLibrary && <div className="compose-library"><div className="compose-library-head"><select value={libraryKind} onChange={(event) => setLibraryKind(event.target.value as ComposeLibraryItem["kind"])}><option value="template">Templates</option><option value="canned">Canned replies</option><option value="snippet">Snippets</option></select><button type="button" onClick={() => void saveLibraryItem()}>Save current</button></div>{library.filter((item) => item.kind === libraryKind).map((item) => <button type="button" key={item.id} onClick={() => applyLibraryItem(item)}><strong>{item.name}{item.shared ? " · Team" : ""}</strong><small>{item.subject || item.text_body.slice(0, 70)}</small></button>)}</div>}
       {availableSignatures.length > 0 && <label className="compose-signature-select"><Tag size={14} aria-hidden="true" /><select value={signatureId} onChange={(event) => chooseSignature(event.target.value)} aria-label="Add signature"><option value="">Signature</option>{availableSignatures.map((signature) => <option key={signature.id} value={signature.id}>{signature.name}</option>)}</select></label>}
       <label className="schedule-field"><Clock3 size={14} aria-hidden="true" /><span>{scheduledAt ? "Scheduled" : "Deliver"}</span><select value={delayMinutes} onChange={(event) => setDelayMinutes(event.target.value)} aria-label="Delayed delivery"><option value="0">Now</option><option value="5">In 5 min</option><option value="15">In 15 min</option><option value="30">In 30 min</option><option value="60">In 1 hour</option></select></label><label className="schedule-field"><span>Send at</span><input type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} aria-label="Schedule send" /></label><label className="schedule-field"><span>Zone</span><select value={timeZone} onChange={(event) => setTimeZone(event.target.value)} aria-label="Scheduling time zone"><option>{timeZone}</option><option>UTC</option><option>Asia/Manila</option><option>America/New_York</option><option>Europe/London</option><option>Australia/Sydney</option></select></label>
       <button type="button" className={`compose-option-button${showMoreOptions ? " is-active" : ""}`} onClick={() => setShowMoreOptions((current) => !current)} aria-expanded={showMoreOptions}>Delivery & privacy</button></div>
@@ -2165,6 +2173,94 @@ function csvLines(value: string): string[][] {
   });
 }
 
+function CollaborationPanel() {
+  const [overview, setOverview] = useState<CollaborationOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [sharedKind, setSharedKind] = useState("template");
+  const [sharedName, setSharedName] = useState("");
+  const [sharedContent, setSharedContent] = useState("");
+  const [policyName, setPolicyName] = useState("");
+  const [policyKind, setPolicyKind] = useState("escalation");
+  const [policyEvent, setPolicyEvent] = useState("message_received");
+  const [policyPriority, setPolicyPriority] = useState("normal");
+  const [policyStatus, setPolicyStatus] = useState("open");
+  const [policyAssignee, setPolicyAssignee] = useState("");
+  const [policySlaMinutes, setPolicySlaMinutes] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try { setOverview(await apiFetch<CollaborationOverview>("/api/collaboration/overview")); }
+    catch (loadError) { setError(loadError instanceof Error ? loadError.message : "Collaboration workspace unavailable"); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  async function createShared(event: FormEvent) {
+    event.preventDefault();
+    if (!sharedName.trim() || !sharedContent.trim()) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await apiFetch("/api/collaboration/shared-items", { method: "POST", body: JSON.stringify({ kind: sharedKind, name: sharedName.trim(), payload: { text: sharedContent.trim() } }) });
+      setSharedName(""); setSharedContent(""); setNotice("Shared resource added to the workspace library"); await load();
+    } catch (createError) { setError(createError instanceof Error ? createError.message : "Shared resource could not be added"); }
+    finally { setBusy(false); }
+  }
+  async function removeShared(id: string) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/collaboration/shared-items/${id}`, { method: "DELETE" }); setNotice("Shared resource removed"); await load(); }
+    catch (removeError) { setError(removeError instanceof Error ? removeError.message : "Shared resource could not be removed"); }
+    finally { setBusy(false); }
+  }
+  async function createPolicy(event: FormEvent) {
+    event.preventDefault();
+    if (!policyName.trim()) return;
+    setBusy(true); setError(""); setNotice("");
+    const actions: Record<string, unknown> = { status: policyStatus, priority: policyPriority };
+    if (policyAssignee) actions.assigneeId = policyAssignee;
+    if (policySlaMinutes) actions.slaMinutes = Number(policySlaMinutes);
+    try {
+      await apiFetch("/api/collaboration/policies", { method: "POST", body: JSON.stringify({ name: policyName.trim(), kind: policyKind, conditions: { event: policyEvent }, actions, priority: (overview?.policies.length || 0) * 100 + 100 }) });
+      setPolicyName(""); setPolicyAssignee(""); setPolicySlaMinutes(""); setNotice("Workspace workflow saved"); await load();
+    } catch (policyError) { setError(policyError instanceof Error ? policyError.message : "Workflow could not be saved"); }
+    finally { setBusy(false); }
+  }
+  async function togglePolicy(policy: CollaborationOverview["policies"][number]) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/collaboration/policies/${policy.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !policy.enabled }) }); setNotice(policy.enabled ? "Workflow paused" : "Workflow enabled"); await load(); }
+    catch (toggleError) { setError(toggleError instanceof Error ? toggleError.message : "Workflow could not be updated"); }
+    finally { setBusy(false); }
+  }
+  async function removePolicy(id: string) {
+    setBusy(true); setError("");
+    try { await apiFetch(`/api/collaboration/policies/${id}`, { method: "DELETE" }); setNotice("Workflow removed"); await load(); }
+    catch (removeError) { setError(removeError instanceof Error ? removeError.message : "Workflow could not be removed"); }
+    finally { setBusy(false); }
+  }
+
+  if (loading) return <div className="admin-loading" role="status">Loading team collaboration…</div>;
+  if (!overview) return <div className="settings-alert settings-error" role="alert">{error || "Team collaboration is unavailable"}</div>;
+  const resources = overview.sharedItems || [];
+  return <div className="collaboration-console">
+    <div className="admin-toolbar">
+      <div><p className="eyebrow">TEAM COLLABORATION</p><h3>{overview.organization.name}</h3><p>Coordinate shared inbox work with clear ownership, private notes, and a traceable activity trail.</p></div>
+      <button className="secondary-button" onClick={() => void load()} disabled={busy}><RefreshCcw size={14} /> Refresh</button>
+    </div>
+    {error && <div className="settings-alert settings-error" role="alert">{error}</div>}
+    {notice && <div className="form-notice" role="status">{notice}</div>}
+    <div className="collaboration-stats"><div><strong>{overview.analytics.totalThreads}</strong><span>Tracked conversations</span></div><div><strong>{overview.analytics.assignedThreads}</strong><span>Assigned</span></div><div><strong>{overview.analytics.unassignedThreads}</strong><span>Unassigned</span></div><div className={overview.analytics.slaBreached ? "is-warning" : ""}><strong>{overview.analytics.slaBreached}</strong><span>SLA breaches</span></div></div>
+    <div className="collaboration-grid">
+      <section className="setting-card"><div className="setting-card-head"><div><h3>Workspace members</h3><p>Members can collaborate on delegated or shared mailbox conversations.</p></div><Users size={18} /></div><div className="collaboration-member-list">{overview.members.map((member) => <div className="collaboration-member" key={member.user_id}><span className="collaboration-avatar">{(member.display_name || member.email).slice(0, 1).toUpperCase()}</span><div><strong>{member.display_name || member.email}</strong><small>{member.email}</small></div><span className={`admin-badge ${member.role === "owner" || member.role === "admin" ? "active" : "member"}`}>{member.role}</span></div>)}</div></section>
+      <section className="setting-card"><div className="setting-card-head"><div><h3>Shared library</h3><p>Team templates, contacts, signatures, labels, and calendar resources.</p></div><Tag size={18} /></div><form className="collaboration-form" onSubmit={(event) => void createShared(event)}><div className="admin-form-row"><label>Resource type<select value={sharedKind} onChange={(event) => setSharedKind(event.target.value)}><option value="template">Team template</option><option value="contact">Shared contact</option><option value="signature">Shared signature</option><option value="label">Shared label</option><option value="calendar">Shared calendar item</option></select></label><label>Name<input value={sharedName} onChange={(event) => setSharedName(event.target.value)} placeholder="Support reply" required /></label></div><label>Content or resource details<textarea value={sharedContent} onChange={(event) => setSharedContent(event.target.value)} placeholder="Reusable text, contact details, or calendar information" rows={3} required /></label><button className="primary-button" disabled={busy}><Plus size={15} /> Add shared resource</button></form><div className="collaboration-resource-list">{resources.map((item) => <div className="collaboration-resource" key={item.id}><div><span className="collaboration-resource-kind">{item.kind}</span><strong>{item.name}</strong><small>{String(item.payload?.text || "Shared with the workspace")}</small></div><button className="text-button danger-text-button" onClick={() => void removeShared(item.id)} disabled={busy} aria-label={`Remove ${item.name}`}><Trash2 size={14} /></button></div>)}{!resources.length && <div className="rule-empty">No shared resources yet.</div>}</div></section>
+      <section className="setting-card collaboration-workflow-card"><div className="setting-card-head"><div><h3>Approval and escalation rules</h3><p>Automate assignment, priorities, status, and SLA deadlines for workspace events.</p></div><ShieldAlert size={18} /></div><form className="collaboration-form" onSubmit={(event) => void createPolicy(event)}><div className="admin-form-row"><label>Rule name<input value={policyName} onChange={(event) => setPolicyName(event.target.value)} placeholder="Urgent inbound triage" required /></label><label>Rule type<select value={policyKind} onChange={(event) => setPolicyKind(event.target.value)}><option value="escalation">Escalation</option><option value="approval">Approval</option></select></label></div><div className="admin-form-row"><label>When<select value={policyEvent} onChange={(event) => setPolicyEvent(event.target.value)}><option value="message_received">A message arrives</option><option value="comment_added">A team comment is added</option><option value="assignment_changed">Assignment changes</option><option value="status_changed">Status changes</option><option value="priority_changed">Priority changes</option></select></label><label>Priority<select value={policyPriority} onChange={(event) => setPolicyPriority(event.target.value)}><option value="urgent">Urgent</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label></div><div className="admin-form-row"><label>Set status<select value={policyStatus} onChange={(event) => setPolicyStatus(event.target.value)}><option value="new">New</option><option value="open">Open</option><option value="pending">Pending</option><option value="resolved">Resolved</option></select></label><label>Assign to<select value={policyAssignee} onChange={(event) => setPolicyAssignee(event.target.value)}><option value="">Leave unassigned</option>{overview.members.filter((member) => member.status === "active").map((member) => <option key={member.user_id} value={member.user_id}>{member.display_name || member.email}</option>)}</select></label></div><label>SLA minutes<input type="number" min="0" max="10080" value={policySlaMinutes} onChange={(event) => setPolicySlaMinutes(event.target.value)} placeholder="Default by priority" /></label><button className="primary-button" disabled={busy}><Plus size={15} /> Add workflow</button></form><div className="collaboration-policy-list">{overview.policies.map((policy) => <div className="collaboration-policy" key={policy.id}><div><strong>{policy.name}</strong><small>{policy.kind} · {String(policy.conditions?.event || "event")} · {policy.enabled ? "enabled" : "paused"}</small></div><div className="security-actions"><button className="text-button" onClick={() => void togglePolicy(policy)} disabled={busy}>{policy.enabled ? "Pause" : "Enable"}</button><button className="text-button danger-text-button" onClick={() => void removePolicy(policy.id)} disabled={busy}>Remove</button></div></div>)}{!overview.policies.length && <div className="rule-empty">No workspace workflows configured.</div>}</div></section>
+      <section className="setting-card"><div className="setting-card-head"><div><h3>Team activity</h3><p>Recent assignments, comments, SLA events, and shared-resource changes.</p></div><History size={18} /></div><div className="collaboration-activity-list">{overview.activity.slice(0, 12).map((item) => <div className="collaboration-activity" key={item.id}><span className="collaboration-activity-dot" /><div><strong>{item.event_type.replace(/_/g, " ")}</strong><small>{item.actor?.display_name || item.actor?.email || "Workspace member"} · {new Date(item.created_at).toLocaleString()}</small></div></div>)}{!overview.activity.length && <div className="rule-empty">No collaboration activity yet.</div>}</div></section>
+    </div>
+  </div>;
+}
+
 function SettingsPanel({
   session,
   settings,
@@ -2201,6 +2297,7 @@ function SettingsPanel({
     | "contacts"
     | "spam"
     | "automation"
+    | "collaboration"
     | "mailboxes"
     | "integrations"
     | "administration"
@@ -3194,6 +3291,7 @@ function SettingsPanel({
               ["contacts", "Contacts"],
               ["spam", "Spam & trust"],
               ["automation", "Rules & signatures"],
+              ["collaboration", "Team collaboration"],
               ["mailboxes", "Mailboxes"],
               ["administration", "Administration"],
               ["integrations", "Integrations"],
@@ -3209,6 +3307,7 @@ function SettingsPanel({
           ))}
         </div>
         {tab === "security" && securityError && <div className="settings-alert settings-error" role="alert">{securityError}</div>}
+        {tab === "collaboration" && <CollaborationPanel />}
         {tab === "security" && (
           <div className="settings-grid security-settings-grid">
             <div className="setting-card">
@@ -4392,6 +4491,11 @@ function MailboxApp({ session }: { session: Session }) {
   const [selected, setSelected] = useState<Message | null>(null);
   const [inlineImageUrls, setInlineImageUrls] = useState<Record<string, string>>({});
   const [threadMessages, setThreadMessages] = useState<Message[]>([]);
+  const [collaborationData, setCollaborationData] = useState<CollaborationData | null>(null);
+  const [collaborationBusy, setCollaborationBusy] = useState(false);
+  const [collaborationComment, setCollaborationComment] = useState("");
+  const [collaborationCommentKind, setCollaborationCommentKind] = useState<"comment" | "note">("comment");
+  const [collaborationCommentVisibility, setCollaborationCommentVisibility] = useState<"team" | "private">("team");
   const [detailLoading, setDetailLoading] = useState(false);
   const detailRequestRef = useRef(0);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -4863,6 +4967,14 @@ function MailboxApp({ session }: { session: Session }) {
     return () => window.clearTimeout(timer);
   }, [query, filter, sort, folder, view, loadMessages]);
   useEffect(() => {
+    const threadId = selected?.thread_id;
+    if (!threadId) return;
+    void loadCollaboration(threadId);
+    void updateCollaborationPresence("viewing");
+    const timer = window.setInterval(() => { void loadCollaboration(threadId); void updateCollaborationPresence("viewing"); }, 15_000);
+    return () => { window.clearInterval(timer); void updateCollaborationPresence("idle"); };
+  }, [selected?.thread_id]);
+  useEffect(() => {
     if (!searchFocused) return;
     const timer = window.setTimeout(() => {
       void apiFetch<SearchSuggestion[]>(`/api/search/suggestions?q=${encodeURIComponent(query)}`)
@@ -4871,6 +4983,32 @@ function MailboxApp({ session }: { session: Session }) {
     }, 160);
     return () => window.clearTimeout(timer);
   }, [query, searchFocused]);
+  async function loadCollaboration(threadId: string) {
+    try { setCollaborationData(await apiFetch<CollaborationData>(`/api/collaboration/threads/${encodeURIComponent(threadId)}`)); }
+    catch { setCollaborationData(null); }
+  }
+  async function updateCollaboration(patch: Record<string, unknown>) {
+    if (!selected?.thread_id) return;
+    setCollaborationBusy(true); setError("");
+    try { await apiFetch<CollaborationThreadState>(`/api/collaboration/threads/${encodeURIComponent(selected.thread_id)}/assignment`, { method: "PATCH", body: JSON.stringify(patch) }); await loadCollaboration(selected.thread_id); }
+    catch (collaborationError) { setError(collaborationError instanceof Error ? collaborationError.message : "Collaboration update failed"); }
+    finally { setCollaborationBusy(false); }
+  }
+  async function addCollaborationComment() {
+    if (!selected?.thread_id || !collaborationComment.trim()) return;
+    setCollaborationBusy(true); setError("");
+    const mentionedUserIds = (collaborationData?.members || []).filter((member) => collaborationComment.toLowerCase().includes(member.email.toLowerCase())).map((member) => member.user_id);
+    try {
+      await apiFetch(`/api/collaboration/threads/${encodeURIComponent(selected.thread_id)}/comments`, { method: "POST", body: JSON.stringify({ body: collaborationComment, kind: collaborationCommentKind, visibility: collaborationCommentVisibility, mentionedUserIds }) });
+      setCollaborationComment("");
+      await loadCollaboration(selected.thread_id);
+    } catch (commentError) { setError(commentError instanceof Error ? commentError.message : "Comment could not be posted"); }
+    finally { setCollaborationBusy(false); }
+  }
+  async function updateCollaborationPresence(state: "viewing" | "composing" | "idle") {
+    if (!selected?.thread_id) return;
+    await apiFetch(`/api/collaboration/threads/${encodeURIComponent(selected.thread_id)}/presence`, { method: "POST", body: JSON.stringify({ state }) }).catch(() => undefined);
+  }
   async function openMessage(message: Message) {
     const requestId = detailRequestRef.current + 1;
     detailRequestRef.current = requestId;
@@ -4883,6 +5021,8 @@ function MailboxApp({ session }: { session: Session }) {
     setDetailLoading(true);
     setError("");
     setShowAllThreadMessages(false);
+    setCollaborationData(null);
+    setCollaborationComment("");
     setShowMessageDetails(false);
     setThreadMessages([]);
     setTrustLensOpen(false);
@@ -4914,6 +5054,7 @@ function MailboxApp({ session }: { session: Session }) {
       const thread = await apiFetch<Message[]>(`/api/threads/${message.thread_id}`);
       if (detailRequestRef.current !== requestId) return;
       setThreadMessages(thread);
+      void loadCollaboration(message.thread_id);
       if (!message.is_read) {
         await apiFetch(`/api/mail/${message.id}`, {
           method: "POST",
@@ -5987,6 +6128,7 @@ function MailboxApp({ session }: { session: Session }) {
                     <div><span className="eyebrow">HISTORY</span><strong>{messages.filter((item) => item.from_address.toLowerCase() === detailIdentity?.email.toLowerCase()).length} visible messages</strong><small>{selectedContact ? "Saved contact" : "Not saved as a contact"}</small></div>
                   </div>
                 </details>
+                {collaborationData && <section className="collaboration-thread-card" aria-label="Team workspace"><div className="collaboration-thread-head"><div><p className="eyebrow">TEAM WORKSPACE</p><h3>Conversation collaboration</h3><small>{collaborationData.presence.some((item) => item.user_id !== session.user.id && item.state === "composing") ? "Someone is replying right now" : collaborationData.presence.some((item) => item.user_id !== session.user.id) ? "A teammate is viewing this conversation" : "Only you are viewing this conversation"}</small></div><Users size={17} /></div><div className="collaboration-thread-controls"><label>Status<select value={collaborationData.thread.status} onChange={(event) => void updateCollaboration({ status: event.target.value })} disabled={collaborationBusy}><option value="new">New</option><option value="open">Open</option><option value="pending">Pending</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><label>Priority<select value={collaborationData.thread.priority} onChange={(event) => void updateCollaboration({ priority: event.target.value })} disabled={collaborationBusy}><option value="urgent">Urgent</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option></select></label><label>Owner<select value={collaborationData.thread.assignee_id || ""} onChange={(event) => void updateCollaboration({ assigneeId: event.target.value || null })} disabled={collaborationBusy}><option value="">Unassigned</option>{collaborationData.members.filter((member) => member.status === "active").map((member) => <option key={member.user_id} value={member.user_id}>{member.display_name || member.email}</option>)}</select></label></div><div className={`collaboration-sla ${collaborationData.thread.sla_breached_at ? "is-breached" : ""}`}><Clock3 size={14} /><span><strong>{collaborationData.thread.sla_breached_at ? "SLA breached" : "SLA target"}</strong><small>{collaborationData.thread.sla_due_at ? new Date(collaborationData.thread.sla_due_at).toLocaleString() : "Not set"}</small></span></div>{collaborationData.presence.filter((item) => item.user_id !== session.user.id).length > 0 && <div className="collaboration-presence-list">{collaborationData.presence.filter((item) => item.user_id !== session.user.id).map((item) => <span key={item.user_id}><span className="presence-dot" />{item.member?.display_name || item.member?.email || "Teammate"}{item.state === "composing" ? " is replying…" : " is viewing"}</span>)}</div>}<div className="collaboration-comment-form"><div className="collaboration-comment-options"><select value={collaborationCommentKind} onChange={(event) => setCollaborationCommentKind(event.target.value as "comment" | "note")} aria-label="Collaboration message type"><option value="comment">Team comment</option><option value="note">Internal note</option></select><select value={collaborationCommentVisibility} onChange={(event) => setCollaborationCommentVisibility(event.target.value as "team" | "private")} aria-label="Comment visibility"><option value="team">Visible to team</option><option value="private">Private to admins and author</option></select></div><textarea value={collaborationComment} onChange={(event) => { setCollaborationComment(event.target.value); void updateCollaborationPresence("composing"); }} onFocus={() => void updateCollaborationPresence("composing")} onBlur={() => void updateCollaborationPresence("viewing")} placeholder="Add a comment or internal note… Mention a teammate by email." rows={3} /><button className="secondary-button" onClick={() => void addCollaborationComment()} disabled={collaborationBusy || !collaborationComment.trim()}><Send size={14} /> Post to team</button></div>{collaborationData.comments.length > 0 && <div className="collaboration-comments">{collaborationData.comments.filter((comment) => !comment.deleted_at).slice(-8).map((comment) => <article className={`collaboration-comment ${comment.kind === "note" ? "is-note" : ""}`} key={comment.id}><div className="collaboration-comment-meta"><strong>{comment.author?.display_name || comment.author?.email || "Workspace member"}</strong><span>{comment.kind === "note" ? "Internal note" : "Comment"} · {comment.visibility === "private" ? "Private" : "Team"}</span><time>{new Date(comment.created_at).toLocaleString()}</time></div><p>{comment.body}</p></article>)}</div>}{collaborationData.activity.length > 0 && <details className="collaboration-thread-history"><summary><History size={14} /> Conversation activity</summary><div>{collaborationData.activity.slice(-8).reverse().map((item) => <p key={item.id}><strong>{item.event_type.replace(/_/g, " ")}</strong><small>{item.actor?.display_name || item.actor?.email || "Workspace member"} · {new Date(item.created_at).toLocaleString()}</small></p>)}</div></details>}</section>}
                 {selected.spam_reasons && selected.spam_reasons.length > 0 && (
                   <div className="signal-box">
                     <ShieldAlert size={15} />
