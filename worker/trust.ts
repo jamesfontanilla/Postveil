@@ -47,6 +47,32 @@ export type TrustPolicy = {
   enabled?: boolean;
 };
 
+// Keep screening decisions explainable and versioned. This is deliberately a
+// local heuristic model; it is not presented as a probability until it has
+// been calibrated against a labelled evaluation set.
+export const SCREENING_MODEL_VERSION = "heuristic-v2";
+
+export function feedbackWeight(createdAt: string | null | undefined, now = Date.now(), halfLifeDays = 30): number {
+  const timestamp = createdAt ? Date.parse(createdAt) : Number.NaN;
+  if (!Number.isFinite(timestamp)) return 0.25;
+  const ageDays = Math.max(0, (now - timestamp) / (24 * 60 * 60 * 1000));
+  return Math.max(0.05, Math.min(1, Math.exp(-Math.log(2) * ageDays / Math.max(1, halfLifeDays))));
+}
+
+export function screeningConfidence(input: { score: number; signalCount: number; hardBlock?: boolean; authenticationPresent?: boolean }): number {
+  const score = Math.max(0, Math.min(1, input.score));
+  const signalStrength = Math.min(1, Math.max(0, input.signalCount) / 6);
+  const decisionDistance = Math.min(1, Math.abs(score - 0.35) / 0.65);
+  const authenticationSignal = input.authenticationPresent ? 0.08 : 0;
+  const hardBlockSignal = input.hardBlock ? 0.22 : 0;
+  const confidence = 0.22 + signalStrength * 0.22 + decisionDistance * 0.32 + authenticationSignal + hardBlockSignal;
+  return Number(Math.max(0.05, Math.min(0.99, confidence)).toFixed(4));
+}
+
+export function uniqueReasonCodes(reasons: string[]): string[] {
+  return [...new Set(reasons.map((reason) => reason.trim()).filter(Boolean))].slice(0, 32);
+}
+
 const statusPattern = "pass|fail|softfail|neutral|none|temperror|permerror";
 
 function cleanAddress(value: string): string {
