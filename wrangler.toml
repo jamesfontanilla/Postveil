@@ -18,7 +18,9 @@ simple = { limit = 120, period = 60 }
 [triggers]
 crons = ["* * * * *"]
 
-# Configure APP_DOMAIN, ALLOWED_SENDER_DOMAINS, and DEFAULT_FROM_EMAIL as
-# deployment secrets/variables in the Cloudflare dashboard or via Wrangler.
-# They are intentionally not committed so example values cannot reach a live
-# deployment.
+[vars]
+# Set these values for your deployment. Configure a Cloudflare custom domain
+# in the dashboard after deploying the Worker.
+APP_DOMAIN = "your-domain.example"
+ALLOWED_SENDER_DOMAINS = "your-domain.example"
+DEFAULT_FROM_EMAIL = "postmaster@your-domain.example"
