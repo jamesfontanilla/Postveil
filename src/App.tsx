@@ -3257,7 +3257,8 @@ function SettingsPanel({
             <X size={18} />
           </button>
         </div>
-        <div className="settings-tabs">
+        <div className="settings-layout">
+        <nav className="settings-tabs" aria-label="Settings sections">
           {(
             [
               ["appearance", "Appearance"],
@@ -3279,7 +3280,8 @@ function SettingsPanel({
               {label}
             </button>
           ))}
-        </div>
+        </nav>
+        <div className="settings-content">
         {tab === "security" && securityError && <div className="settings-alert settings-error" role="alert">{securityError}</div>}
         {tab === "security" && (
           <div className="settings-grid security-settings-grid">
@@ -4108,6 +4110,8 @@ function SettingsPanel({
           </div>
         )}
         {notice && <div className="form-notice">{notice}</div>}
+        </div>
+        </div>
       </section>
     </div>
   );
