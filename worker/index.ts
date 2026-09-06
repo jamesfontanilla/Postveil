@@ -3521,8 +3521,8 @@ async function verifySnsEnvelope(message: SnsEnvelope, expectedTopicArn?: string
     if (!certificateResponse.ok) return false;
     const pem = await certificateResponse.text();
     const der = base64Decode(pem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s+/g, ""));
-    const key = await crypto.subtle.importKey("spki", der.buffer as ArrayBuffer, { name: "RSASSA-PKCS1-v1_5", hash: String(message.SignatureVersion) === "2" ? "SHA-256" : "SHA-1" }, false, ["verify"]);
-    return await crypto.subtle.verify({ name: "RSASSA-PKCS1-v1_5" }, key, base64Decode(message.Signature).buffer as ArrayBuffer, new TextEncoder().encode(snsCanonicalString(message)));
+    const key = await crypto.subtle.importKey("spki", asArrayBuffer(der), { name: "RSASSA-PKCS1-v1_5", hash: String(message.SignatureVersion) === "2" ? "SHA-256" : "SHA-1" }, false, ["verify"]);
+    return await crypto.subtle.verify({ name: "RSASSA-PKCS1-v1_5" }, key, asArrayBuffer(base64Decode(message.Signature)), new TextEncoder().encode(snsCanonicalString(message)));
   } catch {
     return false;
   }
