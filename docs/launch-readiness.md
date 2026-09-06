@@ -9,6 +9,9 @@ not a substitute for provider approval, a restore exercise, or legal review.
 - The API rate-limit binding protects requests by IP and authenticated user.
 - Password failures now create a short account lock after five attempts in a
   rolling 15-minute window. Successful sign-in clears the counter.
+- Completed sign-ups, successful sign-ins, failed sign-ins, and lockouts are
+  recorded in D1 as audit events with hashed email/IP values and bounded
+  user-agent metadata.
 - Delivery webhooks accept only a Worker secret, deduplicate events for seven
   days, update delivery state, and add bounce/complaint suppressions.
 - Amazon SES production sending is approved in Singapore, both configured
