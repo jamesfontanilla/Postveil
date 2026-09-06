@@ -5,6 +5,8 @@ import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import {
   createD1Session,
   createD1User,
+  createD1PasswordResetToken,
+  consumeD1PasswordResetToken,
   deleteD1User,
   d1Probe,
   d1Request,
@@ -680,12 +682,43 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
     const body = await request.json() as JsonRecord;
     if (typeof body.password === "string") {
       const updated = await updateD1Password(env, user.id, body.password);
-      if (!updated) return json({ data: { user: null }, error: { message: "Password must be at least 8 characters" } }, 400);
+      if (!updated) return json({ data: { user: null }, error: { message: "Password must be at least 12 characters and include a letter and a number" } }, 400);
     }
     return json({ data: { user: { id: user.id, email: user.email, user_metadata: user.user_metadata } }, error: null });
   }
   if (url.pathname === "/api/auth/reset-password" && request.method === "POST") {
-    return json({ data: {}, error: null }, 202);
+    const generic = json({ data: {}, error: null, message: "If that address is registered, a reset link will arrive shortly." }, 202);
+    let body: JsonRecord;
+    try { body = await request.json() as JsonRecord; } catch { return generic; }
+    const email = cleanAddress(String(body.email || ""));
+    if (!isValidEmailAddress(email)) return generic;
+    try {
+      const row = await getUserByEmail(env, email);
+      if (!row) return generic;
+      const token = await createD1PasswordResetToken(env, String(row.id));
+      const link = `https://${configuredAppDomain(env)}/?recovery=${encodeURIComponent(token)}`;
+      await sendSystemMessage(env, {
+        fromAddress: await defaultFromAddress(env, String(row.id)),
+        to: [email],
+        subject: "Reset your Postveil password",
+        text: `Use this one-time link to reset your Postveil password:\n\n${link}\n\nThis link expires in 30 minutes. If you did not request this, you can ignore this email.`,
+        html: `<p>Use this one-time link to reset your Postveil password:</p><p><a href="${link}">Reset your Postveil password</a></p><p>This link expires in 30 minutes. If you did not request this, you can ignore this email.</p>`,
+      });
+    } catch {
+      // Preserve the same response for unknown, invalid, or undeliverable addresses.
+    }
+    return generic;
+  }
+  if (url.pathname === "/api/auth/complete-password-reset" && request.method === "POST") {
+    let body: JsonRecord;
+    try { body = await request.json() as JsonRecord; } catch { return error("Request body must be valid JSON", 400); }
+    const token = String(body.token || "").trim();
+    const password = String(body.password || "");
+    if (password.length < 12 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) return error("Password must be at least 12 characters and include a letter and a number", 400);
+    const userId = await consumeD1PasswordResetToken(env, token);
+    if (!userId) return error("This password-reset link is invalid or expired", 401);
+    if (!await updateD1Password(env, userId, password)) return error("Password could not be updated", 500);
+    return json({ ok: true });
   }
   return null;
 }

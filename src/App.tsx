@@ -970,7 +970,7 @@ function PublicHome({ onSignIn, onSignUp }: { onSignIn: () => void; onSignUp: ()
     <main className="public-home">
       <nav className="home-nav" aria-label="Postveil navigation">
         <a className="home-brand" href="#top" aria-label="Postveil home"><span className="home-brand-mark">P</span><span><strong>Postveil</strong><small>private mail</small></span></a>
-        <div className="home-nav-links"><a href="#how-it-works">How it works</a><a href="#privacy">Privacy</a><button type="button" className="home-signin" onClick={onSignIn}>Sign in</button></div>
+        <div className="home-nav-links"><a href="#how-it-works">How it works</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><button type="button" className="home-signin" onClick={onSignIn}>Sign in</button></div>
       </nav>
       <section className="home-hero" id="top">
         <div className="home-copy">
@@ -995,12 +995,12 @@ function PublicHome({ onSignIn, onSignUp }: { onSignIn: () => void; onSignUp: ()
         </div>
       </section>
       <section className="home-proof" id="how-it-works"><div><span className="home-proof-index">01</span><strong>Bring the name</strong><p>Enter a domain you control. Postveil guides the DNS handoff in plain language.</p></div><div><span className="home-proof-index">02</span><strong>Make the address</strong><p>Create hello@, you@, or a shared address without opening an AWS console.</p></div><div id="privacy"><span className="home-proof-index">03</span><strong>Keep the room yours</strong><p>Provider keys stay server-side, and your mailbox is separated from the machinery that delivers it.</p></div></section>
-      <footer className="home-footer"><span>Postveil / private mail for the domains you own</span><button type="button" onClick={onSignUp}>Start with your domain <ArrowRight size={14} /></button></footer>
+      <footer className="home-footer"><span>Postveil / private mail for the domains you own · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span><button type="button" onClick={onSignUp}>Start with your domain <ArrowRight size={14} /></button></footer>
     </main>
   );
 }
 
-function PasswordResetScreen({ onComplete }: { onComplete: () => void }) {
+function PasswordResetScreen({ onComplete, token }: { onComplete: () => void; token?: string | null }) {
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1021,8 +1021,12 @@ function PasswordResetScreen({ onComplete }: { onComplete: () => void }) {
     }
     setBusy(true);
     try {
-      const result = await requireSupabase().auth.updateUser({ password });
-      if (result.error) throw result.error;
+      if (token) {
+        await publicApiFetch("/api/auth/complete-password-reset", { method: "POST", body: JSON.stringify({ token, password }) });
+      } else {
+        const result = await requireSupabase().auth.updateUser({ password });
+        if (result.error) throw result.error;
+      }
       setNotice("Password updated. Sign in again with your new password.");
       setCompleted(true);
     } catch (resetError) {
@@ -6099,6 +6103,7 @@ function AppContent() {
   const [showPublicHome, setShowPublicHome] = useState(true);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [recovering, setRecovering] = useState(false);
+  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
   useEffect(() => {
     if (!supabase) {
@@ -6107,8 +6112,11 @@ function AppContent() {
     }
     void supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      const currentUrl = new URL(window.location.href);
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-      setRecovering(hashParams.get("type") === "recovery");
+      const token = currentUrl.searchParams.get("recovery");
+      setRecoveryToken(token);
+      setRecovering(Boolean(token) || hashParams.get("type") === "recovery");
       setReady(true);
     });
     const { data: listener } = supabase.auth.onAuthStateChange(
@@ -6161,7 +6169,15 @@ function AppContent() {
         <p>Loading Postveil…</p>
       </div>
     );
-  if (recovering) return <PasswordResetScreen onComplete={() => setRecovering(false)} />;
+  if (recovering) return <PasswordResetScreen token={recoveryToken} onComplete={() => {
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.delete("recovery");
+    window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+    setRecoveryToken(null);
+    setRecovering(false);
+    setShowPublicHome(false);
+    setAuthMode("signin");
+  }} />;
   if (!session) return showPublicHome
     ? <PublicHome onSignIn={() => { setAuthMode("signin"); setShowPublicHome(false); }} onSignUp={() => { setAuthMode("signup"); setShowPublicHome(false); }} />
     : <AuthScreen initialMode={authMode} onBack={() => setShowPublicHome(true)} />;

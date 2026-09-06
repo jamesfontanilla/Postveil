@@ -24,20 +24,22 @@
       <a class="mark" href="/" aria-label="Back to Postveil">P</a>
       <p class="eyebrow">Postveil / privacy notice</p>
       <h1>Your mailbox stays yours.</h1>
-      <p>Postveil provides custom-domain email access. This notice explains the information Postveil uses to operate the service.</p>
+      <p>Postveil provides custom-domain email access. This notice explains what we collect, why we use it, and which infrastructure providers help operate the service.</p>
       <div class="card">
         <h2>Information we use</h2>
         <ul>
           <li>Account information such as your email address, sign-in method, and optional profile name.</li>
           <li>Mailbox data, messages, attachments, delivery events, and settings needed to provide email service.</li>
-          <li>Security information such as session records, rate-limit signals, and audit events used to protect accounts.</li>
+          <li>Security information such as session records, rate-limit signals, device information, and audit events used to protect accounts.</li>
         </ul>
         <h2>How providers are used</h2>
-        <p>Postveil uses infrastructure providers to store and deliver mail. Provider credentials are kept server-side. Postveil does not sell mailbox content or use it to train an AI model. Email delivery can require sharing message data with the selected delivery provider.</p>
+        <p>Postveil uses Cloudflare to run the application and database, Backblaze B2 to store private message objects, Amazon SES to deliver mail, and Google to provide optional sign-in. Provider credentials are kept server-side. Postveil does not sell mailbox content or use it to train an AI model. Email delivery can require sharing message data with the selected delivery provider.</p>
         <h2>Security and retention</h2>
-        <p>Access is tenant-scoped and protected with authenticated sessions. Data is retained while your account is active or as needed to complete delivery, prevent abuse, resolve disputes, or comply with legal obligations. You may request account deletion or export through the service.</p>
+        <p>Access is tenant-scoped and protected with authenticated sessions. Data is retained while your account is active or as needed to complete delivery, prevent abuse, resolve disputes, or comply with legal obligations. Deleting an account may not immediately remove encrypted backups or provider-side delivery records. You may request account deletion or export through the service.</p>
+        <h2>Your choices</h2>
+        <p>You may request access, correction, export, deletion, or clarification about processing by contacting us. You may also stop using the service and remove your domain routing records. We may need to verify your identity before fulfilling a request.</p>
         <h2>Contact</h2>
-        <p>For privacy questions, contact <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a>.</p>
+        <p>For privacy questions, data requests, or security concerns, contact <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a>. Read the <a href="/terms">terms of service</a> before using Postveil.</p>
       </div>
       <footer>Last updated: September 6, 2026 · <a href="/">Return to Postveil</a></footer>
     </main>

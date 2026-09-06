@@ -1,8 +1,8 @@
 # Postveil — self-hosted custom-domain mail
 
-Postveil is a Cloudflare Worker and React webmail application for a custom domain. It can receive mail through Cloudflare Email Routing, parse MIME messages, store metadata in Cloudflare D1, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through Amazon SES.
+Postveil is a Cloudflare Worker and React webmail application for custom-domain mail. It can receive mail through a configured Cloudflare Email Worker route, parse MIME messages, store metadata in Cloudflare D1, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through Amazon SES.
 
-This repository is a self-hosted reference implementation. It is currently designed around one owner per deployment; it is not a hosted multi-tenant service. Each deployment must use its own D1 database, provider accounts, storage bucket, domain, and secrets.
+This repository is an early-release reference implementation. The current deployment is not a turnkey multi-tenant custom-domain SaaS: domain verification, provider identity provisioning, and inbound routing still require operator-controlled setup. Each deployment must use its own D1 database, provider accounts, storage bucket, domain, and secrets until the hosted multi-tenant architecture is completed.
 
 - Cloudflare Email Routing sends inbound mail to the email Worker.
 - The Worker parses MIME messages, stores metadata in D1, and stores raw messages/attachments in a private Backblaze B2 bucket.
@@ -35,11 +35,13 @@ The Vite app does not require provider credentials. Never place AWS SES or Backb
 
 ## D1 setup
 
-Apply `migrations/0001_records.sql` to the target D1 database with Wrangler.
-The Worker uses a compatibility record adapter so existing mail routes can be
-migrated without exposing D1 directly to the browser. The adapter stores
-tenant-scoped JSON records in D1 and keeps authentication sessions in separate
-tables.
+Apply the ordered files under `migrations/` to the target D1 database with Wrangler.
+The Worker currently uses a compatibility record adapter so the existing mail
+routes can run on D1 without exposing D1 directly to the browser. It stores
+tenant-scoped JSON records in D1 and keeps authentication sessions and OAuth
+state in separate tables. This adapter is appropriate for development and a
+small controlled beta; a public multi-tenant service should migrate hot paths
+to normalized SQL tables with database-enforced constraints.
 
 Powerful search uses the `search_vector` GIN index for full-text queries and
 owner-scoped indexes for dates, size, spam score, links, authentication
@@ -98,12 +100,12 @@ Configure each provider webhook to send `POST` requests with the deployment's pr
 
 ## Deployment
 
-1. Create the D1 database and apply `migrations/0001_records.sql`.
+1. Create the D1 database and apply every ordered migration under `migrations/`.
 2. Create a private Backblaze B2 bucket and a least-privilege application key.
-3. Authenticate your sending domain and sender with Amazon SES. SES accounts must be out of the sandbox before sending to arbitrary recipients.
+3. Authenticate each sending domain and sender with Amazon SES. SES accounts must be out of the sandbox before sending to arbitrary recipients.
 4. Configure DNS for MX, SPF, DKIM, and DMARC.
 5. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
-6. Set your domain values in `wrangler.toml` and configure the Cloudflare custom domain.
+6. Set your deployment domain values in `wrangler.toml` and configure the Cloudflare custom domain. Do not treat the onboarding domain field as automatic provider provisioning: custom-domain SaaS operation requires a separate verified-domain and routing workflow.
 7. Run `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
 8. Deploy with `npm run deploy` and verify authenticated API routes, inbound mail, outbound mail, webhook delivery, and signed attachment downloads.
 

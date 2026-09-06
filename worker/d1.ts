@@ -22,6 +22,10 @@ type Row = JsonRecord & { id: string };
 
 const SESSION_SECONDS = 60 * 60 * 24 * 30;
 
+function isStrongPassword(password: string): boolean {
+  return password.length >= 12 && /[A-Za-z]/.test(password) && /\d/.test(password);
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -249,6 +253,7 @@ export async function getUserByEmail(env: D1Env, email: string): Promise<Record<
 export async function createD1User(env: D1Env, email: string, password: string, displayName = ""): Promise<{ user: D1User; session: D1Session }> {
   const normalized = email.trim().toLowerCase();
   if (!normalized || !password) throw new Error("Email and password are required");
+  if (!isStrongPassword(password)) throw new Error("Password must be at least 12 characters and include a letter and a number");
   if (await getUserByEmail(env, normalized)) throw new Error("An account with that email already exists");
   const id = crypto.randomUUID();
   const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -314,10 +319,39 @@ export async function deleteD1User(env: D1Env, userId: string): Promise<void> {
 }
 
 export async function updateD1Password(env: D1Env, userId: string, password: string): Promise<boolean> {
-  if (!password || password.length < 8) return false;
+  if (!isStrongPassword(password)) return false;
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const result = await env.DB.prepare("UPDATE pv_users SET password_hash = ?1, password_salt = ?2, updated_at = ?3 WHERE id = ?4")
     .bind(await passwordHash(password, salt), encode(salt), now(), userId).run();
   await revokeD1UserSessions(env, userId);
   return Number(result.meta?.changes || 0) > 0;
+}
+
+function randomPasswordResetToken(): string {
+  return encode(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+export async function createD1PasswordResetToken(env: D1Env, userId: string): Promise<string> {
+  const token = randomPasswordResetToken();
+  const nowValue = now();
+  await env.DB.prepare("DELETE FROM pv_password_reset_tokens WHERE user_id = ?1 OR expires_at <= ?2")
+    .bind(userId, nowValue)
+    .run();
+  await env.DB.prepare("INSERT INTO pv_password_reset_tokens(token_hash,user_id,expires_at,used_at,created_at) VALUES (?1,?2,?3,NULL,?4)")
+    .bind(await tokenHash(token), userId, new Date(Date.now() + 30 * 60 * 1000).toISOString(), nowValue)
+    .run();
+  return token;
+}
+
+export async function consumeD1PasswordResetToken(env: D1Env, token: string): Promise<string | null> {
+  if (!token) return null;
+  const tokenHashValue = await tokenHash(token);
+  const current = await env.DB.prepare("SELECT user_id FROM pv_password_reset_tokens WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2 LIMIT 1")
+    .bind(tokenHashValue, now())
+    .first<{ user_id: string }>();
+  if (!current?.user_id) return null;
+  const result = await env.DB.prepare("UPDATE pv_password_reset_tokens SET used_at = ?1 WHERE token_hash = ?2 AND used_at IS NULL AND expires_at > ?3")
+    .bind(now(), tokenHashValue, now())
+    .run();
+  return Number(result.meta?.changes || 0) === 1 ? current.user_id : null;
 }

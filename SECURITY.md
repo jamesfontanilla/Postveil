@@ -7,11 +7,11 @@ published, so deployments should record the exact commit they run.
 
 ## Scope and limitations
 
-Postveil is a self-hosted reference implementation. Operators are responsible
-for their Cloudflare, Supabase, Brevo, Backblaze, DNS, identity, backup, and
-monitoring configuration. Static attachment checks do not provide antivirus
-protection, and a public deployment must add quotas, abuse controls, backups,
-and malware scanning appropriate to its risk.
+Postveil is an early-release reference implementation. Operators are
+responsible for their Cloudflare, D1, SES, Backblaze, DNS, Google OAuth,
+identity, backup, and monitoring configuration. Static attachment checks do
+not provide antivirus protection, and a public deployment must add quotas,
+abuse controls, backups, and malware scanning appropriate to its risk.
 
 ## Reporting a Vulnerability
 
