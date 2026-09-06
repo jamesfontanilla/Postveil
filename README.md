@@ -93,6 +93,8 @@ MAILGUN_WEBHOOK_SIGNING_KEY (optional)
 POSTMARK_WEBHOOK_SECRET (optional)
 SENDGRID_WEBHOOK_SECRET (optional)
 SES_WEBHOOK_SECRET (optional)
+SES_SNS_TOPIC_ARN (optional; restricts native Amazon SNS SES notifications to one topic ARN)
+SES_CONFIGURATION_SET_NAME (optional; attaches SES sends to the event configuration set)
 SMTP_WEBHOOK_SECRET (optional)
 CONFIDENTIAL_LINK_SECRET (required for confidential mode)
 CONFIDENTIAL_ENCRYPTION_KEY (required for confidential mode)
@@ -113,7 +115,7 @@ enablement additionally requires a public MX lookup to match one of the exact
 `INBOUND_MX_TARGETS`; an arbitrary MX record no longer counts. SPF/DKIM/DMARC
 setup remains a separate DNS handoff.
 
-Configure each provider webhook to send `POST` requests with the deployment's provider secret in the `x-webhook-secret` header. Query-string webhook tokens are deliberately not accepted. Provider-specific webhook payloads are normalized for delivery, bounce, complaint, open, click, and receipt events; the provider must still be configured to emit those events.
+Configure each provider webhook to send `POST` requests with the deployment's provider secret in the `x-webhook-secret` header. Query-string webhook tokens are deliberately not accepted. Amazon SES may also send native Amazon SNS `Notification` messages: the Worker validates the SNS signing certificate and signature, optionally checks `SES_SNS_TOPIC_ARN`, handles subscription confirmation, and then applies the same idempotent delivery processing. Provider-specific webhook payloads are normalized for delivery, bounce, complaint, open, click, and receipt events; the provider must still be configured to emit those events.
 
 ## Deployment
 

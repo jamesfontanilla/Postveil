@@ -35,6 +35,7 @@ export type DeliveryEnvironment = {
   AWS_ACCESS_KEY_ID?: string;
   AWS_SECRET_ACCESS_KEY?: string;
   AWS_SES_REGION?: string;
+  SES_CONFIGURATION_SET_NAME?: string;
   AWS_REGION?: string;
   MAILGUN_API_KEY?: string;
   MAILGUN_DOMAIN?: string;
@@ -217,7 +218,7 @@ async function sendSes(env: DeliveryEnvironment, input: DeliveryInput, config: R
     FromEmailAddress: input.fromAddress,
     Destination: { ToAddresses: input.to, CcAddresses: input.cc, BccAddresses: input.bcc },
     ReplyToAddresses: input.replyTo ? [input.replyTo] : undefined,
-    ConfigurationSetName: typeof config.configurationSetName === "string" ? config.configurationSetName : undefined,
+    ConfigurationSetName: typeof config.configurationSetName === "string" ? config.configurationSetName : env.SES_CONFIGURATION_SET_NAME || undefined,
     Content: { Simple: { Subject: { Data: input.subject || "(no subject)" }, Body: { Text: { Data: input.text || "" }, Html: input.html ? { Data: input.html } : undefined }, Headers: Object.entries(receiptHeaders(input)).map(([Name, Value]) => ({ Name, Value })), Attachments: (input.attachments || []).map((attachment) => ({ FileName: attachment.filename, ContentType: attachment.contentType, RawContent: attachment.bytes, ContentDisposition: "ATTACHMENT" })) } },
   });
   const started = Date.now();

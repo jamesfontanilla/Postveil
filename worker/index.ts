@@ -131,6 +131,8 @@ interface Env {
   POSTMARK_WEBHOOK_SECRET?: string;
   SENDGRID_WEBHOOK_SECRET?: string;
   SES_WEBHOOK_SECRET?: string;
+  SES_SNS_TOPIC_ARN?: string;
+  SES_CONFIGURATION_SET_NAME?: string;
   SMTP_WEBHOOK_SECRET?: string;
   INBOUND_MX_TARGETS?: string;
   TURNSTILE_SECRET_KEY?: string;
@@ -3485,6 +3487,47 @@ function webhookEventId(provider: ProviderName, event: JsonRecord): string {
   return String(event.eventId || event.event_id || event.sg_event_id || event.id || event.MessageID || event.messageId || event["message-id"] || mail.messageId || mail["message-id"] || headers["message-id"] || `${provider}:${event.eventType || event.event || event.Type || event.RecordType || event.notificationType || "event"}:${event.timestamp || event.occurredAt || event.recipient || event.email || ""}`);
 }
 
+type SnsEnvelope = {
+  Type?: string;
+  MessageId?: string;
+  TopicArn?: string;
+  Message?: string;
+  Subject?: string;
+  Timestamp?: string;
+  SignatureVersion?: string;
+  Signature?: string;
+  SigningCertURL?: string;
+  SubscribeURL?: string;
+  Token?: string;
+};
+
+function snsCanonicalString(message: SnsEnvelope): string {
+  const type = String(message.Type || "");
+  const fields = type === "SubscriptionConfirmation"
+    ? ["Message", "MessageId", "SubscribeURL", "Timestamp", "Token", "TopicArn", "Type"]
+    : ["Message", "MessageId", ...(message.Subject ? ["Subject"] : []), "Timestamp", "TopicArn", "Type"];
+  return `${fields.filter((field) => message[field as keyof SnsEnvelope] !== undefined).map((field) => `${field}\n${String(message[field as keyof SnsEnvelope])}\n`).join("")}`;
+}
+
+async function verifySnsEnvelope(message: SnsEnvelope, expectedTopicArn?: string): Promise<boolean> {
+  if (!message.Type || !message.MessageId || !message.TopicArn || !message.Timestamp || !message.Signature || !message.SigningCertURL) return false;
+  if (expectedTopicArn && message.TopicArn !== expectedTopicArn) return false;
+  let certificateUrl: URL;
+  try { certificateUrl = new URL(message.SigningCertURL); } catch { return false; }
+  const certificateHost = certificateUrl.hostname.toLowerCase();
+  if (certificateUrl.protocol !== "https:" || !certificateHost.endsWith(".amazonaws.com")) return false;
+  try {
+    const certificateResponse = await fetch(certificateUrl.toString(), { headers: { accept: "application/x-pem-file,text/plain" } });
+    if (!certificateResponse.ok) return false;
+    const pem = await certificateResponse.text();
+    const der = base64Decode(pem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s+/g, ""));
+    const key = await crypto.subtle.importKey("spki", der.buffer as ArrayBuffer, { name: "RSASSA-PKCS1-v1_5", hash: String(message.SignatureVersion) === "2" ? "SHA-256" : "SHA-1" }, false, ["verify"]);
+    return await crypto.subtle.verify({ name: "RSASSA-PKCS1-v1_5" }, key, base64Decode(message.Signature).buffer as ArrayBuffer, new TextEncoder().encode(snsCanonicalString(message)));
+  } catch {
+    return false;
+  }
+}
+
 function normalizeDeliveryEvents(provider: ProviderName, input: unknown): DeliveryEvent[] {
   let payload = input as JsonRecord;
   if (provider === "ses" && typeof payload.Message === "string") {
@@ -3628,6 +3671,26 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (deliveryWebhookMatch) {
     if (request.method !== "POST") return error("Method not allowed", 405);
     const provider = deliveryWebhookMatch[1] as ProviderName;
+    const snsMessageType = request.headers.get("x-amz-sns-message-type");
+    if (provider === "ses" && snsMessageType) {
+      const envelope = await request.json() as SnsEnvelope;
+      if (String(envelope.Type || snsMessageType) !== snsMessageType || !(await verifySnsEnvelope(envelope, env.SES_SNS_TOPIC_ARN))) return error("Invalid Amazon SNS signature", 401);
+      if (snsMessageType === "SubscriptionConfirmation") {
+        const subscribeUrl = typeof envelope.SubscribeURL === "string" ? envelope.SubscribeURL : "";
+        if (subscribeUrl) {
+          try {
+            const parsed = new URL(subscribeUrl);
+            if (parsed.protocol === "https:" && parsed.hostname.toLowerCase().endsWith(".amazonaws.com")) ctx.waitUntil(fetch(parsed.toString(), { method: "GET" }));
+          } catch { /* reject no-op confirmation URLs without leaking details */ }
+        }
+        return json({ ok: true, confirmed: Boolean(subscribeUrl) }, 202);
+      }
+      if (snsMessageType !== "Notification") return error("Unsupported Amazon SNS message type", 400);
+      const events = normalizeDeliveryEvents(provider, envelope);
+      const results = [];
+      for (const event of events) results.push(await processDeliveryEvent(env, event));
+      return json({ ok: true, received: events.length, matched: results.filter((result) => result.matched).length, replayed: results.filter((result) => result.replayed).length, source: "amazon-sns" });
+    }
     const expectedSecret = providerWebhookSecret(env, provider);
     const suppliedSecret = request.headers.get("x-webhook-secret") || request.headers.get("x-webhook-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
     if (!expectedSecret) return error("This provider webhook is not configured", 503);
