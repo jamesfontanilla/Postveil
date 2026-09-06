@@ -16,6 +16,7 @@ import {
   listD1Users,
   revokeD1Session,
   revokeD1UserSessions,
+  recordD1AuthEvent,
   recordD1SignInFailure,
   updateD1User,
   updateD1Password,
@@ -810,6 +811,10 @@ async function handleCloudflareOAuthCallback(request: Request, env: Env): Promis
 
 async function handleD1Auth(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
+  const authContext = {
+    ip: request.headers.get("cf-connecting-ip") || undefined,
+    userAgent: request.headers.get("user-agent") || undefined,
+  };
   const googleResponse = await handleGoogleAuth(request, env);
   if (googleResponse) return googleResponse;
   if (url.pathname === "/api/auth/signup" && request.method === "POST") {
@@ -831,6 +836,7 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
         throw verificationError;
       }
       await revokeD1Session(env, created.session.access_token).catch(() => undefined);
+      await recordD1AuthEvent(env, { ...authContext, userId: created.user.id, email: created.user.email, eventType: "signup_completed" });
       return json({ data: { user: created.user, session: null, verificationRequired: true }, error: null }, 201);
     } catch (authError) {
       return json({ data: { user: null, session: null }, error: { message: authError instanceof Error ? authError.message : "Unable to create account" } }, 400);
@@ -843,10 +849,17 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
       const result = await verifyD1Password(env, String(body.email || ""), String(body.password || ""));
       if (!result) {
         const failure = await recordD1SignInFailure(env, String(body.email || ""));
+        await recordD1AuthEvent(env, {
+          ...authContext,
+          userId: existing?.id ? String(existing.id) : undefined,
+          email: String(body.email || ""),
+          eventType: failure.locked ? "signin_locked" : "signin_failed",
+        });
         if (failure.locked) return json({ data: { user: null, session: null }, error: { message: "Too many unsuccessful attempts. Try again in about 15 minutes.", code: "account_temporarily_locked" } }, 429);
         if (existing && !existing.email_verified_at) return json({ data: { user: null, session: null }, error: { message: "Verify your email address before signing in", code: "email_not_verified" } }, 403);
         return json({ data: { user: null, session: null }, error: { message: "Invalid email or password" } }, 401);
       }
+      await recordD1AuthEvent(env, { ...authContext, userId: result.user.id, email: result.user.email, eventType: "signin_success" });
       return json({ data: result, error: null });
     } catch (authError) {
       return json({ data: { user: null, session: null }, error: { message: authError instanceof Error ? authError.message : "Unable to sign in" } }, 400);

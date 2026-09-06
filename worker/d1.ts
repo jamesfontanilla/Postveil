@@ -242,6 +242,30 @@ async function tokenHash(token: string): Promise<string> {
   return encode(new Uint8Array(digest));
 }
 
+export async function recordD1AuthEvent(env: D1Env, event: {
+  userId?: string;
+  email: string;
+  eventType: string;
+  ip?: string;
+  userAgent?: string;
+}): Promise<void> {
+  try {
+    await env.DB.prepare("INSERT INTO pv_auth_events(id,user_id,email_hash,event_type,ip_hash,user_agent,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)")
+      .bind(
+        crypto.randomUUID(),
+        event.userId || null,
+        await tokenHash(event.email.trim().toLowerCase()),
+        event.eventType,
+        event.ip ? await tokenHash(event.ip) : null,
+        event.userAgent ? event.userAgent.slice(0, 256) : null,
+        now(),
+      )
+      .run();
+  } catch {
+    // Authentication must remain available if audit storage is temporarily unavailable.
+  }
+}
+
 function userFromRow(row: Record<string, unknown>): D1User {
   let metadata: JsonRecord = {};
   try { metadata = asRecord(JSON.parse(String(row.metadata || "{}"))); } catch { metadata = {}; }
