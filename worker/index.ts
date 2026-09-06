@@ -3509,6 +3509,51 @@ function snsCanonicalString(message: SnsEnvelope): string {
   return `${fields.filter((field) => message[field as keyof SnsEnvelope] !== undefined).map((field) => `${field}\n${String(message[field as keyof SnsEnvelope])}\n`).join("")}`;
 }
 
+type DerNode = { tag: number; start: number; valueStart: number; end: number };
+
+function readDerNode(bytes: Uint8Array, offset: number): DerNode {
+  if (offset + 2 > bytes.length) throw new Error("truncated DER");
+  const start = offset;
+  const tag = bytes[offset++];
+  const firstLengthByte = bytes[offset++];
+  let length = firstLengthByte;
+  if (firstLengthByte & 0x80) {
+    const lengthBytes = firstLengthByte & 0x7f;
+    if (!lengthBytes || lengthBytes > 4 || offset + lengthBytes > bytes.length) throw new Error("invalid DER length");
+    length = 0;
+    for (let index = 0; index < lengthBytes; index += 1) length = length * 256 + bytes[offset++];
+  }
+  const end = offset + length;
+  if (end > bytes.length) throw new Error("truncated DER value");
+  return { tag, start, valueStart: offset, end };
+}
+
+function derChildren(bytes: Uint8Array, node: DerNode): DerNode[] {
+  const children: DerNode[] = [];
+  for (let offset = node.valueStart; offset < node.end;) {
+    const child = readDerNode(bytes, offset);
+    children.push(child);
+    offset = child.end;
+  }
+  if (children.length === 0 && node.valueStart !== node.end) throw new Error("invalid DER children");
+  return children;
+}
+
+function certificateSubjectPublicKeyInfo(certificate: Uint8Array): Uint8Array {
+  const certificateSequence = readDerNode(certificate, 0);
+  if (certificateSequence.tag !== 0x30 || certificateSequence.end !== certificate.length) throw new Error("invalid certificate sequence");
+  const certificateParts = derChildren(certificate, certificateSequence);
+  const tbsCertificate = certificateParts[0];
+  if (!tbsCertificate || tbsCertificate.tag !== 0x30) throw new Error("missing TBS certificate");
+  const fields = derChildren(certificate, tbsCertificate);
+  let fieldIndex = 0;
+  if (fields[fieldIndex]?.tag === 0xa0) fieldIndex += 1;
+  fieldIndex += 5;
+  const subjectPublicKeyInfo = fields[fieldIndex];
+  if (!subjectPublicKeyInfo || subjectPublicKeyInfo.tag !== 0x30) throw new Error("missing subject public key info");
+  return certificate.slice(subjectPublicKeyInfo.start, subjectPublicKeyInfo.end);
+}
+
 async function verifySnsEnvelope(message: SnsEnvelope, expectedTopicArn?: string): Promise<boolean> {
   if (!message.Type || !message.MessageId || !message.TopicArn || !message.Timestamp || !message.Signature || !message.SigningCertURL) return false;
   if (expectedTopicArn && message.TopicArn !== expectedTopicArn) return false;
@@ -3524,7 +3569,8 @@ async function verifySnsEnvelope(message: SnsEnvelope, expectedTopicArn?: string
     stage = "certificate_import";
     const pem = await certificateResponse.text();
     const der = base64Decode(pem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s+/g, ""));
-    const key = await crypto.subtle.importKey("spki", asArrayBuffer(der), { name: "RSASSA-PKCS1-v1_5", hash: String(message.SignatureVersion) === "2" ? "SHA-256" : "SHA-1" }, false, ["verify"]);
+    const subjectPublicKeyInfo = certificateSubjectPublicKeyInfo(der);
+    const key = await crypto.subtle.importKey("spki", asArrayBuffer(subjectPublicKeyInfo), { name: "RSASSA-PKCS1-v1_5", hash: String(message.SignatureVersion) === "2" ? "SHA-256" : "SHA-1" }, false, ["verify"]);
     stage = "signature_verify";
     const verified = await crypto.subtle.verify({ name: "RSASSA-PKCS1-v1_5", hash: String(message.SignatureVersion) === "2" ? "SHA-256" : "SHA-1" }, key, asArrayBuffer(base64Decode(message.Signature)), new TextEncoder().encode(snsCanonicalString(message)));
     if (!verified) console.warn("sns_signature_invalid", { type: message.Type, signatureVersion: message.SignatureVersion, certificateHost });
