@@ -86,20 +86,24 @@ function unsupported<T>(message: string): Promise<AuthResponse<T>> {
 
 const auth = {
   async getSession(): Promise<AuthResponse<{ session: Session | null }>> {
-    if (!currentSession) {
-      const currentUrl = new URL(window.location.href);
-      const oauthCode = currentUrl.searchParams.get("oauth_code");
-      if (oauthCode) {
-        const result = await request<{ user: PostveilUser; session: Session }>(`/api/auth/google/complete?code=${encodeURIComponent(oauthCode)}`);
-        currentUrl.searchParams.delete("oauth_code");
-        currentUrl.searchParams.delete("oauth_error");
-        window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
-        if (!result.error) {
-          writeSession(result.data.session);
-          emit("SIGNED_IN", result.data.session);
-        }
-        return result;
+    const currentUrl = new URL(window.location.href);
+    const oauthCode = currentUrl.searchParams.get("oauth_code");
+    // The callback must win over any cached session. Otherwise an expired token
+    // in localStorage can cause a successful OAuth handoff to be ignored.
+    if (oauthCode) {
+      const result = await request<{ user: PostveilUser; session: Session }>(`/api/auth/google/complete?code=${encodeURIComponent(oauthCode)}`);
+      currentUrl.searchParams.delete("oauth_code");
+      currentUrl.searchParams.delete("oauth_error");
+      window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+      if (!result.error) {
+        writeSession(result.data.session);
+        emit("SIGNED_IN", result.data.session);
+      } else {
+        writeSession(null);
       }
+      return result;
+    }
+    if (!currentSession) {
       if (currentUrl.searchParams.has("oauth_error")) {
         currentUrl.searchParams.delete("oauth_error");
         window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);

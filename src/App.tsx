@@ -6112,6 +6112,7 @@ function AppContent() {
     }
     void supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
+      if (data.session) setShowPublicHome(false);
       const currentUrl = new URL(window.location.href);
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       const token = currentUrl.searchParams.get("recovery");
@@ -6122,6 +6123,7 @@ function AppContent() {
     const { data: listener } = supabase.auth.onAuthStateChange(
       (event, nextSession) => {
         if (event === "PASSWORD_RECOVERY") setRecovering(true);
+        if (event === "SIGNED_IN") setShowPublicHome(false);
         if (event === "SIGNED_OUT") {
           setRecovering(false);
           setMfaRequired(false);
