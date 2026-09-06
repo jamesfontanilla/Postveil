@@ -3512,18 +3512,25 @@ function snsCanonicalString(message: SnsEnvelope): string {
 async function verifySnsEnvelope(message: SnsEnvelope, expectedTopicArn?: string): Promise<boolean> {
   if (!message.Type || !message.MessageId || !message.TopicArn || !message.Timestamp || !message.Signature || !message.SigningCertURL) return false;
   if (expectedTopicArn && message.TopicArn !== expectedTopicArn) return false;
+  let stage = "certificate_url";
   let certificateUrl: URL;
   try { certificateUrl = new URL(message.SigningCertURL); } catch { return false; }
   const certificateHost = certificateUrl.hostname.toLowerCase();
   if (certificateUrl.protocol !== "https:" || !certificateHost.endsWith(".amazonaws.com")) return false;
   try {
+    stage = "certificate_fetch";
     const certificateResponse = await fetch(certificateUrl.toString(), { headers: { accept: "application/x-pem-file,text/plain" } });
     if (!certificateResponse.ok) return false;
+    stage = "certificate_import";
     const pem = await certificateResponse.text();
     const der = base64Decode(pem.replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s+/g, ""));
     const key = await crypto.subtle.importKey("spki", asArrayBuffer(der), { name: "RSASSA-PKCS1-v1_5", hash: String(message.SignatureVersion) === "2" ? "SHA-256" : "SHA-1" }, false, ["verify"]);
-    return await crypto.subtle.verify({ name: "RSASSA-PKCS1-v1_5" }, key, asArrayBuffer(base64Decode(message.Signature)), new TextEncoder().encode(snsCanonicalString(message)));
-  } catch {
+    stage = "signature_verify";
+    const verified = await crypto.subtle.verify({ name: "RSASSA-PKCS1-v1_5", hash: String(message.SignatureVersion) === "2" ? "SHA-256" : "SHA-1" }, key, asArrayBuffer(base64Decode(message.Signature)), new TextEncoder().encode(snsCanonicalString(message)));
+    if (!verified) console.warn("sns_signature_invalid", { type: message.Type, signatureVersion: message.SignatureVersion, certificateHost });
+    return verified;
+  } catch (error) {
+    console.warn("sns_signature_verification_error", { stage, type: message.Type, message: error instanceof Error ? error.message.slice(0, 160) : "unknown" });
     return false;
   }
 }
