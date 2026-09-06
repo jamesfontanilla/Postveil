@@ -1078,7 +1078,11 @@ const ONBOARDING_STEPS = [
 ];
 
 function normalizeDomain(value: string): string {
-  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/\.$/, "");
+  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+}
+
+function canonicalDomain(value: string): string {
+  return normalizeDomain(value).replace(/\.$/, "");
 }
 
 function OnboardingWizard({ session, onComplete }: { session: Session; onComplete: () => void }) {
@@ -1148,7 +1152,7 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
   }
 
   async function createMailbox() {
-    const cleanDomain = normalizeDomain(domain);
+    const cleanDomain = canonicalDomain(domain);
     const cleanLocal = mailboxLocal.trim().toLowerCase();
     if (!/^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/.test(cleanLocal)) {
       setError("Use letters, numbers, dots, hyphens, or underscores for the mailbox name.");
@@ -1186,7 +1190,7 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
     }
   }
 
-  const cleanDomain = normalizeDomain(domain);
+  const cleanDomain = canonicalDomain(domain);
   return (
     <main className="onboarding-shell">
       <section className="onboarding-frame" aria-labelledby="onboarding-title">
