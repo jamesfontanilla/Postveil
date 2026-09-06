@@ -1113,6 +1113,15 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
       if (saved.dnsProvider) setDnsProvider(saved.dnsProvider);
       if (saved.mailboxAddress) setMailboxAddress(saved.mailboxAddress);
       if (saved.domainStatus) setDomainStatus(saved.domainStatus);
+      if (saved.dnsProvider === "Cloudflare" && saved.domain) {
+        void apiFetch<{ verified: boolean; zoneId?: string | null; dnsReady?: boolean }>(`/api/domains/cloudflare/status?domain=${encodeURIComponent(saved.domain)}`)
+          .then((status) => {
+            if (!active || !status.verified) return;
+            setCloudflareZone(status.zoneId || "");
+            setDomainStatus(status.dnsReady ? "ready" : "verified");
+          })
+          .catch(() => undefined);
+      }
     }).catch(() => undefined);
     return () => { active = false; };
   }, []);
