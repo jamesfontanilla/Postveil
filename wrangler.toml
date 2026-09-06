@@ -35,7 +35,7 @@ B2_REGION = "us-east-005"
 B2_BUCKET = "postveil-prod-private"
 AWS_SES_REGION = "ap-southeast-1"
 PROVIDER_FAILOVER_ENABLED = "false"
-GOOGLE_CLIENT_ID = "585169946821-gu9e4aldgf7ro3vfmb7a4djsu57t0vn5.apps.googleusercontent.com"
+GOOGLE_CLIENT_ID = "585169946821-gu9e4aldgf7ro3vfmb7a4djsu57t0vn0.apps.googleusercontent.com"
 
 [[routes]]
 pattern = "postveil.jamesfontanilla.com"
