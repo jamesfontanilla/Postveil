@@ -11,6 +11,11 @@ not a substitute for provider approval, a restore exercise, or legal review.
   rolling 15-minute window. Successful sign-in clears the counter.
 - Delivery webhooks accept only a Worker secret, deduplicate events for seven
   days, update delivery state, and add bounce/complaint suppressions.
+- Amazon SES production sending is approved in Singapore, both configured
+  sending domains are verified with DKIM, and the `postveil-events`
+  configuration set publishes delivery events to the confirmed SNS subscription
+  on the production webhook. A synthetic signed SNS notification was accepted
+  by the live Worker.
 - Mailbox onboarding checks exact public MX targets from `INBOUND_MX_TARGETS`.
   Zone ownership alone never enables send/receive.
 - Raw mail and attachments remain behind authenticated, tenant-scoped routes;
@@ -20,15 +25,8 @@ not a substitute for provider approval, a restore exercise, or legal review.
 
 ### Amazon SES
 
-1. Confirm production access is approved in the sending region.
-2. Confirm the sending identity and DKIM status are verified.
-3. Create a SES configuration set and event destination for send, delivery,
-   bounce, complaint, reject, and delivery-delay events.
-4. Point the destination at the deployed webhook adapter, or operate a small
-   SNS/EventBridge adapter that forwards authenticated events to
-   `/api/webhooks/ses` with `SES_WEBHOOK_SECRET`.
-5. Send a controlled test to an owned mailbox and verify the timeline and
-   suppression record.
+1. Send one controlled real message to an owned mailbox and verify the
+   delivery timeline, bounce/complaint path, and suppression record end to end.
 
 ### Customer domains and inbound mail
 
