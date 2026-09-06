@@ -16,6 +16,7 @@ import {
   listD1Users,
   revokeD1Session,
   revokeD1UserSessions,
+  recordD1SignInFailure,
   updateD1User,
   updateD1Password,
   userFromToken,
@@ -131,6 +132,9 @@ interface Env {
   SENDGRID_WEBHOOK_SECRET?: string;
   SES_WEBHOOK_SECRET?: string;
   SMTP_WEBHOOK_SECRET?: string;
+  INBOUND_MX_TARGETS?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  TURNSTILE_SITE_KEY?: string;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -692,6 +696,32 @@ function normalizeProviderDomain(value: string): string {
   return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/\.$/, "");
 }
 
+function configuredInboundMxTargets(env: Pick<Env, "INBOUND_MX_TARGETS">): string[] {
+  return String(env.INBOUND_MX_TARGETS || "")
+    .split(/[\s,;]+/)
+    .map(normalizeProviderDomain)
+    .filter(Boolean);
+}
+
+async function exactInboundMxReady(env: Pick<Env, "INBOUND_MX_TARGETS">, domain: string): Promise<boolean> {
+  const expected = configuredInboundMxTargets(env);
+  if (!expected.length) return false;
+  try {
+    const dnsUrl = new URL("https://cloudflare-dns.com/dns-query");
+    dnsUrl.searchParams.set("name", domain);
+    dnsUrl.searchParams.set("type", "MX");
+    const response = await fetch(dnsUrl, { headers: { accept: "application/dns-json" } });
+    if (!response.ok) return false;
+    const payload = await response.json() as { Answer?: Array<{ type?: number; data?: string }> };
+    const actual = (payload.Answer || [])
+      .filter((answer) => Number(answer.type) === 15)
+      .map((answer) => normalizeProviderDomain(String(answer.data || "").replace(/^\d+\s+/, "")));
+    return expected.some((target) => actual.includes(target));
+  } catch {
+    return false;
+  }
+}
+
 function cloudflareErrorRedirect(env: Env, code: string, domain = ""): Response {
   const target = new URL(`https://${configuredAppDomain(env)}/`);
   target.searchParams.set("cloudflare", "error");
@@ -720,7 +750,7 @@ async function cloudflareToken(code: string, env: Env, redirectUri: string): Pro
   return accessToken || null;
 }
 
-async function cloudflareZoneForDomain(accessToken: string, domain: string): Promise<{ zone: CloudflareZone; dnsReady: boolean } | null> {
+async function cloudflareZoneForDomain(accessToken: string, domain: string, env: Pick<Env, "INBOUND_MX_TARGETS">): Promise<{ zone: CloudflareZone; dnsReady: boolean } | null> {
   const zonesUrl = new URL("https://api.cloudflare.com/client/v4/zones");
   zonesUrl.searchParams.set("name", domain);
   zonesUrl.searchParams.set("status", "active");
@@ -732,30 +762,16 @@ async function cloudflareZoneForDomain(accessToken: string, domain: string): Pro
   const zone = zonesPayload.result.find((candidate) => normalizeProviderDomain(String(candidate.name || "")) === domain);
   if (!zone?.id) return null;
 
-  let dnsReady = false;
-  try {
-    const recordsUrl = new URL(`https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(zone.id)}/dns_records`);
-    recordsUrl.searchParams.set("type", "MX");
-    recordsUrl.searchParams.set("name", domain);
-    recordsUrl.searchParams.set("per_page", "100");
-    const recordsResponse = await fetch(recordsUrl, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" } });
-    if (recordsResponse.ok) {
-      const recordsPayload = await recordsResponse.json() as { success?: boolean; result?: Array<{ type?: string; name?: string }> };
-      dnsReady = recordsPayload.success === true && Array.isArray(recordsPayload.result) && recordsPayload.result.some((record) => String(record.type || "").toUpperCase() === "MX" && normalizeProviderDomain(String(record.name || "")) === domain);
-    }
-  } catch {
-    // Zone ownership is the verification signal. DNS inspection is an optional status enhancement.
-  }
-  return { zone, dnsReady };
+  return { zone, dnsReady: await exactInboundMxReady(env, domain) };
 }
 
-async function promoteVerifiedMailboxes(env: Env, userId: string, domain: string): Promise<void> {
+async function promoteVerifiedMailboxes(env: Env, userId: string, domain: string, mailReady: boolean): Promise<void> {
   const mailboxes = await d1Request<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(userId)}&select=id,address,settings`).catch(() => []);
   await Promise.all(mailboxes.filter((mailbox) => domainOf(mailbox.address) === domain).map(async (mailbox) => {
     const settings = objectValue(mailbox.settings);
     await d1Request(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(userId)}`, {
       method: "PATCH",
-      body: JSON.stringify({ can_send: true, can_receive: true, settings: { ...settings, domain_verification_status: "verified", domain_verification_provider: "cloudflare" } }),
+      body: JSON.stringify({ can_send: mailReady, can_receive: mailReady, settings: { ...settings, domain_verification_status: mailReady ? "verified" : "dns_pending", domain_verification_provider: "cloudflare", mx_target_verified: mailReady } }),
     });
   }));
 }
@@ -777,15 +793,16 @@ async function handleCloudflareOAuthCallback(request: Request, env: Env): Promis
   if (!env.CLOUDFLARE_OAUTH_CLIENT_ID || !env.CLOUDFLARE_OAUTH_CLIENT_SECRET) return cloudflareErrorRedirect(env, "not_configured", pending.domain);
   const accessToken = await cloudflareToken(code, env, pending.redirect_uri);
   if (!accessToken) return cloudflareErrorRedirect(env, "token_exchange_failed", pending.domain);
-  const match = await cloudflareZoneForDomain(accessToken, pending.domain);
+  const match = await cloudflareZoneForDomain(accessToken, pending.domain, env);
   if (!match) return cloudflareErrorRedirect(env, "zone_not_found", pending.domain);
   const now = new Date().toISOString();
   const zone = match.zone;
+  const verificationStatus = match.dnsReady ? "verified" : "dns_pending";
   await env.DB.prepare(`INSERT INTO pv_domain_verifications(id,user_id,domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at,created_at,updated_at)
-    VALUES (?1,?2,?3,'cloudflare','verified',?4,?5,?6,?7,?7,?7,?7)
-    ON CONFLICT(user_id,domain) DO UPDATE SET provider='cloudflare',status='verified',zone_id=excluded.zone_id,account_id=excluded.account_id,dns_ready=excluded.dns_ready,verified_at=excluded.verified_at,last_checked_at=excluded.last_checked_at,updated_at=excluded.updated_at`)
-    .bind(crypto.randomUUID(), pending.user_id, pending.domain, String(zone.id), zone.account?.id ? String(zone.account.id) : null, match.dnsReady ? 1 : 0, now).run();
-  await promoteVerifiedMailboxes(env, pending.user_id, pending.domain);
+    VALUES (?1,?2,?3,'cloudflare',?4,?5,?6,?7,?8,?8,?8,?8)
+    ON CONFLICT(user_id,domain) DO UPDATE SET provider='cloudflare',status=excluded.status,zone_id=excluded.zone_id,account_id=excluded.account_id,dns_ready=excluded.dns_ready,verified_at=excluded.verified_at,last_checked_at=excluded.last_checked_at,updated_at=excluded.updated_at`)
+    .bind(crypto.randomUUID(), pending.user_id, pending.domain, verificationStatus, String(zone.id), zone.account?.id ? String(zone.account.id) : null, match.dnsReady ? 1 : 0, now).run();
+  await promoteVerifiedMailboxes(env, pending.user_id, pending.domain, match.dnsReady);
   return new Response(null, { status: 302, headers: { Location: `https://${configuredAppDomain(env)}/?cloudflare=connected&domain=${encodeURIComponent(pending.domain)}`, "Set-Cookie": cloudflareStateCookie("", 0) } });
 }
 
@@ -823,6 +840,8 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
       const existing = await getUserByEmail(env, String(body.email || ""));
       const result = await verifyD1Password(env, String(body.email || ""), String(body.password || ""));
       if (!result) {
+        const failure = await recordD1SignInFailure(env, String(body.email || ""));
+        if (failure.locked) return json({ data: { user: null, session: null }, error: { message: "Too many unsuccessful attempts. Try again in about 15 minutes.", code: "account_temporarily_locked" } }, 429);
         if (existing && !existing.email_verified_at) return json({ data: { user: null, session: null }, error: { message: "Verify your email address before signing in", code: "email_not_verified" } }, 403);
         return json({ data: { user: null, session: null }, error: { message: "Invalid email or password" } }, 401);
       }
@@ -3603,7 +3622,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (url.pathname === "/api/health") {
     if (request.method !== "GET" && request.method !== "HEAD") return error("Method not allowed", 405);
-    return json({ ok: true, service: "postveil", configured: { d1: true, ses: Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, databaseProbe: await probeDatabase(env), timestamp: new Date().toISOString() });
+    return json({ ok: true, service: "postveil", configured: { d1: true, ses: Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY), sesWebhook: Boolean(env.SES_WEBHOOK_SECRET), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID), exactInboundMx: configuredInboundMxTargets(env).length > 0, turnstile: Boolean(env.TURNSTILE_SECRET_KEY), accountLockout: true }, databaseProbe: await probeDatabase(env), timestamp: new Date().toISOString() });
   }
   const deliveryWebhookMatch = url.pathname.match(/^\/api\/webhooks\/(brevo|ses|mailgun|postmark|sendgrid|smtp)$/);
   if (deliveryWebhookMatch) {
@@ -3677,7 +3696,19 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const domain = normalizeProviderDomain(url.searchParams.get("domain") || "");
     if (!isValidDomain(domain)) return error("A valid domain is required", 400);
     const verification = await env.DB.prepare("SELECT domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 LIMIT 1").bind(user.id, domain).first<CloudflareDomainVerification>();
-    return json({ domain, verified: verification?.status === "verified", provider: verification?.provider || null, zoneId: verification?.zone_id || null, dnsReady: Number(verification?.dns_ready || 0) === 1, verifiedAt: verification?.verified_at || null, lastCheckedAt: verification?.last_checked_at || null });
+    return json({ domain, ownershipVerified: Boolean(verification), verified: verification?.status === "verified" && Number(verification?.dns_ready || 0) === 1, provider: verification?.provider || null, zoneId: verification?.zone_id || null, dnsReady: Number(verification?.dns_ready || 0) === 1, expectedMxTargets: configuredInboundMxTargets(env), verifiedAt: verification?.verified_at || null, lastCheckedAt: verification?.last_checked_at || null });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/domains/verification/refresh") {
+    const domain = normalizeProviderDomain(String((await request.json().catch(() => ({})) as JsonRecord).domain || ""));
+    if (!isValidDomain(domain)) return error("A valid domain is required", 400);
+    const verification = await env.DB.prepare("SELECT domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 LIMIT 1").bind(user.id, domain).first<CloudflareDomainVerification>();
+    if (!verification) return error("Verify ownership with Cloudflare before checking mail DNS", 409);
+    const dnsReady = await exactInboundMxReady(env, domain);
+    const now = new Date().toISOString();
+    await env.DB.prepare("UPDATE pv_domain_verifications SET status = ?1, dns_ready = ?2, last_checked_at = ?3, updated_at = ?3 WHERE user_id = ?4 AND domain = ?5").bind(dnsReady ? "verified" : "dns_pending", dnsReady ? 1 : 0, now, user.id, domain).run();
+    await promoteVerifiedMailboxes(env, user.id, domain, dnsReady);
+    return json({ domain, ownershipVerified: true, verified: dnsReady, dnsReady, expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now });
   }
 
   const mailbox = await ensureProfileAndMailbox(env, user);

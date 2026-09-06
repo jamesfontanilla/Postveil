@@ -7,6 +7,7 @@ export type D1User = {
   status: string;
   last_sign_in_at: string | null;
   email_verified_at?: string | null;
+  locked_until?: string | null;
 };
 
 export type D1Session = {
@@ -244,7 +245,7 @@ async function tokenHash(token: string): Promise<string> {
 function userFromRow(row: Record<string, unknown>): D1User {
   let metadata: JsonRecord = {};
   try { metadata = asRecord(JSON.parse(String(row.metadata || "{}"))); } catch { metadata = {}; }
-  return { id: String(row.id), email: String(row.email), user_metadata: metadata, status: String(row.status || "active"), last_sign_in_at: row.last_sign_in_at ? String(row.last_sign_in_at) : null, email_verified_at: row.email_verified_at ? String(row.email_verified_at) : null };
+  return { id: String(row.id), email: String(row.email), user_metadata: metadata, status: String(row.status || "active"), last_sign_in_at: row.last_sign_in_at ? String(row.last_sign_in_at) : null, email_verified_at: row.email_verified_at ? String(row.email_verified_at) : null, locked_until: row.locked_until ? String(row.locked_until) : null };
 }
 
 export async function getUserByEmail(env: D1Env, email: string): Promise<Record<string, unknown> | null> {
@@ -262,20 +263,36 @@ export async function createD1User(env: D1Env, email: string, password: string, 
   await env.DB.prepare("INSERT INTO pv_users(id,email,password_hash,password_salt,display_name,metadata,status,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,'active',?7,?7)")
     .bind(id, normalized, await passwordHash(password, salt), encode(salt), displayName || normalized.split("@")[0], JSON.stringify({ display_name: displayName || normalized.split("@")[0] }), createdAt).run();
   if (options.emailVerified) await env.DB.prepare("UPDATE pv_users SET email_verified_at = ?1 WHERE id = ?2").bind(createdAt, id).run();
-  const user = userFromRow({ id, email: normalized, status: "active", metadata: JSON.stringify({ display_name: displayName || normalized.split("@")[0] }), email_verified_at: options.emailVerified ? createdAt : null });
+  const user = userFromRow({ id, email: normalized, status: "active", metadata: JSON.stringify({ display_name: displayName || normalized.split("@")[0] }), email_verified_at: options.emailVerified ? createdAt : null, locked_until: null });
   return { user, session: await createD1Session(env, user) };
 }
 
 export async function verifyD1Password(env: D1Env, email: string, password: string, options: { allowUnverified?: boolean } = {}): Promise<{ user: D1User; session: D1Session } | null> {
   const row = await getUserByEmail(env, email);
   if (!row || String(row.status || "active") !== "active") return null;
+  if (row.locked_until && Date.parse(String(row.locked_until)) > Date.now()) return null;
   if (!options.allowUnverified && !row.email_verified_at) return null;
   const hash = await passwordHash(password, decode(String(row.password_salt)));
   if (hash !== String(row.password_hash)) return null;
   const signedIn = now();
-  await env.DB.prepare("UPDATE pv_users SET last_sign_in_at = ?1, updated_at = ?1 WHERE id = ?2").bind(signedIn, String(row.id)).run();
-  const user = userFromRow({ ...row, last_sign_in_at: signedIn });
+  await env.DB.prepare("UPDATE pv_users SET last_sign_in_at = ?1, failed_sign_in_count = 0, locked_until = NULL, last_failed_sign_in_at = NULL, updated_at = ?1 WHERE id = ?2").bind(signedIn, String(row.id)).run();
+  const user = userFromRow({ ...row, last_sign_in_at: signedIn, failed_sign_in_count: 0, locked_until: null, last_failed_sign_in_at: null });
   return { user, session: await createD1Session(env, user) };
+}
+
+/** Records a failed password attempt without disclosing account existence. */
+export async function recordD1SignInFailure(env: D1Env, email: string): Promise<{ locked: boolean; lockedUntil: string | null }> {
+  const row = await getUserByEmail(env, email);
+  if (!row) return { locked: false, lockedUntil: null };
+  const nowValue = now();
+  const existingLock = row.locked_until ? String(row.locked_until) : null;
+  if (existingLock && Date.parse(existingLock) > Date.now()) return { locked: true, lockedUntil: existingLock };
+  const recentFailure = row.last_failed_sign_in_at && Date.parse(String(row.last_failed_sign_in_at)) > Date.now() - 15 * 60 * 1000;
+  const count = recentFailure ? Number(row.failed_sign_in_count || 0) + 1 : 1;
+  const lockedUntil = count >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
+  await env.DB.prepare("UPDATE pv_users SET failed_sign_in_count = ?1, last_failed_sign_in_at = ?2, locked_until = ?3, updated_at = ?2 WHERE id = ?4")
+    .bind(count, nowValue, lockedUntil, String(row.id)).run();
+  return { locked: Boolean(lockedUntil), lockedUntil };
 }
 
 export async function createD1Session(env: D1Env, user: D1User): Promise<D1Session> {

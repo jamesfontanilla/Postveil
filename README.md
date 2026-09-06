@@ -73,6 +73,7 @@ OUTLOOK_FORWARD_TO (optional)
 AWS_ACCESS_KEY_ID (optional, SES)
 AWS_SECRET_ACCESS_KEY (optional, SES)
 AWS_SES_REGION (optional, defaults to us-east-1)
+INBOUND_MX_TARGETS (required for mailbox enablement; comma-separated exact MX targets)
 CLOUDFLARE_OAUTH_CLIENT_ID (optional, one-click domain verification)
 CLOUDFLARE_OAUTH_CLIENT_SECRET (optional, one-click domain verification)
 CLOUDFLARE_OAUTH_SCOPES (optional, defaults to zone.read dns.read)
@@ -107,8 +108,10 @@ scopes `zone.read dns.read`. Configure the token endpoint authentication method
 as `client_secret_post`, then store the client ID as a Worker variable and the
 client secret with `wrangler secret put CLOUDFLARE_OAUTH_CLIENT_SECRET`. The
 onboarding button uses the OAuth grant to confirm the user controls the zone;
-the access token is exchanged and discarded, never stored by Postveil. MX/SPF/
-DKIM/DMARC setup remains a separate DNS handoff.
+the access token is exchanged and discarded, never stored by Postveil. Mailbox
+enablement additionally requires a public MX lookup to match one of the exact
+`INBOUND_MX_TARGETS`; an arbitrary MX record no longer counts. SPF/DKIM/DMARC
+setup remains a separate DNS handoff.
 
 Configure each provider webhook to send `POST` requests with the deployment's provider secret in the `x-webhook-secret` header. Query-string webhook tokens are deliberately not accepted. Provider-specific webhook payloads are normalized for delivery, bounce, complaint, open, click, and receipt events; the provider must still be configured to emit those events.
 
@@ -117,7 +120,7 @@ Configure each provider webhook to send `POST` requests with the deployment's pr
 1. Create the D1 database and apply every ordered migration under `migrations/`.
 2. Create a private Backblaze B2 bucket and a least-privilege application key.
 3. Authenticate each sending domain and sender with Amazon SES. For password signups, verify the `SYSTEM_FROM_EMAIL` domain and move the SES account out of the sandbox before sending verification messages to arbitrary recipients.
-4. Configure DNS for MX, SPF, DKIM, and DMARC.
+4. Configure DNS for the exact inbound MX target(s) in `INBOUND_MX_TARGETS`, plus SPF, DKIM, and DMARC.
 5. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
 6. Set your deployment domain values in `wrangler.toml` and configure the Cloudflare custom domain. Do not treat the onboarding domain field as automatic provider provisioning: custom-domain SaaS operation requires a separate verified-domain and routing workflow.
 7. Run `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
@@ -171,7 +174,8 @@ Do not deploy the example domain or example credentials. Do not reuse another de
 
 The application implements the mail workflow, local spam scoring, static
 attachment safety checks, custom organization, scheduled send, snooze, PWA
-shell, polling, D1-backed authentication, mailbox administration,
+shell, polling, D1-backed authentication, email verification, account-level
+sign-in lockouts, mailbox administration,
 delegated mailboxes, and organization group-address expansion. Passkeys use
 and TOTP require a separately implemented D1/WebAuthn service before they can
 be enabled in this configuration. Outbound provider credentials and inbound
