@@ -1182,12 +1182,16 @@ async function ensureOrganization(env: Env, user: User): Promise<Organization> {
     body: JSON.stringify({
       mailbox_id: mailbox.id,
       organization_id: organization.id,
+      status: "active",
       quota_bytes: defaultQuota,
       sending_limit_daily: defaultSendingLimit,
       inactivity_days: Math.max(0, Number(settings.inactivity_days || 90)),
       last_activity_at: mailbox.created_at,
     }),
-  }).catch(() => undefined)));
+  }).then(() => dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}&status=is.null`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "active", updated_at: new Date().toISOString() }),
+  })).catch(() => undefined)));
   return organization;
 }
 
@@ -1213,7 +1217,17 @@ async function organizationMfaBlocked(env: Env, user: User, organization: Organi
 async function getMailboxAdminSettings(env: Env, mailbox: Mailbox, organizationId?: string): Promise<MailboxAdminSettings | null> {
   const query = `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}&limit=1${organizationId ? `&organization_id=eq.${encodeURIComponent(organizationId)}` : ""}`;
   const rows = await dbRequest<MailboxAdminSettings[]>(env, query).catch(() => []);
-  return rows[0] || null;
+  const setting = rows[0];
+  if (!setting) return null;
+  const rawStatus = setting.status;
+  const status: MailboxAdminSettings["status"] = rawStatus === "suspended" || rawStatus === "archived" ? rawStatus : rawStatus === "active" ? "active" : "suspended";
+  if (rawStatus !== status) {
+    await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status, updated_at: new Date().toISOString() }),
+    }).catch(() => undefined);
+  }
+  return { ...setting, status };
 }
 
 async function authUsers(env: Env): Promise<AdminAuthUser[]> {
@@ -3964,6 +3978,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const body = (await request.json()) as JsonRecord;
     const address = cleanAddress(String(body.address || ""));
     if (!isValidEmailAddress(address)) return error("Enter a valid email address");
+    const organization = await ensureOrganization(env, user);
     const verified = await isVerifiedMailboxDomain(env, user.id, domainOf(address));
     const settings = verified
       ? {}
@@ -3973,6 +3988,26 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: false, can_send: verified, can_receive: verified, settings }),
     });
+    const mailbox = rows[0];
+    if (mailbox) {
+      await dbRequest(env, "mailbox_admin_settings", {
+        method: "POST",
+        headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+        body: JSON.stringify({
+          mailbox_id: mailbox.id,
+          organization_id: organization.id,
+          status: "active",
+          quota_bytes: Math.max(0, Number(organizationSettings(organization.settings).default_quota_bytes || 5 * 1024 * 1024 * 1024)),
+          sending_limit_daily: Math.max(0, Number(organizationSettings(organization.settings).default_sending_limit_daily || 100)),
+          inactivity_days: Math.max(0, Number(organizationSettings(organization.settings).inactivity_days || 90)),
+          last_activity_at: mailbox.created_at || new Date().toISOString(),
+        }),
+      });
+      await dbRequest(env, `mailbox_admin_settings?mailbox_id=eq.${encodeURIComponent(mailbox.id)}&status=is.null`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "active", updated_at: new Date().toISOString() }),
+      }).catch(() => undefined);
+    }
     return json(rows[0], 201);
   }
   const mailboxMatch = url.pathname.match(/^\/api\/mailboxes\/([^/]+)$/);
