@@ -69,8 +69,15 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<AuthRes
       },
     });
     const payload = await response.json().catch(() => ({})) as JsonRecord;
-    if (!response.ok) return { data: {} as T, error: authError(String(payload.error ?? payload.message ?? `Request failed (${response.status})`), response.status) };
-    return { data: payload as T, error: null };
+    const payloadError = payload.error;
+    const errorMessage = payloadError && typeof payloadError === "object" && "message" in payloadError
+      ? String((payloadError as JsonRecord).message)
+      : String(payloadError ?? payload.message ?? `Request failed (${response.status})`);
+    if (!response.ok) return { data: {} as T, error: authError(errorMessage, response.status) };
+    // Worker auth endpoints use the same { data, error } envelope as the
+    // Supabase client. Unwrap it before the auth methods read session/user.
+    const data = Object.prototype.hasOwnProperty.call(payload, "data") ? payload.data : payload;
+    return { data: data as T, error: null };
   } catch (error) {
     return { data: {} as T, error: authError(error instanceof Error ? error.message : "Network request failed") };
   }
