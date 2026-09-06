@@ -2410,15 +2410,30 @@ async function ingestRawEmail(env: Env, raw: ArrayBuffer, envelopeFrom: string, 
   const mimeParts = mimePartSummary(parsed);
   const threadFingerprint = await sha256Hex(new TextEncoder().encode(`${ownerId}\n${normalizeSubject(subject)}\n${headerFrom}\n${toAddresses.join(",")}`));
   const receivedAt = new Date().toISOString();
-  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder: "quarantine", status: "queued", delivery_status: "received", screening_status: "review", screening_decision_source: "pending", from_name: fromName, from_address: headerFrom, to_addresses: toAddresses, cc_addresses: ccAddresses, reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: null, has_attachment: Boolean(parsed.attachments?.length), spam_score: 0, spam_reasons: [], focused_score: 0.5, focused_category: "focused", auth_results: {}, screening_model_version: SCREENING_MODEL_VERSION, screening_confidence: 0, screening_signal_snapshot: {}, message_size_bytes: raw.byteLength, max_size_bytes: maxEmailBytes(env), raw_headers: rawHeaders, mime_parts: mimeParts, thread_fingerprint: threadFingerprint, inbound_event_id: messageIdHeader, received_at: receivedAt }) });
+  const inserted = await dbRequest<Array<{ id: string }>>(env, "messages", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ id: messageId, owner_id: ownerId, thread_id: threadId, mailbox_id: mailbox.id, direction: "inbound", folder: "quarantine", status: "queued", delivery_status: "received", screening_status: "review", screening_decision_source: "pending", from_name: fromName, from_address: headerFrom, to_addresses: toAddresses, cc_addresses: ccAddresses, reply_to: cleanAddress(headerValue(parsed, "reply-to") || headerFrom), subject, text_body: textBody, html_body: htmlBody || null, snippet: snippet(textBody || htmlBody.replace(/<[^>]+>/g, " ")), message_id_header: messageIdHeader, in_reply_to: inReplyTo, references_header: references, raw_object_key: null, has_attachment: Boolean(parsed.attachments?.length), is_read: false, is_starred: false, is_pinned: false, is_flagged: false, is_important: false, is_muted: false, is_ignored: false, priority: 0, spam_score: 0, spam_reasons: [], focused_score: 0.5, focused_category: "focused", auth_results: {}, screening_model_version: SCREENING_MODEL_VERSION, screening_confidence: 0, screening_signal_snapshot: {}, message_size_bytes: raw.byteLength, max_size_bytes: maxEmailBytes(env), raw_headers: rawHeaders, mime_parts: mimeParts, thread_fingerprint: threadFingerprint, inbound_event_id: messageIdHeader, received_at: receivedAt }) });
   if (!inserted[0]) throw new Error("Message insert returned no row");
 
   const finishInbound = async (): Promise<void> => {
     try {
       const assessment = await assessInbound(env, ownerId, mailbox.id, envelopeFrom, headerFrom, subject, textBody, htmlBody, parsed);
-      const rawKey = `raw/${ownerId}/${messageId}.eml`;
-      await putObject(env, rawKey, new Uint8Array(raw), "message/rfc822");
-      const attachmentResult = await saveAttachments(env, ownerId, messageId, parsed.attachments ?? []);
+      let rawKey: string | null = null;
+      try {
+        const candidateRawKey = `raw/${ownerId}/${messageId}.eml`;
+        await putObject(env, candidateRawKey, new Uint8Array(raw), "message/rfc822");
+        rawKey = candidateRawKey;
+      } catch (storageError) {
+        // A storage archival failure must not turn a successfully received message
+        // into a failed delivery. The message remains readable from D1; raw-source
+        // archival can be retried by a later repair job once the storage adapter is
+        // healthy again.
+        console.error("Inbound raw-message archival failed", storageError);
+      }
+      let attachmentResult: { stored: StoredAttachment[]; blocked: string[] } = { stored: [], blocked: [] };
+      try {
+        attachmentResult = await saveAttachments(env, ownerId, messageId, parsed.attachments ?? []);
+      } catch (storageError) {
+        console.error("Inbound attachment archival failed", storageError);
+      }
       const [blockedAddressRows, blockedDomainRows] = await Promise.all([
         dbRequest<JsonRecord[]>(env, `sender_blocks?owner_id=eq.${encodeURIComponent(ownerId)}&match_type=eq.address&match_value=eq.${encodeURIComponent(headerFrom)}&enabled=eq.true&limit=1`).catch(() => []),
         dbRequest<JsonRecord[]>(env, `sender_blocks?owner_id=eq.${encodeURIComponent(ownerId)}&match_type=eq.domain&match_value=eq.${encodeURIComponent(domainOf(headerFrom))}&enabled=eq.true&limit=1`).catch(() => []),
@@ -3813,6 +3828,44 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (user.mfaRequired) return error("Complete two-step verification to continue", 401);
   const userRateLimitResponse = await enforceEdgeRateLimit(request, env, user.id);
   if (userRateLimitResponse) return userRateLimitResponse;
+
+  // Keep the high-frequency mailbox reads below the Workers Free 10 ms CPU
+  // ceiling. These reads do not need profile/bootstrap reconciliation or an
+  // organization security-event write on every refresh. The full routes
+  // below remain responsible for writes and administration.
+  if (request.method === "GET" && url.pathname === "/api/mail") {
+    try {
+      const query = await buildMailQuery(env, user.id, {
+        folder: url.searchParams.get("folder") || "inbox",
+        query: url.searchParams.get("q") || "",
+        filter: url.searchParams.get("filter") || "all",
+        sort: url.searchParams.get("sort") || "newest",
+        page: Number(url.searchParams.get("page") || 1),
+        pageSize: Number(url.searchParams.get("page_size") || url.searchParams.get("limit") || 80),
+        mailboxIds: await delegatedMailboxIds(env, user.id, "read"),
+      });
+      const rows = await dbRequest<JsonRecord[]>(env, query.path);
+      const hasMore = rows.length > query.pageSize;
+      const items = hasMore ? rows.slice(0, query.pageSize) : rows;
+      if (url.searchParams.get("meta") === "true") {
+        const total = await dbRequestCount(env, query.path);
+        return json({ items, total, page: query.page, pageSize: query.pageSize, hasMore, normalizedQuery: query.parsed?.normalized || "" });
+      }
+      return json(items);
+    } catch (searchError) {
+      return error(searchError instanceof Error ? searchError.message : "Search failed", 400);
+    }
+  }
+  if (request.method === "GET" && url.pathname === "/api/mailboxes") return json(await accessibleMailboxes(env, user.id));
+  if (request.method === "GET" && url.pathname === "/api/labels") return json(await dbRequest(env, `labels?owner_id=eq.${encodeURIComponent(user.id)}&order=name.asc`));
+  if (request.method === "GET" && url.pathname === "/api/search/history") return json(await dbRequest(env, `search_history?owner_id=eq.${encodeURIComponent(user.id)}&order=last_used_at.desc&limit=20`).catch(() => []));
+  if (request.method === "GET" && url.pathname === "/api/settings") {
+    const [settingsRows, mailboxRows] = await Promise.all([
+      dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`),
+      dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&order=is_default.desc,created_at.asc&limit=1`),
+    ]);
+    return json({ ...(settingsRows[0] || { owner_id: user.id }), send_undo_seconds: normalizeUndoSeconds(objectValue(mailboxRows[0]?.settings), 0) });
+  }
 
   if (request.method === "GET" && url.pathname === "/api/cloudflare/oauth/start") {
     if (!env.CLOUDFLARE_OAUTH_CLIENT_ID || !env.CLOUDFLARE_OAUTH_CLIENT_SECRET) return error("Cloudflare verification is not configured yet", 503);
