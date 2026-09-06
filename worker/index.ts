@@ -3773,6 +3773,16 @@ function protectedHeaders(response: Response, noStore = false): Response {
   headers.set("X-Frame-Options", "DENY");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  headers.set("Strict-Transport-Security", "max-age=31536000");
+  headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  if (isHtml && !headers.has("Content-Security-Policy")) {
+    headers.set(
+      "Content-Security-Policy",
+      "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:;"
+    );
+  }
   if (noStore || headers.get("content-type")?.includes("text/html")) {
     headers.set("Cache-Control", "no-store");
     headers.set("CDN-Cache-Control", "no-store");
@@ -3797,7 +3807,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (url.pathname === "/api/health") {
     if (request.method !== "GET" && request.method !== "HEAD") return error("Method not allowed", 405);
-    return json({ ok: true, service: "postveil", configured: { d1: true, ses: Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY), sesWebhook: Boolean(env.SES_WEBHOOK_SECRET), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID), exactInboundMx: configuredInboundMxTargets(env).length > 0, turnstile: Boolean(env.TURNSTILE_SECRET_KEY), accountLockout: true }, databaseProbe: await probeDatabase(env), timestamp: new Date().toISOString() });
+    return json({ ok: true, service: "postveil", configured: { d1: true, ses: Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY), sesWebhook: Boolean(env.SES_WEBHOOK_SECRET), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID), exactInboundMx: configuredInboundMxTargets(env).length > 0, turnstile: Boolean(env.TURNSTILE_SECRET_KEY), accountLockout: true, attachmentsEnabled: String(env.ATTACHMENTS_ENABLED || "true").toLowerCase() !== "false" }, databaseProbe: await probeDatabase(env), timestamp: new Date().toISOString() });
   }
   const deliveryWebhookMatch = url.pathname.match(/^\/api\/webhooks\/(brevo|ses|mailgun|postmark|sendgrid|smtp)$/);
   if (deliveryWebhookMatch) {

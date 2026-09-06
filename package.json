@@ -18,7 +18,8 @@
     "test:spam": "node --experimental-strip-types --test tests/spam-hardening.test.ts",
     "test:delivery": "node --experimental-strip-types --test tests/delivery.test.ts",
     "test:input": "node --experimental-strip-types --test tests/input-security.test.ts",
-    "test:renderer": "node --experimental-strip-types --test tests/email-renderer.test.ts"
+    "test:renderer": "node --experimental-strip-types --test tests/email-renderer.test.ts",
+    "test:prod": "node scripts/prod-smoke.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.879.0",
