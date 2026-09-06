@@ -3,7 +3,9 @@ import {
   createContext,
   DragEvent,
   FormEvent,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   useCallback,
   useContext,
@@ -832,8 +834,8 @@ function AppDialogProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function AuthScreen() {
-  const [mode, setMode] = useState<"signin" | "signup" | "forgot" | "recovery">("signin");
+function AuthScreen({ initialMode = "signin", onBack }: { initialMode?: "signin" | "signup"; onBack?: () => void }) {
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot" | "recovery">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
@@ -880,6 +882,7 @@ function AuthScreen() {
   return (
     <main className="auth-shell">
       <section className="auth-card">
+        {onBack && <button type="button" className="auth-back-link" onClick={onBack}><ArrowLeft size={14} /> Back to overview</button>}
         <div className="brand-mark">P</div>
         <p className="eyebrow">PRIVATE MAIL / {new Date().getFullYear()}</p>
         <h1>{mode === "forgot" || mode === "recovery" ? "Get back in safely." : "Keep your address close."}</h1>
@@ -944,6 +947,48 @@ function AuthScreen() {
           chose.
         </p>
       </aside>
+    </main>
+  );
+}
+
+function PublicHome({ onSignIn, onSignUp }: { onSignIn: () => void; onSignUp: () => void }) {
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  function moveScene(event: ReactPointerEvent<HTMLDivElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width - .5) * 2;
+    const y = ((event.clientY - bounds.top) / bounds.height - .5) * 2;
+    setTilt({ x: Math.max(-1, Math.min(1, y)), y: Math.max(-1, Math.min(1, x)) });
+  }
+  return (
+    <main className="public-home">
+      <nav className="home-nav" aria-label="Postveil navigation">
+        <a className="home-brand" href="#top" aria-label="Postveil home"><span className="home-brand-mark">P</span><span><strong>Postveil</strong><small>private mail</small></span></a>
+        <div className="home-nav-links"><a href="#how-it-works">How it works</a><a href="#privacy">Privacy</a><button type="button" className="home-signin" onClick={onSignIn}>Sign in</button></div>
+      </nav>
+      <section className="home-hero" id="top">
+        <div className="home-copy">
+          <p className="home-kicker"><span className="home-kicker-dot" /> custom-domain mail, made quiet</p>
+          <h1>Your domain.<br /><em>Your room.</em></h1>
+          <p className="home-lede">A private mailbox for the address you already own—without making you learn the deployment stack behind it.</p>
+          <div className="home-actions"><button type="button" className="home-primary" onClick={onSignUp}>Create your mailbox <ArrowRight size={17} /></button><button type="button" className="home-secondary" onClick={onSignIn}>I already have an account</button></div>
+          <p className="home-note"><ShieldCheck size={14} /> Provider credentials stay behind Postveil. Your inbox stays yours.</p>
+        </div>
+        <div className="home-scene-wrap" onPointerMove={moveScene} onPointerLeave={() => setTilt({ x: 0, y: 0 })} aria-label="A 3D illustration of a private mailbox" role="img">
+          <div className="home-scene" style={{ "--scene-x": `${tilt.x * 5}deg`, "--scene-y": `${tilt.y * 7}deg` } as CSSProperties}>
+            <div className="scene-orbit orbit-one" /><div className="scene-orbit orbit-two" />
+            <div className="scene-letter scene-letter-back"><span>MX</span><strong>route</strong><small>incoming</small></div>
+            <div className="scene-letter scene-letter-front"><span>DKIM</span><strong>signed</strong><small>outgoing</small></div>
+            <div className="scene-mailbox">
+              <div className="mailbox-shadow" />
+              <div className="mailbox-body"><div className="mailbox-side" /><div className="mailbox-door"><span className="mailbox-slot" /><span className="mailbox-badge">P</span></div><div className="mailbox-flag"><span /></div></div>
+              <div className="mailbox-envelope"><div /><span>hello@yourdomain.com</span></div>
+            </div>
+            <div className="scene-label"><span className="scene-label-dot" /> private by default <strong>01</strong></div>
+          </div>
+        </div>
+      </section>
+      <section className="home-proof" id="how-it-works"><div><span className="home-proof-index">01</span><strong>Bring the name</strong><p>Enter a domain you control. Postveil guides the DNS handoff in plain language.</p></div><div><span className="home-proof-index">02</span><strong>Make the address</strong><p>Create hello@, you@, or a shared address without opening an AWS console.</p></div><div id="privacy"><span className="home-proof-index">03</span><strong>Keep the room yours</strong><p>Provider keys stay server-side, and your mailbox is separated from the machinery that delivers it.</p></div></section>
+      <footer className="home-footer"><span>Postveil / private mail for the domains you own</span><button type="button" onClick={onSignUp}>Start with your domain <ArrowRight size={14} /></button></footer>
     </main>
   );
 }
@@ -6044,6 +6089,8 @@ function AppContent() {
   const [ready, setReady] = useState(false);
   const [onboardingChecked, setOnboardingChecked] = useState(false);
   const [onboardingRequired, setOnboardingRequired] = useState(false);
+  const [showPublicHome, setShowPublicHome] = useState(true);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [recovering, setRecovering] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
   useEffect(() => {
@@ -6063,6 +6110,7 @@ function AppContent() {
         if (event === "SIGNED_OUT") {
           setRecovering(false);
           setMfaRequired(false);
+          setShowPublicHome(true);
         }
         setSession(nextSession);
       },
@@ -6107,7 +6155,9 @@ function AppContent() {
       </div>
     );
   if (recovering) return <PasswordResetScreen onComplete={() => setRecovering(false)} />;
-  if (!session) return <AuthScreen />;
+  if (!session) return showPublicHome
+    ? <PublicHome onSignIn={() => { setAuthMode("signin"); setShowPublicHome(false); }} onSignUp={() => { setAuthMode("signup"); setShowPublicHome(false); }} />
+    : <AuthScreen initialMode={authMode} onBack={() => setShowPublicHome(true)} />;
   if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
   if (!onboardingChecked) return <div className="loading-screen"><div className="brand-mark">P</div><p>Preparing your private desk…</p></div>;
   if (onboardingRequired) return <OnboardingWizard session={session} onComplete={() => setOnboardingRequired(false)} />;
