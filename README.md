@@ -97,7 +97,7 @@ CONFIDENTIAL_LINK_SECRET (required for confidential mode)
 CONFIDENTIAL_ENCRYPTION_KEY (required for confidential mode)
 ```
 
-`APP_DOMAIN` and `DEFAULT_FROM_EMAIL` must use a domain that is verified with your email provider. `ALLOWED_SENDER_DOMAINS` may contain additional verified domains separated by commas. The default mailbox is `DEFAULT_FROM_EMAIL`, or `postmaster@APP_DOMAIN` when no default is set.
+`APP_DOMAIN`, `DEFAULT_FROM_EMAIL`, and `SYSTEM_FROM_EMAIL` must use domains that are verified with your email provider. `SYSTEM_FROM_EMAIL` is the sender used for new-account email verification. `ALLOWED_SENDER_DOMAINS` may contain additional verified domains separated by commas. The default mailbox is `DEFAULT_FROM_EMAIL`, or `postmaster@APP_DOMAIN` when no default is set.
 
 ### Cloudflare one-click domain verification
 
@@ -116,7 +116,7 @@ Configure each provider webhook to send `POST` requests with the deployment's pr
 
 1. Create the D1 database and apply every ordered migration under `migrations/`.
 2. Create a private Backblaze B2 bucket and a least-privilege application key.
-3. Authenticate each sending domain and sender with Amazon SES. SES accounts must be out of the sandbox before sending to arbitrary recipients.
+3. Authenticate each sending domain and sender with Amazon SES. For password signups, verify the `SYSTEM_FROM_EMAIL` domain and move the SES account out of the sandbox before sending verification messages to arbitrary recipients.
 4. Configure DNS for MX, SPF, DKIM, and DMARC.
 5. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
 6. Set your deployment domain values in `wrangler.toml` and configure the Cloudflare custom domain. Do not treat the onboarding domain field as automatic provider provisioning: custom-domain SaaS operation requires a separate verified-domain and routing workflow.

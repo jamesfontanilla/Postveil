@@ -30,6 +30,7 @@ crons = ["* * * * *"]
 APP_DOMAIN = "postveil.jamesfontanilla.com"
 ALLOWED_SENDER_DOMAINS = "jamesfontanilla.com,postveil.jamesfontanilla.com"
 DEFAULT_FROM_EMAIL = "postmaster@jamesfontanilla.com"
+SYSTEM_FROM_EMAIL = "noreply@postveil.jamesfontanilla.com"
 B2_ENDPOINT = "https://s3.us-east-005.backblazeb2.com"
 B2_REGION = "us-east-005"
 B2_BUCKET = "postveil-prod-private"

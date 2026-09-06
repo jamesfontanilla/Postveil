@@ -7,6 +7,8 @@ import {
   createD1User,
   createD1PasswordResetToken,
   consumeD1PasswordResetToken,
+  createD1EmailVerificationToken,
+  consumeD1EmailVerificationToken,
   deleteD1User,
   d1Probe,
   d1Request,
@@ -99,6 +101,7 @@ interface Env {
   INTERNAL_TEST_TOKEN?: string;
   OUTLOOK_FORWARD_TO?: string;
   DEFAULT_FROM_EMAIL?: string;
+  SYSTEM_FROM_EMAIL?: string;
   AWS_ACCESS_KEY_ID?: string;
   AWS_SECRET_ACCESS_KEY?: string;
   AWS_SES_REGION?: string;
@@ -231,6 +234,12 @@ function defaultMailboxAddress(env: Pick<Env, "APP_DOMAIN" | "DEFAULT_FROM_EMAIL
   const fallback = `postmaster@${configuredAppDomain(env)}`;
   const address = cleanAddress(env.DEFAULT_FROM_EMAIL?.trim() || fallback);
   if (!isConfiguredSenderAddress(env, address)) throw new Error("DEFAULT_FROM_EMAIL must use an allowed sender domain");
+  return address;
+}
+
+function systemFromAddress(env: Pick<Env, "APP_DOMAIN" | "SYSTEM_FROM_EMAIL" | "ALLOWED_SENDER_DOMAINS">): string {
+  const address = cleanAddress(String(env.SYSTEM_FROM_EMAIL || ""));
+  if (!isConfiguredSenderAddress(env, address)) throw new Error("SYSTEM_FROM_EMAIL must use an allowed sender domain");
   return address;
 }
 
@@ -585,7 +594,7 @@ async function findOrCreateGoogleSession(env: Env, profile: JsonRecord): Promise
       session = await createD1Session(env, user);
     } else {
       const displayName = String(profile.name || email.split("@")[0]).trim().slice(0, 120);
-      const created = await createD1User(env, email, randomOAuthPassword(), displayName);
+      const created = await createD1User(env, email, randomOAuthPassword(), displayName, { emailVerified: true });
       user = created.user;
       session = created.session;
     }
@@ -788,7 +797,22 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
     try {
       const body = await request.json() as JsonRecord;
       const created = await createD1User(env, String(body.email || ""), String(body.password || ""), String(body.displayName || ""));
-      return json({ data: created, error: null }, 201);
+      try {
+        const token = await createD1EmailVerificationToken(env, created.user.id);
+        const verificationUrl = `https://${configuredAppDomain(env)}/?verify_email=${encodeURIComponent(token)}`;
+        await sendSystemMessage(env, {
+          fromAddress: systemFromAddress(env),
+          to: [created.user.email],
+          subject: "Verify your Postveil email address",
+          text: `Welcome to Postveil. Verify your email address by opening this link:\n\n${verificationUrl}\n\nThis link expires in 24 hours. If you did not create this account, you can ignore this message.`,
+          html: `<p>Welcome to Postveil.</p><p><a href="${verificationUrl}">Verify your email address</a></p><p>This link expires in 24 hours. If you did not create this account, you can ignore this message.</p>`,
+        });
+      } catch (verificationError) {
+        await deleteD1User(env, created.user.id).catch(() => undefined);
+        throw verificationError;
+      }
+      await revokeD1Session(env, created.session.access_token).catch(() => undefined);
+      return json({ data: { user: created.user, session: null, verificationRequired: true }, error: null }, 201);
     } catch (authError) {
       return json({ data: { user: null, session: null }, error: { message: authError instanceof Error ? authError.message : "Unable to create account" } }, 400);
     }
@@ -796,12 +820,45 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
   if (url.pathname === "/api/auth/signin" && request.method === "POST") {
     try {
       const body = await request.json() as JsonRecord;
+      const existing = await getUserByEmail(env, String(body.email || ""));
       const result = await verifyD1Password(env, String(body.email || ""), String(body.password || ""));
-      if (!result) return json({ data: { user: null, session: null }, error: { message: "Invalid email or password" } }, 401);
+      if (!result) {
+        if (existing && !existing.email_verified_at) return json({ data: { user: null, session: null }, error: { message: "Verify your email address before signing in", code: "email_not_verified" } }, 403);
+        return json({ data: { user: null, session: null }, error: { message: "Invalid email or password" } }, 401);
+      }
       return json({ data: result, error: null });
     } catch (authError) {
       return json({ data: { user: null, session: null }, error: { message: authError instanceof Error ? authError.message : "Unable to sign in" } }, 400);
     }
+  }
+  if (url.pathname === "/api/auth/verify-email" && request.method === "GET") {
+    const token = url.searchParams.get("token") || "";
+    const userId = await consumeD1EmailVerificationToken(env, token);
+    if (!userId) return error("This verification link is invalid or expired", 400);
+    return json({ ok: true, message: "Email address verified. You can now sign in." });
+  }
+  if (url.pathname === "/api/auth/resend-verification" && request.method === "POST") {
+    const generic = json({ ok: true, message: "If the account can receive mail, a verification link will arrive shortly." }, 202);
+    try {
+      const body = await request.json() as JsonRecord;
+      const email = cleanAddress(String(body.email || ""));
+      const existing = await getUserByEmail(env, email);
+      if (!existing || existing.email_verified_at) return generic;
+      const passwordResult = await verifyD1Password(env, email, String(body.password || ""), { allowUnverified: true });
+      if (!passwordResult) return generic;
+      const token = await createD1EmailVerificationToken(env, String(existing.id));
+      const verificationUrl = `https://${configuredAppDomain(env)}/?verify_email=${encodeURIComponent(token)}`;
+      await sendSystemMessage(env, {
+        fromAddress: systemFromAddress(env),
+        to: [email],
+        subject: "Verify your Postveil email address",
+        text: `Verify your Postveil email address by opening this link:\n\n${verificationUrl}\n\nThis link expires in 24 hours.`,
+        html: `<p><a href="${verificationUrl}">Verify your Postveil email address</a></p><p>This link expires in 24 hours.</p>`,
+      });
+    } catch {
+      // Keep resend responses generic and avoid leaking account state.
+    }
+    return generic;
   }
   if (url.pathname === "/api/auth/session" && request.method === "GET") {
     const authorization = request.headers.get("authorization") || "";
@@ -1029,7 +1086,7 @@ function adminAuthClient(env: Env) {
     inviteUserByEmail: async (email: string, options?: { data?: JsonRecord; redirectTo?: string }): Promise<AdminResult<{ user: D1User | null }>> => {
       try {
         const temporaryPassword = `${crypto.randomUUID()}-${crypto.randomUUID()}`;
-        const created = await createD1User(env, email, temporaryPassword, String(options?.data?.display_name || ""));
+        const created = await createD1User(env, email, temporaryPassword, String(options?.data?.display_name || ""), { emailVerified: true });
         await revokeD1Session(env, created.session.access_token);
         return { data: { user: created.user }, error: null };
       } catch (error) {

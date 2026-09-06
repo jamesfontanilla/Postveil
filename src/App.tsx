@@ -834,14 +834,14 @@ function AppDialogProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function AuthScreen({ initialMode = "signin", onBack }: { initialMode?: "signin" | "signup"; onBack?: () => void }) {
+function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { initialMode?: "signin" | "signup"; initialNotice?: string; onBack?: () => void }) {
   const [mode, setMode] = useState<"signin" | "signup" | "forgot" | "recovery">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(initialNotice);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -875,6 +875,18 @@ function AuthScreen({ initialMode = "signin", onBack }: { initialMode?: "signin"
           ? authError.message
           : "Authentication failed",
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resendVerification() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await publicApiFetch<{ message?: string }>("/api/auth/resend-verification", { method: "POST", body: JSON.stringify({ email, password }) });
+      setNotice(result.message || "If the account can receive mail, a verification link will arrive shortly.");
+    } catch (resendError) {
+      setError(resendError instanceof Error ? resendError.message : "Could not resend the verification email");
     } finally {
       setBusy(false);
     }
@@ -926,6 +938,7 @@ function AuthScreen({ initialMode = "signin", onBack }: { initialMode?: "signin"
           <button className="primary-button" disabled={busy}>
             {busy ? "Working…" : mode === "forgot" ? "Send reset link" : mode === "recovery" ? "Request recovery link" : mode === "signin" ? "Open mailbox" : "Create account"}
           </button>
+          {mode === "signup" && notice && <button type="button" className="text-button auth-link" onClick={() => void resendVerification()} disabled={busy}>Resend verification email</button>}
         </form>
         {(mode === "signin" || mode === "signup") && <>
           <div className="oauth-divider"><span>or</span></div>
@@ -1173,7 +1186,6 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
       setBusy(false);
     }
   }
-
   async function skipSetup() {
     setBusy(true);
     setError("");
@@ -6161,6 +6173,7 @@ function AppContent() {
   const [onboardingRequired, setOnboardingRequired] = useState(false);
   const [showPublicHome, setShowPublicHome] = useState(true);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [emailVerificationNotice, setEmailVerificationNotice] = useState("");
   const [recovering, setRecovering] = useState(false);
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
@@ -6169,16 +6182,29 @@ function AppContent() {
       setReady(true);
       return;
     }
-    void supabase.auth.getSession().then(({ data }) => {
+    const initialize = async () => {
+      const currentUrl = new URL(window.location.href);
+      const verificationToken = currentUrl.searchParams.get("verify_email");
+      if (verificationToken) {
+        try {
+          const result = await publicApiFetch<{ message?: string }>(`/api/auth/verify-email?token=${encodeURIComponent(verificationToken)}`);
+          setEmailVerificationNotice(result.message || "Email address verified. You can now sign in.");
+        } catch (verificationError) {
+          setEmailVerificationNotice(verificationError instanceof Error ? verificationError.message : "This verification link is invalid or expired");
+        }
+        currentUrl.searchParams.delete("verify_email");
+        window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+      }
+      const { data } = await supabase.auth.getSession();
       setSession(data.session);
       if (data.session) setShowPublicHome(false);
-      const currentUrl = new URL(window.location.href);
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       const token = currentUrl.searchParams.get("recovery");
       setRecoveryToken(token);
       setRecovering(Boolean(token) || hashParams.get("type") === "recovery");
       setReady(true);
-    });
+    };
+    void initialize();
     const { data: listener } = supabase.auth.onAuthStateChange(
       (event, nextSession) => {
         if (event === "PASSWORD_RECOVERY") setRecovering(true);
@@ -6241,7 +6267,7 @@ function AppContent() {
   }} />;
   if (!session) return showPublicHome
     ? <PublicHome onSignIn={() => { setAuthMode("signin"); setShowPublicHome(false); }} onSignUp={() => { setAuthMode("signup"); setShowPublicHome(false); }} />
-    : <AuthScreen initialMode={authMode} onBack={() => setShowPublicHome(true)} />;
+    : <AuthScreen initialMode={authMode} initialNotice={emailVerificationNotice} onBack={() => setShowPublicHome(true)} />;
   if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
   if (!onboardingChecked) return <div className="loading-screen"><div className="brand-mark">P</div><p>Preparing your private desk…</p></div>;
   if (onboardingRequired) return <OnboardingWizard session={session} onComplete={() => setOnboardingRequired(false)} />;

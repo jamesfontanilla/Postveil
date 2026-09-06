@@ -6,6 +6,7 @@ export type D1User = {
   user_metadata: JsonRecord;
   status: string;
   last_sign_in_at: string | null;
+  email_verified_at?: string | null;
 };
 
 export type D1Session = {
@@ -243,14 +244,14 @@ async function tokenHash(token: string): Promise<string> {
 function userFromRow(row: Record<string, unknown>): D1User {
   let metadata: JsonRecord = {};
   try { metadata = asRecord(JSON.parse(String(row.metadata || "{}"))); } catch { metadata = {}; }
-  return { id: String(row.id), email: String(row.email), user_metadata: metadata, status: String(row.status || "active"), last_sign_in_at: row.last_sign_in_at ? String(row.last_sign_in_at) : null };
+  return { id: String(row.id), email: String(row.email), user_metadata: metadata, status: String(row.status || "active"), last_sign_in_at: row.last_sign_in_at ? String(row.last_sign_in_at) : null, email_verified_at: row.email_verified_at ? String(row.email_verified_at) : null };
 }
 
 export async function getUserByEmail(env: D1Env, email: string): Promise<Record<string, unknown> | null> {
   return await env.DB.prepare("SELECT * FROM pv_users WHERE lower(email) = lower(?1) LIMIT 1").bind(email.trim()).first<Record<string, unknown>>();
 }
 
-export async function createD1User(env: D1Env, email: string, password: string, displayName = ""): Promise<{ user: D1User; session: D1Session }> {
+export async function createD1User(env: D1Env, email: string, password: string, displayName = "", options: { emailVerified?: boolean } = {}): Promise<{ user: D1User; session: D1Session }> {
   const normalized = email.trim().toLowerCase();
   if (!normalized || !password) throw new Error("Email and password are required");
   if (!isStrongPassword(password)) throw new Error("Password must be at least 12 characters and include a letter and a number");
@@ -260,13 +261,15 @@ export async function createD1User(env: D1Env, email: string, password: string, 
   const createdAt = now();
   await env.DB.prepare("INSERT INTO pv_users(id,email,password_hash,password_salt,display_name,metadata,status,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,'active',?7,?7)")
     .bind(id, normalized, await passwordHash(password, salt), encode(salt), displayName || normalized.split("@")[0], JSON.stringify({ display_name: displayName || normalized.split("@")[0] }), createdAt).run();
-  const user = userFromRow({ id, email: normalized, status: "active", metadata: JSON.stringify({ display_name: displayName || normalized.split("@")[0] }) });
+  if (options.emailVerified) await env.DB.prepare("UPDATE pv_users SET email_verified_at = ?1 WHERE id = ?2").bind(createdAt, id).run();
+  const user = userFromRow({ id, email: normalized, status: "active", metadata: JSON.stringify({ display_name: displayName || normalized.split("@")[0] }), email_verified_at: options.emailVerified ? createdAt : null });
   return { user, session: await createD1Session(env, user) };
 }
 
-export async function verifyD1Password(env: D1Env, email: string, password: string): Promise<{ user: D1User; session: D1Session } | null> {
+export async function verifyD1Password(env: D1Env, email: string, password: string, options: { allowUnverified?: boolean } = {}): Promise<{ user: D1User; session: D1Session } | null> {
   const row = await getUserByEmail(env, email);
   if (!row || String(row.status || "active") !== "active") return null;
+  if (!options.allowUnverified && !row.email_verified_at) return null;
   const hash = await passwordHash(password, decode(String(row.password_salt)));
   if (hash !== String(row.password_hash)) return null;
   const signedIn = now();
@@ -354,4 +357,28 @@ export async function consumeD1PasswordResetToken(env: D1Env, token: string): Pr
     .bind(now(), tokenHashValue, now())
     .run();
   return Number(result.meta?.changes || 0) === 1 ? current.user_id : null;
+}
+
+export async function createD1EmailVerificationToken(env: D1Env, userId: string): Promise<string> {
+  const token = randomPasswordResetToken();
+  const nowValue = now();
+  const recent = await env.DB.prepare("SELECT created_at FROM pv_email_verification_tokens WHERE user_id = ?1 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1").bind(userId).first<{ created_at: string }>();
+  if (recent?.created_at && Date.parse(recent.created_at) > Date.now() - 60_000) throw new Error("Please wait before requesting another verification email");
+  await env.DB.prepare("DELETE FROM pv_email_verification_tokens WHERE user_id = ?1 OR expires_at <= ?2").bind(userId, nowValue).run();
+  await env.DB.prepare("INSERT INTO pv_email_verification_tokens(token_hash,user_id,expires_at,used_at,created_at) VALUES (?1,?2,?3,NULL,?4)")
+    .bind(await tokenHash(token), userId, new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), nowValue).run();
+  return token;
+}
+
+export async function consumeD1EmailVerificationToken(env: D1Env, token: string): Promise<string | null> {
+  if (!token) return null;
+  const tokenHashValue = await tokenHash(token);
+  const current = await env.DB.prepare("SELECT user_id FROM pv_email_verification_tokens WHERE token_hash = ?1 AND used_at IS NULL AND expires_at > ?2 LIMIT 1")
+    .bind(tokenHashValue, now()).first<{ user_id: string }>();
+  if (!current?.user_id) return null;
+  const nowValue = now();
+  const result = await env.DB.prepare("UPDATE pv_email_verification_tokens SET used_at = ?1 WHERE token_hash = ?2 AND used_at IS NULL AND expires_at > ?3").bind(nowValue, tokenHashValue, nowValue).run();
+  if (Number(result.meta?.changes || 0) !== 1) return null;
+  await env.DB.prepare("UPDATE pv_users SET email_verified_at = ?1, updated_at = ?1 WHERE id = ?2").bind(nowValue, current.user_id).run();
+  return current.user_id;
 }
