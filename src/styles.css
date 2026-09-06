@@ -51,6 +51,9 @@ input:focus, textarea:focus, select:focus { border-color: #2d5bff; background: #
 .auth-password-checks svg { color: #b7c4bc; }
 .auth-password-checks .met { color: #2f7651; }
 .auth-password-checks .met svg { color: #3da469; }
+.auth-turnstile { display: grid; gap: 7px; min-height: 66px; padding: 3px 0; }
+.auth-turnstile > div { min-height: 50px; }
+.auth-turnstile small { color: #8a96a6; font-size: 10px; font-weight: 500; line-height: 1.4; }
 .auth-aside { max-width: 350px; }
 .auth-shell > .auth-aside { align-self: center; }
 .auth-shell-verification .auth-aside { padding-top: 12px; }

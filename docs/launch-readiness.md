@@ -16,14 +16,23 @@ not a substitute for provider approval, a restore exercise, or legal review.
   days, update delivery state, and add bounce/complaint suppressions.
 - Amazon SES production sending is approved in Singapore, both configured
   sending domains are verified with DKIM, and the `postveil-events`
-  configuration set publishes delivery events to the confirmed SNS subscription
-  on the production webhook. The live Worker accepted the SNS subscription
-  confirmation, and SNS accepted a synthetic publish; a real SES delivery
-  event still needs to be verified.
+  configuration set is present in the Worker configuration. The live Worker
+  accepted the SNS subscription confirmation and a synthetic publish earlier;
+  provider-side delivery, bounce, complaint, and suppression events still need
+  a fresh end-to-end verification.
 - Mailbox onboarding checks exact public MX targets from `INBOUND_MX_TARGETS`.
   Zone ownership alone never enables send/receive.
 - Raw mail and attachments remain behind authenticated, tenant-scoped routes;
-  the B2 bucket is expected to remain private.
+  the B2 bucket is private. Hosted attachment ingestion is currently disabled
+  until an antivirus scanner and quarantine workflow are connected.
+- Cloudflare Turnstile is configured for `postveil.jamesfontanilla.com` signup;
+  the browser widget is explicit and the Worker rejects missing or invalid
+  tokens server-side.
+- Cloudflare managed protection, HTTP DDoS protection, Browser Integrity Check,
+  and Bot Fight Mode are enabled for the production zone. The Worker also
+  enforces its configured per-source and per-user API rate limit.
+- D1 Time Travel is available for `postveil-prod`; the current database exposes
+  a restore bookmark. A destructive production restore has not been performed.
 
 ## Still requires an operator or provider
 
@@ -43,20 +52,21 @@ not a substitute for provider approval, a restore exercise, or legal review.
 
 ### Security operations
 
-- Add Cloudflare WAF/bot rules for the custom domain and confirm a 429/blocked
-  response with a staging-only test rule before enabling enforcement.
-- Configure Turnstile with a real site and secret key, then wire the signup
-  widget and reject missing/invalid tokens server-side.
-- Operate antivirus scanning before promising malware detection. Until a
-  scanner is connected, attachment checks are static and must not be described
-  as antivirus protection.
+- Add custom Cloudflare WAF and rate-limit rules after upgrading to a plan that
+  supports them, then confirm a 429/blocked response with a staging-only rule.
+- Operate antivirus scanning before re-enabling attachments. The production
+  configuration currently rejects attachment uploads, inbound attachment
+  storage, and outbound messages containing attachments.
 - Set up alerting for failed logins, webhook failures, queue dead letters,
   bounce/complaint rates, D1 errors, B2 errors, and provider throttling.
 
 ### Data, recovery, and growth
 
-- Enable D1 backups on the chosen Cloudflare plan and set B2 lifecycle rules.
-- Perform and record a restore test before accepting customer data.
+- Export and retain encrypted D1 backups in an independent account or region;
+  Time Travel alone is not an independent backup. Set B2 lifecycle rules and
+  take a protected snapshot of the production bucket.
+- Perform and record a restore test against a disposable recovery database or
+  bucket before accepting customer data.
 - Migrate hot mailbox/message paths from compatibility JSON records to
   normalized, tenant-keyed D1 tables before serious multi-tenant growth.
 - Add billing, entitlements, invoices, tax handling, and payment-failure flows

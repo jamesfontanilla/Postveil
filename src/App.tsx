@@ -74,6 +74,7 @@ import RichEmailBody from "./components/RichEmailBody";
 
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam" | "quarantine";
 type ViewKey = SystemFolder | "focused" | "other" | "important" | "snoozed" | "muted" | `custom:${string}`;
+const TURNSTILE_SITE_KEY = "0x4AAAAAAEqXXuhzdUlMoSuz";
   type Message = {
   id: string;
   thread_id: string;
@@ -845,6 +846,9 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
   const [verificationPending, setVerificationPending] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const captchaRef = useRef<HTMLDivElement | null>(null);
+  const captchaWidgetId = useRef<string | null>(null);
   const passwordChecks = {
     length: password.length >= 12,
     letter: /[A-Za-z]/.test(password),
@@ -855,6 +859,42 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
     const timer = window.setInterval(() => setResendCooldown((current) => Math.max(0, current - 1)), 1000);
     return () => window.clearInterval(timer);
   }, [resendCooldown]);
+  useEffect(() => {
+    if (mode !== "signup") return undefined;
+    let disposed = false;
+    const renderWidget = () => {
+      if (disposed || !captchaRef.current || !window.turnstile || captchaWidgetId.current) return;
+      captchaWidgetId.current = window.turnstile.render(captchaRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        theme: "light",
+        size: "flexible",
+        callback: (token) => setCaptchaToken(token),
+        "expired-callback": () => setCaptchaToken(""),
+        "error-callback": () => {
+          setCaptchaToken("");
+          setError("The security check is temporarily unavailable. Try again.");
+        },
+      });
+    };
+    const existingScript = document.querySelector<HTMLScriptElement>("script[data-postveil-turnstile]");
+    if (window.turnstile) renderWidget();
+    else if (existingScript) existingScript.addEventListener("load", renderWidget, { once: true });
+    else {
+      const script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.defer = true;
+      script.dataset.postveilTurnstile = "true";
+      script.addEventListener("load", renderWidget, { once: true });
+      document.head.appendChild(script);
+    }
+    return () => {
+      disposed = true;
+      if (captchaWidgetId.current && window.turnstile?.remove) window.turnstile.remove(captchaWidgetId.current);
+      captchaWidgetId.current = null;
+      setCaptchaToken("");
+    };
+  }, [mode]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -875,9 +915,10 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
         await publicApiFetch("/api/auth/mfa-recovery", { method: "POST", body: JSON.stringify({ email, code: recoveryCode }) });
         setNotice("If the details are valid, a recovery link will arrive shortly. Check your inbox.");
       } else {
+        if (mode === "signup" && !captchaToken) throw new Error("Complete the security check before creating an account");
         const result = mode === "signin"
           ? await client.auth.signInWithPassword({ email, password })
-          : await client.auth.signUp({ email, password });
+          : await client.auth.signUp({ email, password, options: { captchaToken } });
         if (result.error) throw result.error;
         if (mode === "signup" && !result.data.session) {
           setVerificationEmail(email.trim());
@@ -979,6 +1020,7 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
             Recovery code
             <input value={recoveryCode} onChange={(event) => setRecoveryCode(event.target.value.toUpperCase().replace(/[^A-Z2-9-]/g, "").slice(0, 14))} placeholder="ABCD-EFGH-JKLM" autoComplete="one-time-code" />
           </label>}
+          {mode === "signup" && <div className="auth-turnstile"><div ref={captchaRef} /><small>Protected by Cloudflare Turnstile. We use it only to reduce automated signups.</small></div>}
           {error && <div className="form-error">{error}</div>}
           {notice && <div className="form-notice">{notice}</div>}
           <button className="primary-button" disabled={busy}>

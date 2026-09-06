@@ -20,7 +20,9 @@ This repository is an early-release reference implementation. The current deploy
 - The browser receives no database or provider key. Never expose AWS SES or Backblaze application keys to the browser.
 - D1 access is only through authenticated Worker routes, with owner-scoped queries and server-side authorization.
 - Backblaze B2 must use a private bucket and an application key limited to the required object operations.
-- Attachment checks are static type and size checks. They are not antivirus scanning.
+- The hosted deployment currently disables attachment ingestion until an
+  antivirus scanner and quarantine workflow are connected. The code includes
+  static type and size checks, but those are not antivirus scanning.
 - The public health endpoint intentionally returns only a generic liveness response.
 - Production deployments should enable provider 2FA, backups, rate limits, quotas, monitoring, and a malware-scanning workflow.
 

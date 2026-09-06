@@ -126,7 +126,7 @@ const auth = {
     return result;
   },
   async signUp({ email, password, options }: { email: string; password: string; options?: JsonRecord }): Promise<AuthResponse<{ user: PostveilUser | null; session: Session | null }>> {
-    const result = await request<{ user: PostveilUser; session: Session | null }>("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password, data: options?.data ?? {} }) });
+    const result = await request<{ user: PostveilUser; session: Session | null }>("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password, data: options?.data ?? {}, captchaToken: options?.captchaToken ?? null }) });
     if (!result.error) {
       writeSession(result.data.session);
       emit("SIGNED_IN", result.data.session);

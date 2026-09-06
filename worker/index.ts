@@ -138,6 +138,7 @@ interface Env {
   INBOUND_MX_TARGETS?: string;
   TURNSTILE_SECRET_KEY?: string;
   TURNSTILE_SITE_KEY?: string;
+  ATTACHMENTS_ENABLED?: string;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -257,6 +258,36 @@ function constantTimeEqual(left: string, right: string): boolean {
     difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
   }
   return difference === 0;
+}
+
+async function verifyTurnstileToken(request: Request, env: Env, token: string): Promise<{ ok: boolean; reason?: string }> {
+  const secret = String(env.TURNSTILE_SECRET_KEY || "").trim();
+  // Local builds may intentionally omit Turnstile. A deployed, public origin
+  // must fail closed when the secret is configured but the token is absent or
+  // invalid; this prevents a client-side-only CAPTCHA from becoming theater.
+  if (!secret) {
+    return env.APP_DOMAIN && !/^(?:localhost|127\.0\.0\.1|your-domain\.example)$/i.test(env.APP_DOMAIN)
+      ? { ok: false, reason: "Turnstile is not configured" }
+      : { ok: true };
+  }
+  const candidate = token.trim().slice(0, 4096);
+  if (!candidate) return { ok: false, reason: "Complete the security check before creating an account" };
+  const form = new URLSearchParams({ secret, response: candidate });
+  const remoteIp = request.headers.get("CF-Connecting-IP");
+  if (remoteIp) form.set("remoteip", remoteIp.slice(0, 96));
+  try {
+    const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    const result = await response.json() as { success?: boolean };
+    return response.ok && result.success === true
+      ? { ok: true }
+      : { ok: false, reason: "The security check could not be verified. Try again." };
+  } catch {
+    return { ok: false, reason: "The security check is temporarily unavailable. Try again." };
+  }
 }
 
 function splitAddresses(value: unknown): string[] {
@@ -820,6 +851,8 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
   if (url.pathname === "/api/auth/signup" && request.method === "POST") {
     try {
       const body = await request.json() as JsonRecord;
+      const captcha = await verifyTurnstileToken(request, env, String(body.captchaToken || ""));
+      if (!captcha.ok) return json({ data: { user: null, session: null }, error: { message: captcha.reason || "Complete the security check before creating an account", code: "captcha_required" } }, 400);
       const created = await createD1User(env, String(body.email || ""), String(body.password || ""), String(body.displayName || ""));
       try {
         const token = await createD1EmailVerificationToken(env, created.user.id);
@@ -1950,6 +1983,9 @@ async function applyPolicyToMessage(env: Env, ownerId: string, message: JsonReco
 async function saveAttachments(env: Env, ownerId: string, messageId: string, attachments: Array<{ filename?: string | null; mimeType?: string; content?: Uint8Array | ArrayBuffer | string; contentId?: string | null; disposition?: string | null }>): Promise<{ stored: StoredAttachment[]; blocked: string[] }> {
   const stored: StoredAttachment[] = [];
   const blocked: string[] = [];
+  if (String(env.ATTACHMENTS_ENABLED || "true").toLowerCase() === "false") {
+    return { stored, blocked: attachments.map((attachment, index) => String(attachment.filename || `attachment-${index + 1}`)).slice(0, 20) };
+  }
   for (const [index, attachment] of attachments.entries()) {
     if (!attachment.content) continue;
     const filename = (attachment.filename || `attachment-${index + 1}`).replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -2788,6 +2824,7 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   const replyTo = cleanAddress(String(body.replyTo || fromAddress));
   await enforceDomainQuota(env, mailboxAdminSettings?.organization_id, fromAddress);
   const attachments: OutboundAttachment[] = Array.isArray(body.attachments) ? body.attachments.filter((item): item is OutboundAttachment => Boolean(item && typeof item.filename === "string" && typeof item.object_key === "string")).map((item) => ({ filename: item.filename.slice(0, 180), object_key: item.object_key, byte_size: Number(item.byte_size || 0), content_type: item.content_type, detected_content_type: item.detected_content_type, sha256: item.sha256, preview_state: item.preview_state, safety_status: item.safety_status, safety_reasons: item.safety_reasons })) : [];
+  if (String(env.ATTACHMENTS_ENABLED || "true").toLowerCase() === "false" && attachments.length) return error("Attachments are temporarily disabled until malware scanning is configured", 503);
   const suppressed = await suppressedRecipients(env, mailboxAdminSettings?.organization_id, [...to, ...cc, ...bcc]);
   if (suppressed.size) return error(`Delivery blocked for suppressed recipient${suppressed.size === 1 ? "" : "s"}: ${[...suppressed].join(", ")}`, 422);
   const messageBytes = messageSizeBytes({ subject, text, html, to, cc, bcc, attachments });
@@ -4861,6 +4898,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (request.method === "POST" && url.pathname === "/api/drafts") return handleDraft(env, user, (await request.json()) as JsonRecord);
   if (request.method === "POST" && url.pathname === "/api/attachments") {
+    if (String(env.ATTACHMENTS_ENABLED || "true").toLowerCase() === "false") return error("Attachments are temporarily disabled until malware scanning is configured", 503);
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return error("File is required");
