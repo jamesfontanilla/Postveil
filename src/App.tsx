@@ -1066,7 +1066,7 @@ type OnboardingState = {
   displayName?: string;
   dnsProvider?: string;
   mailboxAddress?: string;
-  domainStatus?: "pending" | "ready";
+  domainStatus?: "pending" | "verified" | "ready";
 };
 
 const ONBOARDING_STEPS = [
@@ -1095,6 +1095,8 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
   const [domainStatus, setDomainStatus] = useState<OnboardingState["domainStatus"]>("pending");
   const [mailboxAddress, setMailboxAddress] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cloudflareBusy, setCloudflareBusy] = useState(false);
+  const [cloudflareZone, setCloudflareZone] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -1113,6 +1115,31 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
       if (saved.domainStatus) setDomainStatus(saved.domainStatus);
     }).catch(() => undefined);
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const currentUrl = new URL(window.location.href);
+    const result = currentUrl.searchParams.get("cloudflare");
+    const callbackDomain = canonicalDomain(currentUrl.searchParams.get("domain") || "");
+    if (!result) return;
+    currentUrl.searchParams.delete("cloudflare");
+    currentUrl.searchParams.delete("code");
+    currentUrl.searchParams.delete("domain");
+    window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+    if (result !== "connected" || !callbackDomain) {
+      setError("Cloudflare verification was not completed. You can try again or choose another DNS provider.");
+      return;
+    }
+    setDomain(callbackDomain);
+    setDnsProvider("Cloudflare");
+    void apiFetch<{ verified: boolean; zoneId?: string | null; dnsReady?: boolean }>(`/api/domains/cloudflare/status?domain=${encodeURIComponent(callbackDomain)}`)
+      .then((status) => {
+        if (!status.verified) throw new Error("Cloudflare did not verify this domain");
+        setCloudflareZone(status.zoneId || "");
+        setDomainStatus(status.dnsReady ? "ready" : "verified");
+        setNotice(status.dnsReady ? "Cloudflare connected. An MX record was found too." : "Cloudflare connected. Your zone is verified; add the Postveil DNS records next.");
+      })
+      .catch((statusError) => setError(statusError instanceof Error ? statusError.message : "Cloudflare verification could not be confirmed"));
   }, []);
 
   const persist = useCallback(async (patch: Partial<OnboardingState>) => {
@@ -1177,6 +1204,24 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
     }
   }
 
+  async function connectCloudflare() {
+    const cleanDomain = canonicalDomain(domain);
+    if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(cleanDomain)) {
+      setError("Enter a valid domain before connecting Cloudflare.");
+      return;
+    }
+    setCloudflareBusy(true);
+    setError("");
+    try {
+      const result = await apiFetch<{ authorizationUrl: string }>(`/api/cloudflare/oauth/start?domain=${encodeURIComponent(cleanDomain)}`);
+      if (!result.authorizationUrl) throw new Error("Cloudflare verification is not available");
+      window.location.assign(result.authorizationUrl);
+    } catch (connectError) {
+      setError(connectError instanceof Error ? connectError.message : "Cloudflare verification could not start");
+      setCloudflareBusy(false);
+    }
+  }
+
   async function finish() {
     setBusy(true);
     setError("");
@@ -1214,18 +1259,19 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
             </>}
             {step === 1 && <>
               <p className="eyebrow">THE NAME PEOPLE WILL USE</p><h2>Which domain should Postveil connect?</h2><p className="onboarding-lede">Use a domain you control. We’ll show the exact handoff for your DNS provider next.</p>
-              <label className="onboarding-field">Your domain<input autoFocus value={domain} onChange={(event) => setDomain(normalizeDomain(event.target.value))} placeholder="yourcompany.com" autoComplete="url" /></label>
+              <label className="onboarding-field">Your domain<input autoFocus value={domain} onChange={(event) => { setDomain(normalizeDomain(event.target.value)); setDomainStatus("pending"); setCloudflareZone(""); }} placeholder="yourcompany.com" autoComplete="url" /></label>
               <div className="onboarding-hint"><Globe2 size={17} /><span>Example: if your address is <strong>hello@acme.com</strong>, enter <strong>acme.com</strong>.</span></div>
               {error && <div className="form-error" role="alert">{error}</div>}
               <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => setStep(0)}><ArrowLeft size={16} /> Back</button><button className="primary-button" type="button" onClick={() => { if (!cleanDomain || !cleanDomain.includes(".")) { setError("Enter a domain such as yourcompany.com."); return; } void advance(2, { domain: cleanDomain }); }} disabled={busy}>Review connection <ArrowRight size={16} /></button></div>
             </>}
             {step === 2 && <>
               <p className="eyebrow">ONE SMALL DNS HANDOFF</p><h2>Connect {cleanDomain || "your domain"}.</h2><p className="onboarding-lede">Your messages stay in Postveil after this. DNS only tells the internet where mail for your name belongs.</p>
-              <div className="onboarding-provider-row"><span className="onboarding-label">Where do you manage DNS?</span><div className="provider-pills">{["Cloudflare", "GoDaddy", "Namecheap", "Other"].map((provider) => <button type="button" key={provider} className={dnsProvider === provider ? "selected" : ""} onClick={() => setDnsProvider(provider)}>{provider}</button>)}</div></div>
-              <div className="dns-preview"><div className="dns-preview-head"><div><strong>Connection checklist</strong><small>Postveil will verify each item when your records are live.</small></div><span className="pending-badge">Pending</span></div><div className="dns-row"><span className="dns-mark"><Mail size={15} /></span><div><strong>Receiving mail</strong><small>MX record routes incoming messages to your Postveil mailbox.</small></div><span>Next</span></div><div className="dns-row"><span className="dns-mark"><ShieldCheck size={15} /></span><div><strong>Sending trust</strong><small>SPF, DKIM, and DMARC protect your domain’s reputation.</small></div><span>Next</span></div></div>
-              <div className="onboarding-hint"><ShieldAlert size={17} /><span>DNS changes can take a little while. You can create the mailbox now and finish verification later.</span></div>
+              <div className="onboarding-provider-row"><span className="onboarding-label">Where do you manage DNS?</span><div className="provider-pills">{["Cloudflare", "GoDaddy", "Namecheap", "Other"].map((provider) => <button type="button" key={provider} className={dnsProvider === provider ? "selected" : ""} onClick={() => { setDnsProvider(provider); if (provider !== "Cloudflare") { setDomainStatus("pending"); setCloudflareZone(""); } }}>{provider}</button>)}</div></div>
+              {dnsProvider === "Cloudflare" && <div className={`cloudflare-connect-card${domainStatus !== "pending" ? " connected" : ""}`}><div className="cloudflare-connect-copy"><span className="cloudflare-connect-mark"><Globe2 size={17} /></span><div><strong>{domainStatus !== "pending" ? "Cloudflare zone verified" : "Verify with Cloudflare"}</strong><small>{domainStatus !== "pending" ? `${cloudflareZone ? `Zone ${cloudflareZone} · ` : ""}Postveil can continue with this domain.` : "One click opens Cloudflare’s consent screen. Postveil requests read-only zone and DNS access and does not store your token."}</small></div></div>{domainStatus !== "pending" ? <span className="verified-badge"><Check size={13} /> Verified</span> : <button type="button" className="secondary-button" onClick={() => void connectCloudflare()} disabled={cloudflareBusy || busy}>{cloudflareBusy ? "Opening…" : "Connect Cloudflare"}</button>}</div>}
+              <div className="dns-preview"><div className="dns-preview-head"><div><strong>Connection checklist</strong><small>Postveil will verify each item when your records are live.</small></div><span className={domainStatus === "ready" ? "verified-badge" : "pending-badge"}>{domainStatus === "ready" ? "MX found" : domainStatus === "verified" ? "Zone verified" : "Pending"}</span></div><div className="dns-row"><span className="dns-mark"><Mail size={15} /></span><div><strong>Receiving mail</strong><small>MX record routes incoming messages to your Postveil mailbox.</small></div><span>Next</span></div><div className="dns-row"><span className="dns-mark"><ShieldCheck size={15} /></span><div><strong>Sending trust</strong><small>SPF, DKIM, and DMARC protect your domain’s reputation.</small></div><span>Next</span></div></div>
+              <div className="onboarding-hint"><ShieldAlert size={17} /><span>{dnsProvider === "Cloudflare" && domainStatus === "pending" ? "Verify the zone first. Postveil keeps unverified custom mailboxes disabled until ownership is confirmed." : "DNS changes can take a little while. Postveil will keep mail disabled until the domain is verified."}</span></div>
               {error && <div className="form-error" role="alert">{error}</div>}
-              <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button><button className="primary-button" type="button" onClick={() => void advance(3, { dnsProvider, domainStatus: "pending" })} disabled={busy}>Create mailbox <ArrowRight size={16} /></button></div>
+              <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button><button className="primary-button" type="button" onClick={() => void advance(3, { dnsProvider, domainStatus })} disabled={busy || (dnsProvider === "Cloudflare" && domainStatus === "pending")}>Continue to mailbox <ArrowRight size={16} /></button></div>
             </>}
             {step === 3 && <>
               <p className="eyebrow">MAKE IT YOURS</p><h2>Choose your first address.</h2><p className="onboarding-lede">You can add aliases and shared addresses after this one is working.</p>
@@ -1236,8 +1282,8 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
               <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => setStep(2)}><ArrowLeft size={16} /> Back</button><button className="primary-button" type="button" onClick={() => void createMailbox()} disabled={busy || !mailboxLocal}>{busy ? "Creating…" : "Create address"} <ArrowRight size={16} /></button></div>
             </>}
             {step === 4 && <>
-              <div className="onboarding-success-mark"><Check size={24} /></div><p className="eyebrow">YOUR DESK IS READY</p><h2>{mailboxAddress || `${mailboxLocal}@${cleanDomain}`} is yours.</h2><p className="onboarding-lede">The mailbox exists now. Finish the DNS handoff when you’re ready so messages can travel reliably.</p>
-              <div className="onboarding-next-list"><div><Check size={16} /><span><strong>Mailbox created</strong><small>Your address is available in Postveil.</small></span></div><div className={domainStatus === "ready" ? "ready" : "pending"}><span className="onboarding-number">02</span><span><strong>Connect DNS</strong><small>{dnsProvider} · MX, SPF, DKIM, and DMARC</small></span><span className="pending-badge">{domainStatus === "ready" ? "Ready" : "Next"}</span></div><div><span className="onboarding-number">03</span><span><strong>Send your first message</strong><small>We’ll check delivery and authentication together.</small></span></div></div>
+              <div className="onboarding-success-mark"><Check size={24} /></div><p className="eyebrow">{domainStatus === "pending" ? "ADDRESS RESERVED" : "YOUR DESK IS READY"}</p><h2>{mailboxAddress || `${mailboxLocal}@${cleanDomain}`} is yours.</h2><p className="onboarding-lede">{domainStatus === "pending" ? "The address is reserved, but sending and receiving stay disabled until the domain is verified." : "The mailbox exists now. Finish the DNS handoff when you’re ready so messages can travel reliably."}</p>
+              <div className="onboarding-next-list"><div><Check size={16} /><span><strong>{domainStatus === "pending" ? "Address reserved" : "Mailbox created"}</strong><small>{domainStatus === "pending" ? "Verification is required before mail can flow." : "Your address is available in Postveil."}</small></span></div><div className={domainStatus === "ready" ? "ready" : "pending"}><span className="onboarding-number">02</span><span><strong>Connect DNS</strong><small>{dnsProvider} · MX, SPF, DKIM, and DMARC</small></span><span className="pending-badge">{domainStatus === "ready" ? "Ready" : "Next"}</span></div><div><span className="onboarding-number">03</span><span><strong>Send your first message</strong><small>We’ll check delivery and authentication together.</small></span></div></div>
               {notice && <div className="form-notice" role="status">{notice}</div>}
               <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => { setNotice("DNS setup will remain on your checklist."); setStep(2); }}><ArrowLeft size={16} /> Review DNS</button><button className="primary-button" type="button" onClick={() => void finish()} disabled={busy}>Open my mailbox <ArrowRight size={16} /></button></div>
             </>}

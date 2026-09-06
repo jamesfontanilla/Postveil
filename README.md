@@ -73,6 +73,9 @@ OUTLOOK_FORWARD_TO (optional)
 AWS_ACCESS_KEY_ID (optional, SES)
 AWS_SECRET_ACCESS_KEY (optional, SES)
 AWS_SES_REGION (optional, defaults to us-east-1)
+CLOUDFLARE_OAUTH_CLIENT_ID (optional, one-click domain verification)
+CLOUDFLARE_OAUTH_CLIENT_SECRET (optional, one-click domain verification)
+CLOUDFLARE_OAUTH_SCOPES (optional, defaults to zone.read dns.read)
 MAILGUN_API_KEY (optional)
 MAILGUN_DOMAIN (optional)
 MAILGUN_BASE_URL (optional)
@@ -95,6 +98,17 @@ CONFIDENTIAL_ENCRYPTION_KEY (required for confidential mode)
 ```
 
 `APP_DOMAIN` and `DEFAULT_FROM_EMAIL` must use a domain that is verified with your email provider. `ALLOWED_SENDER_DOMAINS` may contain additional verified domains separated by commas. The default mailbox is `DEFAULT_FROM_EMAIL`, or `postmaster@APP_DOMAIN` when no default is set.
+
+### Cloudflare one-click domain verification
+
+Create a Cloudflare OAuth client with the authorization-code flow, the redirect
+URL `https://YOUR_APP_DOMAIN/api/cloudflare/oauth/callback`, and the read-only
+scopes `zone.read dns.read`. Configure the token endpoint authentication method
+as `client_secret_post`, then store the client ID as a Worker variable and the
+client secret with `wrangler secret put CLOUDFLARE_OAUTH_CLIENT_SECRET`. The
+onboarding button uses the OAuth grant to confirm the user controls the zone;
+the access token is exchanged and discarded, never stored by Postveil. MX/SPF/
+DKIM/DMARC setup remains a separate DNS handoff.
 
 Configure each provider webhook to send `POST` requests with the deployment's provider secret in the `x-webhook-secret` header. Query-string webhook tokens are deliberately not accepted. Provider-specific webhook payloads are normalized for delivery, bounce, complaint, open, click, and receipt events; the provider must still be configured to emit those events.
 

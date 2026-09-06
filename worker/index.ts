@@ -105,6 +105,9 @@ interface Env {
   AWS_REGION?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  CLOUDFLARE_OAUTH_CLIENT_ID?: string;
+  CLOUDFLARE_OAUTH_CLIENT_SECRET?: string;
+  CLOUDFLARE_OAUTH_SCOPES?: string;
   MAILGUN_API_KEY?: string;
   MAILGUN_DOMAIN?: string;
   MAILGUN_BASE_URL?: string;
@@ -460,6 +463,14 @@ function domainOf(address: string): string {
   return cleanAddress(address).split("@")[1] || "unknown";
 }
 
+async function isVerifiedMailboxDomain(env: Env, userId: string, domain: string): Promise<boolean> {
+  const normalized = normalizeProviderDomain(domain);
+  if (!normalized) return false;
+  if (configuredSenderDomains(env).includes(normalized)) return true;
+  const row = await env.DB.prepare("SELECT id FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 AND status = 'verified' LIMIT 1").bind(userId, normalized).first<{ id: string }>();
+  return Boolean(row?.id);
+}
+
 async function suppressedRecipients(env: Env, organizationId: string | undefined, recipients: string[]): Promise<Set<string>> {
   if (!organizationId || !recipients.length) return new Set();
   const encoded = recipients.map((email) => encodeURIComponent(cleanAddress(email))).join(",");
@@ -522,8 +533,16 @@ function googleStateCookie(value: string, maxAge: number): string {
   return `postveil_google_state=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
 }
 
+function cloudflareStateCookie(value: string, maxAge: number): string {
+  return `postveil_cloudflare_state=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+}
+
 function googleRedirectUri(env: Pick<Env, "APP_DOMAIN">): string {
   return `https://${configuredAppDomain(env)}/api/auth/google/callback`;
+}
+
+function cloudflareRedirectUri(env: Pick<Env, "APP_DOMAIN">): string {
+  return `https://${configuredAppDomain(env)}/api/cloudflare/oauth/callback`;
 }
 
 function googleErrorRedirect(env: Pick<Env, "APP_DOMAIN">, code: string): Response {
@@ -642,6 +661,123 @@ async function handleGoogleAuth(request: Request, env: Env): Promise<Response | 
     return json({ data: { user, session: d1SessionPayload(user, row.session_token) }, error: null });
   }
   return null;
+}
+
+type CloudflareZone = { id: string; name: string; status?: string; account?: { id?: string } | null };
+type CloudflareDomainVerification = {
+  id: string;
+  user_id: string;
+  domain: string;
+  provider: "cloudflare";
+  status: "verified" | string;
+  zone_id: string | null;
+  account_id: string | null;
+  dns_ready: number;
+  verified_at: string | null;
+  last_checked_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function normalizeProviderDomain(value: string): string {
+  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/\.$/, "");
+}
+
+function cloudflareErrorRedirect(env: Env, code: string, domain = ""): Response {
+  const target = new URL(`https://${configuredAppDomain(env)}/`);
+  target.searchParams.set("cloudflare", "error");
+  target.searchParams.set("code", code.slice(0, 80));
+  if (domain) target.searchParams.set("domain", domain);
+  return new Response(null, { status: 302, headers: { Location: target.toString(), "Set-Cookie": cloudflareStateCookie("", 0) } });
+}
+
+async function cloudflareToken(code: string, env: Env, redirectUri: string): Promise<string | null> {
+  if (!env.CLOUDFLARE_OAUTH_CLIENT_ID || !env.CLOUDFLARE_OAUTH_CLIENT_SECRET) return null;
+  const body = new URLSearchParams({
+    client_id: env.CLOUDFLARE_OAUTH_CLIENT_ID,
+    client_secret: env.CLOUDFLARE_OAUTH_CLIENT_SECRET,
+    code,
+    grant_type: "authorization_code",
+    redirect_uri: redirectUri,
+  });
+  const response = await fetch("https://dash.cloudflare.com/oauth2/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+    body,
+  });
+  if (!response.ok) return null;
+  const payload = await response.json() as JsonRecord;
+  const accessToken = String(payload.access_token || "").trim();
+  return accessToken || null;
+}
+
+async function cloudflareZoneForDomain(accessToken: string, domain: string): Promise<{ zone: CloudflareZone; dnsReady: boolean } | null> {
+  const zonesUrl = new URL("https://api.cloudflare.com/client/v4/zones");
+  zonesUrl.searchParams.set("name", domain);
+  zonesUrl.searchParams.set("status", "active");
+  zonesUrl.searchParams.set("per_page", "50");
+  const zonesResponse = await fetch(zonesUrl, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" } });
+  if (!zonesResponse.ok) return null;
+  const zonesPayload = await zonesResponse.json() as { success?: boolean; result?: CloudflareZone[] };
+  if (zonesPayload.success !== true || !Array.isArray(zonesPayload.result)) return null;
+  const zone = zonesPayload.result.find((candidate) => normalizeProviderDomain(String(candidate.name || "")) === domain);
+  if (!zone?.id) return null;
+
+  let dnsReady = false;
+  try {
+    const recordsUrl = new URL(`https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(zone.id)}/dns_records`);
+    recordsUrl.searchParams.set("type", "MX");
+    recordsUrl.searchParams.set("name", domain);
+    recordsUrl.searchParams.set("per_page", "100");
+    const recordsResponse = await fetch(recordsUrl, { headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" } });
+    if (recordsResponse.ok) {
+      const recordsPayload = await recordsResponse.json() as { success?: boolean; result?: Array<{ type?: string; name?: string }> };
+      dnsReady = recordsPayload.success === true && Array.isArray(recordsPayload.result) && recordsPayload.result.some((record) => String(record.type || "").toUpperCase() === "MX" && normalizeProviderDomain(String(record.name || "")) === domain);
+    }
+  } catch {
+    // Zone ownership is the verification signal. DNS inspection is an optional status enhancement.
+  }
+  return { zone, dnsReady };
+}
+
+async function promoteVerifiedMailboxes(env: Env, userId: string, domain: string): Promise<void> {
+  const mailboxes = await d1Request<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(userId)}&select=id,address,settings`).catch(() => []);
+  await Promise.all(mailboxes.filter((mailbox) => domainOf(mailbox.address) === domain).map(async (mailbox) => {
+    const settings = objectValue(mailbox.settings);
+    await d1Request(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ can_send: true, can_receive: true, settings: { ...settings, domain_verification_status: "verified", domain_verification_provider: "cloudflare" } }),
+    });
+  }));
+}
+
+async function handleCloudflareOAuthCallback(request: Request, env: Env): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname !== "/api/cloudflare/oauth/callback" || request.method !== "GET") return null;
+  const state = url.searchParams.get("state") || "";
+  const code = url.searchParams.get("code") || "";
+  const cookieState = requestCookie(request, "postveil_cloudflare_state");
+  const stateHash = state ? await sha256Hex(new TextEncoder().encode(state)) : "";
+  const pending = stateHash
+    ? await env.DB.prepare("SELECT state_hash,user_id,domain,redirect_uri,expires_at FROM pv_cloudflare_oauth_states WHERE state_hash = ?1 AND expires_at > ?2 LIMIT 1").bind(stateHash, new Date().toISOString()).first<{ state_hash: string; user_id: string; domain: string; redirect_uri: string; expires_at: string }>()
+    : null;
+  if (stateHash) await env.DB.prepare("DELETE FROM pv_cloudflare_oauth_states WHERE state_hash = ?1").bind(stateHash).run();
+  if (!state || !constantTimeEqual(state, cookieState) || !pending) return cloudflareErrorRedirect(env, "invalid_oauth_state");
+  if (url.searchParams.get("error")) return cloudflareErrorRedirect(env, "cloudflare_denied", pending.domain);
+  if (!code) return cloudflareErrorRedirect(env, "missing_code", pending.domain);
+  if (!env.CLOUDFLARE_OAUTH_CLIENT_ID || !env.CLOUDFLARE_OAUTH_CLIENT_SECRET) return cloudflareErrorRedirect(env, "not_configured", pending.domain);
+  const accessToken = await cloudflareToken(code, env, pending.redirect_uri);
+  if (!accessToken) return cloudflareErrorRedirect(env, "token_exchange_failed", pending.domain);
+  const match = await cloudflareZoneForDomain(accessToken, pending.domain);
+  if (!match) return cloudflareErrorRedirect(env, "zone_not_found", pending.domain);
+  const now = new Date().toISOString();
+  const zone = match.zone;
+  await env.DB.prepare(`INSERT INTO pv_domain_verifications(id,user_id,domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at,created_at,updated_at)
+    VALUES (?1,?2,?3,'cloudflare','verified',?4,?5,?6,?7,?7,?7,?7)
+    ON CONFLICT(user_id,domain) DO UPDATE SET provider='cloudflare',status='verified',zone_id=excluded.zone_id,account_id=excluded.account_id,dns_ready=excluded.dns_ready,verified_at=excluded.verified_at,last_checked_at=excluded.last_checked_at,updated_at=excluded.updated_at`)
+    .bind(crypto.randomUUID(), pending.user_id, pending.domain, String(zone.id), zone.account?.id ? String(zone.account.id) : null, match.dnsReady ? 1 : 0, now).run();
+  await promoteVerifiedMailboxes(env, pending.user_id, pending.domain);
+  return new Response(null, { status: 302, headers: { Location: `https://${configuredAppDomain(env)}/?cloudflare=connected&domain=${encodeURIComponent(pending.domain)}`, "Set-Cookie": cloudflareStateCookie("", 0) } });
 }
 
 async function handleD1Auth(request: Request, env: Env): Promise<Response | null> {
@@ -3402,6 +3538,8 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   await enforceRequestBodyLimit(request);
   const d1AuthResponse = await handleD1Auth(request, env);
   if (d1AuthResponse) return d1AuthResponse;
+  const cloudflareCallbackResponse = await handleCloudflareOAuthCallback(request, env);
+  if (cloudflareCallbackResponse) return cloudflareCallbackResponse;
   if (url.pathname === "/api/client-config") {
     if (request.method !== "GET") return error("Method not allowed", 405);
     return json({ authMode: "d1", service: "postveil" });
@@ -3456,6 +3594,35 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (user.mfaRequired) return error("Complete two-step verification to continue", 401);
   const userRateLimitResponse = await enforceEdgeRateLimit(request, env, user.id);
   if (userRateLimitResponse) return userRateLimitResponse;
+
+  if (request.method === "GET" && url.pathname === "/api/cloudflare/oauth/start") {
+    if (!env.CLOUDFLARE_OAUTH_CLIENT_ID || !env.CLOUDFLARE_OAUTH_CLIENT_SECRET) return error("Cloudflare verification is not configured yet", 503);
+    const domain = normalizeProviderDomain(url.searchParams.get("domain") || "");
+    if (!isValidDomain(domain)) return error("Enter a valid domain before connecting Cloudflare", 400);
+    const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    const redirectUri = cloudflareRedirectUri(env);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    await env.DB.prepare("DELETE FROM pv_cloudflare_oauth_states WHERE expires_at <= ?1").bind(new Date().toISOString()).run();
+    await env.DB.prepare("INSERT INTO pv_cloudflare_oauth_states(state_hash,user_id,domain,redirect_uri,expires_at,created_at) VALUES (?1,?2,?3,?4,?5,?6)").bind(await sha256Hex(new TextEncoder().encode(state)), user.id, domain, redirectUri, expiresAt, new Date().toISOString()).run();
+    const authorize = new URL("https://dash.cloudflare.com/oauth2/auth");
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set("client_id", env.CLOUDFLARE_OAUTH_CLIENT_ID);
+    authorize.searchParams.set("redirect_uri", redirectUri);
+    authorize.searchParams.set("scope", env.CLOUDFLARE_OAUTH_SCOPES || "zone.read dns.read");
+    authorize.searchParams.set("state", state);
+    const response = json({ authorizationUrl: authorize.toString(), domain });
+    const headers = new Headers(response.headers);
+    headers.set("Set-Cookie", cloudflareStateCookie(state, 600));
+    return new Response(response.body, { status: response.status, headers });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/domains/cloudflare/status") {
+    const domain = normalizeProviderDomain(url.searchParams.get("domain") || "");
+    if (!isValidDomain(domain)) return error("A valid domain is required", 400);
+    const verification = await env.DB.prepare("SELECT domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 LIMIT 1").bind(user.id, domain).first<CloudflareDomainVerification>();
+    return json({ domain, verified: verification?.status === "verified", provider: verification?.provider || null, zoneId: verification?.zone_id || null, dnsReady: Number(verification?.dns_ready || 0) === 1, verifiedAt: verification?.verified_at || null, lastCheckedAt: verification?.last_checked_at || null });
+  }
+
   const mailbox = await ensureProfileAndMailbox(env, user);
   if (request.method === "GET" && url.pathname === "/api/email-image-proxy") {
     try {
@@ -3576,9 +3743,35 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
 
   if (request.method === "GET" && url.pathname === "/api/mailboxes") return json(await accessibleMailboxes(env, user.id));
-  if (request.method === "POST" && url.pathname === "/api/mailboxes") { const body = (await request.json()) as JsonRecord; const address = cleanAddress(String(body.address || "")); if (!address.includes("@")) return error("Enter a valid email address"); const rows = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: false }) }); return json(rows[0], 201); }
+  if (request.method === "POST" && url.pathname === "/api/mailboxes") {
+    const body = (await request.json()) as JsonRecord;
+    const address = cleanAddress(String(body.address || ""));
+    if (!isValidEmailAddress(address)) return error("Enter a valid email address");
+    const verified = await isVerifiedMailboxDomain(env, user.id, domainOf(address));
+    const settings = verified
+      ? {}
+      : { domain_verification_status: "pending", domain_verification_message: "Connect Cloudflare to verify this domain before sending or receiving mail." };
+    const rows = await dbRequest<Mailbox[]>(env, "mailboxes", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: false, can_send: verified, can_receive: verified, settings }),
+    });
+    return json(rows[0], 201);
+  }
   const mailboxMatch = url.pathname.match(/^\/api\/mailboxes\/([^/]+)$/);
-  if (request.method === "PATCH" && mailboxMatch) { const body = (await request.json()) as JsonRecord; const patch: JsonRecord = {}; for (const key of ["display_name", "can_send", "can_receive", "is_default", "reply_to", "settings"]) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || null); }
+  if (request.method === "PATCH" && mailboxMatch) {
+    const body = (await request.json()) as JsonRecord;
+    const currentRows = await dbRequest<Mailbox[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+    const current = currentRows[0];
+    if (!current) return error("Mailbox not found", 404);
+    const verified = await isVerifiedMailboxDomain(env, user.id, domainOf(current.address));
+    if (!verified && (body.can_send === true || body.can_receive === true)) return error("Verify this domain with Cloudflare before enabling mail", 409);
+    const patch: JsonRecord = {};
+    for (const key of ["display_name", "can_send", "can_receive", "is_default", "reply_to", "settings"]) if (key in body) patch[key] = body[key];
+    if (verified && (body.can_send === true || body.can_receive === true)) patch.settings = { ...objectValue(current.settings), ...objectValue(body.settings), domain_verification_status: "verified", domain_verification_provider: "cloudflare" };
+    const rows = await dbRequest<JsonRecord[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailboxMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) });
+    return json(rows[0] || null);
+  }
 
   if (request.method === "POST" && url.pathname === "/api/trash/empty") {
     const result = await dbRequest<JsonRecord>(env, "rpc/empty_trash", {

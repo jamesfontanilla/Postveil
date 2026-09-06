@@ -1526,6 +1526,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .dns-preview-head strong { color: #243b31; font-size: 13px; }
 .dns-preview-head small { margin-top: 4px; color: #89998f; font-size: 10px; }
 .pending-badge { display: inline-flex; flex: 0 0 auto; align-items: center; border-radius: 99px; background: #f1f3e6; color: #78824e; padding: 5px 8px; font: 500 10px "IBM Plex Mono", monospace; }
+.verified-badge { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; border-radius: 99px; background: #e8f5e9; color: #2b6755; padding: 5px 8px; font: 600 10px "IBM Plex Mono", monospace; }
+.cloudflare-connect-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; border: 1px solid #d8e5dc; border-radius: 9px; background: #f8fbf8; padding: 14px 15px; }
+.cloudflare-connect-card.connected { border-color: #b8d7c0; background: #f3faf4; }
+.cloudflare-connect-copy { display: flex; min-width: 0; align-items: center; gap: 11px; }
+.cloudflare-connect-mark { display: grid; flex: 0 0 auto; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: #f48120; color: #fff; }
+.cloudflare-connect-copy strong, .cloudflare-connect-copy small { display: block; }
+.cloudflare-connect-copy strong { color: #254136; font-size: 12px; }
+.cloudflare-connect-copy small { max-width: 410px; margin-top: 4px; color: #7b8e83; font-size: 10px; line-height: 1.45; }
+.cloudflare-connect-card .secondary-button { flex: 0 0 auto; min-height: 36px; padding: 8px 12px; }
 .dns-row { display: grid; grid-template-columns: auto 1fr auto; gap: 11px; align-items: center; padding: 14px 16px; border-bottom: 1px solid #edf1ee; }
 .dns-row:last-child { border-bottom: 0; }
 .dns-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: #eff6ef; color: #477b63; }
@@ -1564,6 +1573,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .onboarding-progress { padding: 0 24px; }
   .onboarding-body { padding: 37px 24px 34px; }
   .onboarding-footer { margin-top: 0; padding: 17px 24px; }
+  .cloudflare-connect-card { align-items: flex-start; flex-direction: column; }
+  .cloudflare-connect-card .secondary-button { width: 100%; }
 }
 
 @media (max-width: 480px) {
