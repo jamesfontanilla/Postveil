@@ -1419,6 +1419,163 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 @keyframes app-dialog-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes app-dialog-rise-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
+/* First-run domain desk: a quiet, operational setup surface rather than a marketing page. */
+.onboarding-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: #e9edeb;
+  color: #172522;
+}
+.onboarding-frame {
+  display: grid;
+  grid-template-columns: minmax(280px, .78fr) minmax(0, 1.22fr);
+  width: min(1120px, 100%);
+  min-height: min(720px, calc(100vh - 64px));
+  overflow: hidden;
+  border: 1px solid #d0d9d4;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 28px 80px rgba(24, 45, 38, .14), 0 2px 7px rgba(24, 45, 38, .06);
+}
+.onboarding-rail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  overflow: hidden;
+  padding: 34px 38px 30px;
+  background: #162925;
+  color: #f1f7f2;
+}
+.onboarding-rail::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .55;
+  content: "";
+  background-image: linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+  background-position: -1px -1px;
+  background-size: 32px 32px;
+}
+.onboarding-rail::after {
+  position: absolute;
+  right: -86px;
+  bottom: 76px;
+  width: 230px;
+  height: 230px;
+  border: 1px solid rgba(206, 241, 177, .32);
+  border-radius: 50%;
+  box-shadow: 0 0 0 20px rgba(206, 241, 177, .045), 0 0 0 42px rgba(206, 241, 177, .035);
+  content: "";
+}
+.onboarding-brand, .onboarding-rail-copy, .onboarding-rail-foot { position: relative; z-index: 1; }
+.onboarding-brand { display: flex; align-items: center; gap: 12px; }
+.onboarding-brand .brand-mark { width: 39px; height: 39px; border-radius: 12px 12px 12px 3px; background: #d9f19a; color: #193329; font-size: 19px; box-shadow: 6px 6px 0 rgba(217, 241, 154, .18); }
+.onboarding-brand strong, .onboarding-brand span { display: block; }
+.onboarding-brand strong { font-size: 15px; letter-spacing: -.02em; }
+.onboarding-brand span { margin-top: 3px; color: #a9bbb0; font: 10px "IBM Plex Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.onboarding-rail-copy { margin-top: auto; padding: 80px 0 50px; }
+.onboarding-rail-copy .eyebrow { color: #a9c3b6; }
+.onboarding-rail-copy h1 { max-width: 360px; margin: 16px 0 22px; font-size: clamp(35px, 4vw, 55px); line-height: .98; letter-spacing: -.065em; }
+.onboarding-rail-copy h1 em { color: #d9f19a; font-style: normal; }
+.onboarding-rail-copy p:not(.eyebrow) { max-width: 310px; margin: 0; color: #b2c2b9; font-size: 13px; line-height: 1.7; }
+.onboarding-rail-foot { display: flex; align-items: center; gap: 9px; color: #a9c3b6; font-size: 11px; }
+.onboarding-rail-foot svg { color: #d9f19a; }
+.onboarding-content { display: flex; min-width: 0; flex-direction: column; background: #fff; }
+.onboarding-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 30px 48px 21px; border-bottom: 1px solid #e5ebe7; }
+.onboarding-header > div { display: grid; grid-template-columns: auto auto; gap: 3px 12px; align-items: center; }
+.onboarding-header strong { color: #1b302a; font-size: 13px; }
+.onboarding-header small { grid-column: 2; color: #85958d; font-size: 11px; }
+.onboarding-step-count { grid-row: 1 / span 2; color: #638175; font: 500 11px "IBM Plex Mono", monospace; letter-spacing: .1em; }
+.onboarding-header .text-button { color: #72877d; font-size: 11px; }
+.onboarding-progress { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 0 48px; }
+.onboarding-progress span { height: 3px; margin-top: -2px; border-radius: 4px; background: #e2e9e5; }
+.onboarding-progress span.complete { background: #2b6755; }
+.onboarding-body { width: min(100%, 630px); margin: auto; padding: 54px 48px 42px; }
+.onboarding-body h2 { margin: 13px 0 12px; color: #192d27; font-size: clamp(29px, 4vw, 43px); line-height: 1.03; letter-spacing: -.06em; }
+.onboarding-lede { max-width: 520px; margin: 0 0 32px; color: #71837a; font-size: 14px; line-height: 1.65; }
+.onboarding-choice-grid { display: grid; gap: 10px; }
+.onboarding-choice { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; width: 100%; border: 1px solid #dfe8e2; border-radius: 10px; background: #fbfcfb; color: #587065; padding: 16px 17px; text-align: left; transition: border-color .18s, background .18s, transform .18s; }
+.onboarding-choice:hover { border-color: #a7c4b5; background: #f8fbf8; transform: translateX(2px); }
+.onboarding-choice.selected { border-color: #2b6755; background: #eff7ef; box-shadow: inset 3px 0 #2b6755; color: #2b6755; }
+.onboarding-choice svg:last-child { color: #2b6755; }
+.onboarding-choice strong, .onboarding-choice small { display: block; }
+.onboarding-choice strong { color: #1f352d; font-size: 13px; }
+.onboarding-choice small { margin-top: 4px; color: #84968d; font-size: 11px; font-weight: 400; }
+.onboarding-field { margin-top: 25px; color: #60766b; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.onboarding-field input { border-color: #d6e2da; border-radius: 7px; background: #fbfdfb; color: #1a3028; padding: 15px 14px; font-size: 16px; letter-spacing: 0; text-transform: none; }
+.onboarding-field input:focus { border-color: #2b6755; box-shadow: 0 0 0 4px rgba(43, 103, 85, .1); }
+.onboarding-hint { display: flex; gap: 10px; align-items: flex-start; margin-top: 16px; border-left: 2px solid #d9f19a; background: #f6f9f3; color: #71847a; padding: 12px 13px; font-size: 11px; line-height: 1.5; }
+.onboarding-hint svg { flex: 0 0 auto; color: #648974; }
+.onboarding-hint strong { color: #2b5142; font-weight: 700; }
+.onboarding-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 33px; }
+.onboarding-actions .primary-button, .onboarding-actions .secondary-button { min-height: 43px; border-radius: 7px; }
+.onboarding-actions .primary-button { background: #275d4c; box-shadow: 0 8px 18px rgba(39, 93, 76, .18); }
+.onboarding-actions .primary-button:hover { background: #1f4b3d; }
+.onboarding-actions .secondary-button { background: #fff; }
+.onboarding-provider-row { display: grid; gap: 10px; margin-top: 24px; }
+.onboarding-label { color: #60766b; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.provider-pills { display: flex; flex-wrap: wrap; gap: 7px; }
+.provider-pills button { border: 1px solid #d8e4dc; border-radius: 99px; background: #fff; color: #61776b; padding: 8px 11px; font-size: 11px; }
+.provider-pills button:hover, .provider-pills button.selected { border-color: #2b6755; background: #eff7ef; color: #2b6755; }
+.dns-preview { margin-top: 23px; overflow: hidden; border: 1px solid #dce7df; border-radius: 9px; background: #fcfefd; }
+.dns-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 15px 16px 13px; border-bottom: 1px solid #e4ece6; }
+.dns-preview-head strong, .dns-preview-head small { display: block; }
+.dns-preview-head strong { color: #243b31; font-size: 13px; }
+.dns-preview-head small { margin-top: 4px; color: #89998f; font-size: 10px; }
+.pending-badge { display: inline-flex; flex: 0 0 auto; align-items: center; border-radius: 99px; background: #f1f3e6; color: #78824e; padding: 5px 8px; font: 500 10px "IBM Plex Mono", monospace; }
+.dns-row { display: grid; grid-template-columns: auto 1fr auto; gap: 11px; align-items: center; padding: 14px 16px; border-bottom: 1px solid #edf1ee; }
+.dns-row:last-child { border-bottom: 0; }
+.dns-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: #eff6ef; color: #477b63; }
+.dns-row strong, .dns-row small { display: block; }
+.dns-row strong { color: #2a4237; font-size: 12px; }
+.dns-row small { margin-top: 3px; color: #89988f; font-size: 10px; line-height: 1.45; }
+.dns-row > span:last-child { color: #93a197; font: 10px "IBM Plex Mono", monospace; }
+.email-composer { display: flex; align-items: center; overflow: hidden; border: 1px solid #d6e2da; border-radius: 7px; background: #fbfdfb; }
+.email-composer:focus-within { border-color: #2b6755; box-shadow: 0 0 0 4px rgba(43, 103, 85, .1); }
+.email-composer input { min-width: 0; border: 0; box-shadow: none; background: transparent; }
+.email-composer input:focus { box-shadow: none; }
+.email-composer span { flex: 0 0 auto; padding-right: 14px; color: #738a7d; font-size: 14px; letter-spacing: 0; text-transform: none; }
+.onboarding-success-mark { display: grid; place-items: center; width: 51px; height: 51px; margin-bottom: 24px; border-radius: 50%; background: #d9f19a; color: #275d4c; }
+.onboarding-next-list { display: grid; overflow: hidden; margin-top: 28px; border: 1px solid #dce7df; border-radius: 9px; }
+.onboarding-next-list > div { display: grid; grid-template-columns: auto 1fr auto; gap: 11px; align-items: center; padding: 14px 16px; border-bottom: 1px solid #e9efeb; }
+.onboarding-next-list > div:last-child { border-bottom: 0; }
+.onboarding-next-list > div > svg { color: #3d8965; }
+.onboarding-next-list strong, .onboarding-next-list small { display: block; }
+.onboarding-next-list strong { color: #2a4237; font-size: 12px; }
+.onboarding-next-list small { margin-top: 4px; color: #89988f; font-size: 10px; }
+.onboarding-number { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #eff3ef; color: #728379; font: 10px "IBM Plex Mono", monospace; }
+.onboarding-footer { display: flex; justify-content: space-between; gap: 14px; margin-top: auto; border-top: 1px solid #e5ebe7; padding: 17px 48px; color: #94a199; font-size: 10px; }
+.onboarding-footer span:last-child { display: inline-flex; align-items: center; gap: 5px; color: #648174; }
+.onboarding-shell button:focus-visible { outline: 3px solid rgba(43, 103, 85, .3); outline-offset: 2px; }
+
+@media (max-width: 780px) {
+  .onboarding-shell { display: block; padding: 0; background: #fff; }
+  .onboarding-frame { display: block; min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+  .onboarding-rail { min-height: 250px; padding: 24px 24px 30px; }
+  .onboarding-rail-copy { margin-top: 48px; padding: 0; }
+  .onboarding-rail-copy h1 { margin: 12px 0 10px; font-size: 35px; }
+  .onboarding-rail-copy p:not(.eyebrow) { max-width: 440px; font-size: 12px; }
+  .onboarding-rail-foot { display: none; }
+  .onboarding-rail::after { right: -70px; bottom: -150px; }
+  .onboarding-header { padding: 21px 24px 17px; }
+  .onboarding-progress { padding: 0 24px; }
+  .onboarding-body { padding: 37px 24px 34px; }
+  .onboarding-footer { margin-top: 0; padding: 17px 24px; }
+}
+
+@media (max-width: 480px) {
+  .onboarding-header { gap: 8px; }
+  .onboarding-header .text-button { padding-top: 0; }
+  .onboarding-body h2 { font-size: 31px; }
+  .onboarding-actions { justify-content: stretch; }
+  .onboarding-actions button { flex: 1; }
+  .onboarding-footer { align-items: flex-start; flex-direction: column; }
+  .email-composer span { padding-right: 10px; font-size: 12px; }
+}
+
 @media (max-width: 520px) {
   .app-dialog-backdrop { align-items: end; padding: 12px; }
   .app-dialog { width: 100%; padding: 20px 18px 16px; border-radius: 12px; }
@@ -1428,4 +1585,5 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 
 @media (prefers-reduced-motion: reduce) {
   .app-dialog-backdrop, .app-dialog { animation: none; }
+  .onboarding-choice { transition: none; }
 }

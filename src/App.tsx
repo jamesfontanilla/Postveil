@@ -17,8 +17,10 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowDown,
+  ArrowRight,
   ArrowUp,
   Bell,
+  Building2,
   Bookmark,
   Briefcase,
   CalendarDays,
@@ -30,6 +32,7 @@ import {
   Flag,
   FolderPlus,
   Forward,
+  Globe2,
   HelpCircle,
   History,
   Inbox,
@@ -51,6 +54,7 @@ import {
   Send,
   Settings2,
   ShieldAlert,
+  ShieldCheck,
   SlidersHorizontal,
   Star,
   Tag,
@@ -61,7 +65,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { requireSupabase, supabase, type Session } from "./lib/supabase";
+import { requireSupabase, supabase, type JsonRecord, type Session } from "./lib/supabase";
 import { sanitizeEmailHtml } from "./lib/email-html";
 import { qrImageSource } from "./lib/qr";
 import RichEmailBody from "./components/RichEmailBody";
@@ -991,6 +995,196 @@ function PasswordResetScreen({ onComplete }: { onComplete: () => void }) {
         </form>
       </section>
       <aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> protected recovery</div><p className="aside-quote">One link. One new password. Back to your mailbox.</p><p className="aside-meta">Postveil never reveals whether an email address has an account.</p></aside>
+    </main>
+  );
+}
+
+type OnboardingStep = 0 | 1 | 2 | 3 | 4;
+type OnboardingState = {
+  completed?: boolean;
+  skipped?: boolean;
+  step?: OnboardingStep;
+  goal?: "personal" | "team" | "explore";
+  domain?: string;
+  mailboxLocal?: string;
+  displayName?: string;
+  dnsProvider?: string;
+  mailboxAddress?: string;
+  domainStatus?: "pending" | "ready";
+};
+
+const ONBOARDING_STEPS = [
+  { label: "Direction", note: "Choose your starting point" },
+  { label: "Domain", note: "Name the address you own" },
+  { label: "Connect", note: "Prepare the DNS handoff" },
+  { label: "Mailbox", note: "Create your first address" },
+  { label: "Ready", note: "Know what happens next" },
+];
+
+function normalizeDomain(value: string): string {
+  return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/\.$/, "");
+}
+
+function OnboardingWizard({ session, onComplete }: { session: Session; onComplete: () => void }) {
+  const [step, setStep] = useState<OnboardingStep>(0);
+  const [goal, setGoal] = useState<OnboardingState["goal"]>("personal");
+  const [domain, setDomain] = useState("");
+  const [mailboxLocal, setMailboxLocal] = useState("hello");
+  const [displayName, setDisplayName] = useState("My mailbox");
+  const [dnsProvider, setDnsProvider] = useState("Cloudflare");
+  const [domainStatus, setDomainStatus] = useState<OnboardingState["domainStatus"]>("pending");
+  const [mailboxAddress, setMailboxAddress] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void apiFetch<JsonRecord>("/api/settings").then((settings) => {
+      if (!active) return;
+      const saved = settings.onboarding_state && typeof settings.onboarding_state === "object" ? settings.onboarding_state as OnboardingState : {};
+      if (saved.step !== undefined) setStep(Math.max(0, Math.min(4, Number(saved.step))) as OnboardingStep);
+      if (saved.goal) setGoal(saved.goal);
+      if (saved.domain) setDomain(saved.domain);
+      if (saved.mailboxLocal) setMailboxLocal(saved.mailboxLocal);
+      if (saved.displayName) setDisplayName(saved.displayName);
+      if (saved.dnsProvider) setDnsProvider(saved.dnsProvider);
+      if (saved.mailboxAddress) setMailboxAddress(saved.mailboxAddress);
+      if (saved.domainStatus) setDomainStatus(saved.domainStatus);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+
+  const persist = useCallback(async (patch: Partial<OnboardingState>) => {
+    const next = { step, goal, domain, mailboxLocal, displayName, dnsProvider, domainStatus, mailboxAddress, ...patch };
+    await apiFetch("/api/settings", { method: "PATCH", body: JSON.stringify({ onboarding_state: next }) });
+  }, [step, goal, domain, mailboxLocal, displayName, dnsProvider, domainStatus, mailboxAddress]);
+
+  async function advance(nextStep: OnboardingStep, patch: Partial<OnboardingState> = {}) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await persist({ ...patch, step: nextStep });
+      if (patch.domain) setDomain(patch.domain);
+      if (patch.goal) setGoal(patch.goal);
+      if (patch.dnsProvider) setDnsProvider(patch.dnsProvider);
+      if (patch.domainStatus) setDomainStatus(patch.domainStatus);
+      setStep(nextStep);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Your progress could not be saved");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function skipSetup() {
+    setBusy(true);
+    setError("");
+    try {
+      await persist({ completed: true, skipped: true, step: 4 });
+      onComplete();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Setup could not be skipped");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createMailbox() {
+    const cleanDomain = normalizeDomain(domain);
+    const cleanLocal = mailboxLocal.trim().toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/.test(cleanLocal)) {
+      setError("Use letters, numbers, dots, hyphens, or underscores for the mailbox name.");
+      return;
+    }
+    if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i.test(cleanDomain)) {
+      setError("Enter a domain such as yourcompany.com.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const created = await apiFetch<{ address?: string }>("/api/mailboxes", { method: "POST", body: JSON.stringify({ address: `${cleanLocal}@${cleanDomain}`, displayName }) });
+      const createdAddress = created.address || `${cleanLocal}@${cleanDomain}`;
+      setMailboxAddress(createdAddress);
+      await persist({ step: 4, domain: cleanDomain, mailboxLocal: cleanLocal, displayName, mailboxAddress: createdAddress, domainStatus: "pending" });
+      setStep(4);
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Mailbox could not be created");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function finish() {
+    setBusy(true);
+    setError("");
+    try {
+      await persist({ completed: true, step: 4 });
+      onComplete();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Setup could not be completed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const cleanDomain = normalizeDomain(domain);
+  return (
+    <main className="onboarding-shell">
+      <section className="onboarding-frame" aria-labelledby="onboarding-title">
+        <aside className="onboarding-rail">
+          <div className="onboarding-brand"><div className="brand-mark">P</div><div><strong>Postveil</strong><span>private mail</span></div></div>
+          <div className="onboarding-rail-copy"><p className="eyebrow">FIRST RUN / {new Date().getFullYear()}</p><h1 id="onboarding-title">Your domain,<br /><em>properly addressed.</em></h1><p>Bring the name you already own. Postveil turns it into a calm, private mailbox in a few deliberate steps.</p></div>
+          <div className="onboarding-rail-foot"><ShieldCheck size={16} aria-hidden="true" /><span>No provider credentials appear here.</span></div>
+        </aside>
+        <div className="onboarding-content">
+          <header className="onboarding-header"><div><span className="onboarding-step-count">0{step + 1} / 05</span><strong>{ONBOARDING_STEPS[step].label}</strong><small>{ONBOARDING_STEPS[step].note}</small></div><button type="button" className="text-button" onClick={() => void skipSetup()} disabled={busy}>Finish later</button></header>
+          <div className="onboarding-progress" aria-label={`Step ${step + 1} of 5`}>{ONBOARDING_STEPS.map((item, index) => <span key={item.label} className={index <= step ? "complete" : ""} />)}</div>
+          <div className="onboarding-body">
+            {step === 0 && <>
+              <p className="eyebrow">LET’S SET THE ROOM</p><h2>What are you setting up?</h2><p className="onboarding-lede">This only tunes the starting view. You can change everything later.</p>
+              <div className="onboarding-choice-grid" role="radiogroup" aria-label="Setup goal">
+                <button type="button" className={`onboarding-choice${goal === "personal" ? " selected" : ""}`} onClick={() => setGoal("personal")}><Mail size={20} /><span><strong>Personal address</strong><small>One domain, one focused inbox.</small></span>{goal === "personal" && <Check size={17} aria-hidden="true" />}</button>
+                <button type="button" className={`onboarding-choice${goal === "team" ? " selected" : ""}`} onClick={() => setGoal("team")}><Building2 size={20} /><span><strong>Team mailbox</strong><small>Shared addresses and delegated access.</small></span>{goal === "team" && <Check size={17} aria-hidden="true" />}</button>
+                <button type="button" className={`onboarding-choice${goal === "explore" ? " selected" : ""}`} onClick={() => setGoal("explore")}><Globe2 size={20} /><span><strong>Explore first</strong><small>See the shape before connecting a domain.</small></span>{goal === "explore" && <Check size={17} aria-hidden="true" />}</button>
+              </div>
+              <div className="onboarding-actions"><button className="primary-button" type="button" onClick={() => void advance(1, { goal })} disabled={busy}>Continue <ArrowRight size={16} /></button></div>
+            </>}
+            {step === 1 && <>
+              <p className="eyebrow">THE NAME PEOPLE WILL USE</p><h2>Which domain should Postveil connect?</h2><p className="onboarding-lede">Use a domain you control. We’ll show the exact handoff for your DNS provider next.</p>
+              <label className="onboarding-field">Your domain<input autoFocus value={domain} onChange={(event) => setDomain(normalizeDomain(event.target.value))} placeholder="yourcompany.com" autoComplete="url" /></label>
+              <div className="onboarding-hint"><Globe2 size={17} /><span>Example: if your address is <strong>hello@acme.com</strong>, enter <strong>acme.com</strong>.</span></div>
+              {error && <div className="form-error" role="alert">{error}</div>}
+              <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => setStep(0)}><ArrowLeft size={16} /> Back</button><button className="primary-button" type="button" onClick={() => { if (!cleanDomain || !cleanDomain.includes(".")) { setError("Enter a domain such as yourcompany.com."); return; } void advance(2, { domain: cleanDomain }); }} disabled={busy}>Review connection <ArrowRight size={16} /></button></div>
+            </>}
+            {step === 2 && <>
+              <p className="eyebrow">ONE SMALL DNS HANDOFF</p><h2>Connect {cleanDomain || "your domain"}.</h2><p className="onboarding-lede">Your messages stay in Postveil after this. DNS only tells the internet where mail for your name belongs.</p>
+              <div className="onboarding-provider-row"><span className="onboarding-label">Where do you manage DNS?</span><div className="provider-pills">{["Cloudflare", "GoDaddy", "Namecheap", "Other"].map((provider) => <button type="button" key={provider} className={dnsProvider === provider ? "selected" : ""} onClick={() => setDnsProvider(provider)}>{provider}</button>)}</div></div>
+              <div className="dns-preview"><div className="dns-preview-head"><div><strong>Connection checklist</strong><small>Postveil will verify each item when your records are live.</small></div><span className="pending-badge">Pending</span></div><div className="dns-row"><span className="dns-mark"><Mail size={15} /></span><div><strong>Receiving mail</strong><small>MX record routes incoming messages to your Postveil mailbox.</small></div><span>Next</span></div><div className="dns-row"><span className="dns-mark"><ShieldCheck size={15} /></span><div><strong>Sending trust</strong><small>SPF, DKIM, and DMARC protect your domain’s reputation.</small></div><span>Next</span></div></div>
+              <div className="onboarding-hint"><ShieldAlert size={17} /><span>DNS changes can take a little while. You can create the mailbox now and finish verification later.</span></div>
+              {error && <div className="form-error" role="alert">{error}</div>}
+              <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button><button className="primary-button" type="button" onClick={() => void advance(3, { dnsProvider, domainStatus: "pending" })} disabled={busy}>Create mailbox <ArrowRight size={16} /></button></div>
+            </>}
+            {step === 3 && <>
+              <p className="eyebrow">MAKE IT YOURS</p><h2>Choose your first address.</h2><p className="onboarding-lede">You can add aliases and shared addresses after this one is working.</p>
+              <label className="onboarding-field">Mailbox name<div className="email-composer"><input autoFocus value={mailboxLocal} onChange={(event) => setMailboxLocal(event.target.value.replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 64))} placeholder="hello" autoComplete="username" /><span>@{cleanDomain || "your-domain.com"}</span></div></label>
+              <label className="onboarding-field">Display name<input value={displayName} onChange={(event) => setDisplayName(event.target.value.slice(0, 120))} placeholder="Your name or team" autoComplete="organization" /></label>
+              <div className="onboarding-hint"><Mail size={17} /><span>Your new address will be <strong>{mailboxLocal || "hello"}@{cleanDomain || "your-domain.com"}</strong>.</span></div>
+              {error && <div className="form-error" role="alert">{error}</div>}
+              <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => setStep(2)}><ArrowLeft size={16} /> Back</button><button className="primary-button" type="button" onClick={() => void createMailbox()} disabled={busy || !mailboxLocal}>{busy ? "Creating…" : "Create address"} <ArrowRight size={16} /></button></div>
+            </>}
+            {step === 4 && <>
+              <div className="onboarding-success-mark"><Check size={24} /></div><p className="eyebrow">YOUR DESK IS READY</p><h2>{mailboxAddress || `${mailboxLocal}@${cleanDomain}`} is yours.</h2><p className="onboarding-lede">The mailbox exists now. Finish the DNS handoff when you’re ready so messages can travel reliably.</p>
+              <div className="onboarding-next-list"><div><Check size={16} /><span><strong>Mailbox created</strong><small>Your address is available in Postveil.</small></span></div><div className={domainStatus === "ready" ? "ready" : "pending"}><span className="onboarding-number">02</span><span><strong>Connect DNS</strong><small>{dnsProvider} · MX, SPF, DKIM, and DMARC</small></span><span className="pending-badge">{domainStatus === "ready" ? "Ready" : "Next"}</span></div><div><span className="onboarding-number">03</span><span><strong>Send your first message</strong><small>We’ll check delivery and authentication together.</small></span></div></div>
+              {notice && <div className="form-notice" role="status">{notice}</div>}
+              <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => { setNotice("DNS setup will remain on your checklist."); setStep(2); }}><ArrowLeft size={16} /> Review DNS</button><button className="primary-button" type="button" onClick={() => void finish()} disabled={busy}>Open my mailbox <ArrowRight size={16} /></button></div>
+            </>}
+          </div>
+          <footer className="onboarding-footer"><span>Signed in as {session.user.email || "your account"}</span><span><ShieldCheck size={13} /> Private by default</span></footer>
+        </div>
+      </section>
     </main>
   );
 }
@@ -5848,6 +6042,8 @@ function MailboxApp({ session }: { session: Session }) {
 function AppContent() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [onboardingRequired, setOnboardingRequired] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [mfaRequired, setMfaRequired] = useState(false);
   useEffect(() => {
@@ -5884,6 +6080,25 @@ function AppContent() {
     });
     return () => { active = false; };
   }, [session, recovering]);
+  useEffect(() => {
+    if (!session) {
+      setOnboardingChecked(false);
+      setOnboardingRequired(false);
+      return;
+    }
+    let active = true;
+    setOnboardingChecked(false);
+    void apiFetch<JsonRecord>("/api/settings").then((settings) => {
+      if (!active) return;
+      const state = settings.onboarding_state && typeof settings.onboarding_state === "object" ? settings.onboarding_state as OnboardingState : null;
+      setOnboardingRequired(state?.completed !== true);
+    }).catch(() => {
+      if (active) setOnboardingRequired(false);
+    }).finally(() => {
+      if (active) setOnboardingChecked(true);
+    });
+    return () => { active = false; };
+  }, [session]);
   if (!ready)
     return (
       <div className="loading-screen">
@@ -5894,6 +6109,8 @@ function AppContent() {
   if (recovering) return <PasswordResetScreen onComplete={() => setRecovering(false)} />;
   if (!session) return <AuthScreen />;
   if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
+  if (!onboardingChecked) return <div className="loading-screen"><div className="brand-mark">P</div><p>Preparing your private desk…</p></div>;
+  if (onboardingRequired) return <OnboardingWizard session={session} onComplete={() => setOnboardingRequired(false)} />;
   return <MailboxApp session={session} />;
 }
 
