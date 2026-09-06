@@ -17,8 +17,9 @@ not a substitute for provider approval, a restore exercise, or legal review.
 - Amazon SES production sending is approved in Singapore, both configured
   sending domains are verified with DKIM, and the `postveil-events`
   configuration set publishes delivery events to the confirmed SNS subscription
-  on the production webhook. A synthetic signed SNS notification was accepted
-  by the live Worker.
+  on the production webhook. The live Worker accepted the SNS subscription
+  confirmation, and SNS accepted a synthetic publish; a real SES delivery
+  event still needs to be verified.
 - Mailbox onboarding checks exact public MX targets from `INBOUND_MX_TARGETS`.
   Zone ownership alone never enables send/receive.
 - Raw mail and attachments remain behind authenticated, tenant-scoped routes;
