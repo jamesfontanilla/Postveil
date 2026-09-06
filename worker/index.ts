@@ -539,7 +539,9 @@ function d1UserFromGoogleRow(row: Record<string, unknown>): D1User {
 }
 
 function randomOAuthPassword(): string {
-  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+  // Google users never type this password, but the D1 adapter still applies
+  // the normal password policy when creating the backing account.
+  return `${base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)))}A1`;
 }
 
 async function findOrCreateGoogleSession(env: Env, profile: JsonRecord): Promise<D1Session> {
