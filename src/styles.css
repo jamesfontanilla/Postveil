@@ -1669,6 +1669,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .home-footer button:hover { color: #183c30; }
 .auth-back-link { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 22px; color: #759083; font-size: 11px; }
 .auth-back-link:hover { color: #2b6755; }
+.oauth-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 12px; color: #9aa8a0; font: 10px "IBM Plex Mono", monospace; text-transform: uppercase; }
+.oauth-divider::before, .oauth-divider::after { height: 1px; flex: 1; background: #e2e9e3; content: ""; }
+.google-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; width: 100%; min-height: 42px; border: 1px solid #d9e2dc; border-radius: 7px; background: #fff; color: #375648; font-size: 12px; }
+.google-button:hover { border-color: #8aaa98; background: #fbfdfb; }
+.google-button:disabled { cursor: wait; opacity: .6; }
+.google-g { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid #dce6df; border-radius: 50%; color: #4285f4; font: 700 13px Arial, sans-serif; }
 
 @media (max-width: 900px) {
   .home-hero { grid-template-columns: 1fr; gap: 10px; min-height: auto; padding-top: 52px; }

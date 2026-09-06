@@ -927,6 +927,13 @@ function AuthScreen({ initialMode = "signin", onBack }: { initialMode?: "signin"
             {busy ? "Working…" : mode === "forgot" ? "Send reset link" : mode === "recovery" ? "Request recovery link" : mode === "signin" ? "Open mailbox" : "Create account"}
           </button>
         </form>
+        {(mode === "signin" || mode === "signup") && <>
+          <div className="oauth-divider"><span>or</span></div>
+          <button type="button" className="google-button" onClick={() => { window.location.assign("/api/auth/google/start"); }} disabled={busy}>
+            <span className="google-g" aria-hidden="true">G</span>
+            Continue with Google
+          </button>
+        </>}
         {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("forgot"); setError(""); setNotice(""); }}>Forgot your password?</button>}
         {mode === "signin" && <button className="text-button auth-link" onClick={() => { setMode("recovery"); setError(""); setNotice(""); }}>Use a recovery code</button>}
         {mode !== "forgot" && mode !== "recovery" && <button className="text-button" onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setNotice(""); }}>

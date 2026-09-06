@@ -86,7 +86,26 @@ function unsupported<T>(message: string): Promise<AuthResponse<T>> {
 
 const auth = {
   async getSession(): Promise<AuthResponse<{ session: Session | null }>> {
-    if (!currentSession) return { data: { session: null }, error: null };
+    if (!currentSession) {
+      const currentUrl = new URL(window.location.href);
+      const oauthCode = currentUrl.searchParams.get("oauth_code");
+      if (oauthCode) {
+        const result = await request<{ user: PostveilUser; session: Session }>(`/api/auth/google/complete?code=${encodeURIComponent(oauthCode)}`);
+        currentUrl.searchParams.delete("oauth_code");
+        currentUrl.searchParams.delete("oauth_error");
+        window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+        if (!result.error) {
+          writeSession(result.data.session);
+          emit("SIGNED_IN", result.data.session);
+        }
+        return result;
+      }
+      if (currentUrl.searchParams.has("oauth_error")) {
+        currentUrl.searchParams.delete("oauth_error");
+        window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+      }
+      return { data: { session: null }, error: null };
+    }
     const result = await request<{ session: Session | null }>("/api/auth/session");
     if (result.error) {
       writeSession(null);

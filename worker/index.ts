@@ -101,6 +101,8 @@ interface Env {
   AWS_SECRET_ACCESS_KEY?: string;
   AWS_SES_REGION?: string;
   AWS_REGION?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
   MAILGUN_API_KEY?: string;
   MAILGUN_DOMAIN?: string;
   MAILGUN_BASE_URL?: string;
@@ -508,8 +510,140 @@ function d1SessionPayload(user: D1User, token: string): D1Session {
   return { access_token: token, refresh_token: token, token_type: "bearer", expires_in: 60 * 60 * 24 * 30, user };
 }
 
+function requestCookie(request: Request, name: string): string {
+  const header = request.headers.get("cookie") || "";
+  const entry = header.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
+  return entry ? decodeURIComponent(entry.slice(name.length + 1)) : "";
+}
+
+function googleStateCookie(value: string, maxAge: number): string {
+  return `postveil_google_state=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; HttpOnly; Secure; SameSite=Lax`;
+}
+
+function googleRedirectUri(env: Pick<Env, "APP_DOMAIN">): string {
+  return `https://${configuredAppDomain(env)}/api/auth/google/callback`;
+}
+
+function googleErrorRedirect(env: Pick<Env, "APP_DOMAIN">, code: string): Response {
+  const target = new URL(`https://${configuredAppDomain(env)}/`);
+  target.searchParams.set("oauth_error", code.slice(0, 80));
+  return new Response(null, { status: 302, headers: { Location: target.toString(), "Set-Cookie": googleStateCookie("", 0) } });
+}
+
+function d1UserFromGoogleRow(row: Record<string, unknown>): D1User {
+  let metadata: JsonRecord = {};
+  try { metadata = JSON.parse(String(row.metadata || "{}")) as JsonRecord; } catch { metadata = {}; }
+  return { id: String(row.id), email: String(row.email), user_metadata: metadata, status: String(row.status || "active"), last_sign_in_at: row.last_sign_in_at ? String(row.last_sign_in_at) : null };
+}
+
+function randomOAuthPassword(): string {
+  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+async function findOrCreateGoogleSession(env: Env, profile: JsonRecord): Promise<D1Session> {
+  const googleSub = String(profile.sub || "").trim();
+  const email = cleanAddress(String(profile.email || ""));
+  if (!googleSub || !isValidEmailAddress(email) || String(profile.email_verified) !== "true") throw new Error("Google did not return a verified email address");
+
+  const linked = await env.DB.prepare("SELECT u.* FROM pv_google_identities g JOIN pv_users u ON u.id = g.user_id WHERE g.google_sub = ?1 LIMIT 1").bind(googleSub).first<Record<string, unknown>>();
+  let user: D1User;
+  let session: D1Session;
+  if (linked) {
+    user = d1UserFromGoogleRow(linked);
+    if (user.status !== "active") throw new Error("This Postveil account is not active");
+    session = await createD1Session(env, user);
+  } else {
+    const existing = await getUserByEmail(env, email);
+    if (existing) {
+      const otherLink = await env.DB.prepare("SELECT google_sub FROM pv_google_identities WHERE user_id = ?1 LIMIT 1").bind(String(existing.id)).first<{ google_sub: string }>();
+      if (otherLink) throw new Error("This Postveil account is already linked to another Google account");
+      user = d1UserFromGoogleRow(existing);
+      if (user.status !== "active") throw new Error("This Postveil account is not active");
+      session = await createD1Session(env, user);
+    } else {
+      const displayName = String(profile.name || email.split("@")[0]).trim().slice(0, 120);
+      const created = await createD1User(env, email, randomOAuthPassword(), displayName);
+      user = created.user;
+      session = created.session;
+    }
+    await env.DB.prepare("INSERT INTO pv_google_identities(google_sub,user_id,created_at,updated_at) VALUES (?1,?2,?3,?3)").bind(googleSub, user.id, new Date().toISOString()).run();
+  }
+
+  const metadata = { ...user.user_metadata, google_sub: googleSub, avatar_url: typeof profile.picture === "string" ? profile.picture.slice(0, 2048) : user.user_metadata.avatar_url };
+  await env.DB.prepare("UPDATE pv_users SET metadata = ?1, updated_at = ?2, last_sign_in_at = ?2 WHERE id = ?3").bind(JSON.stringify(metadata), new Date().toISOString(), user.id).run();
+  return { ...session, user: { ...user, user_metadata: metadata } };
+}
+
+async function handleGoogleAuth(request: Request, env: Env): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname === "/api/auth/google/start" && request.method === "GET") {
+    if (!env.GOOGLE_CLIENT_ID) return error("Google sign-in is not configured", 503);
+    const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    const verifier = base64UrlEncode(crypto.getRandomValues(new Uint8Array(48)));
+    const challenge = base64UrlEncode(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+    const redirectUri = googleRedirectUri(env);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    await env.DB.prepare("DELETE FROM pv_oauth_states WHERE expires_at <= ?1").bind(new Date().toISOString()).run();
+    await env.DB.prepare("INSERT INTO pv_oauth_states(state_hash,code_verifier,redirect_uri,expires_at,created_at) VALUES (?1,?2,?3,?4,?5)").bind(await sha256Hex(new TextEncoder().encode(state)), verifier, redirectUri, expiresAt, new Date().toISOString()).run();
+    const authorize = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authorize.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
+    authorize.searchParams.set("redirect_uri", redirectUri);
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set("scope", "openid email profile");
+    authorize.searchParams.set("state", state);
+    authorize.searchParams.set("code_challenge", challenge);
+    authorize.searchParams.set("code_challenge_method", "S256");
+    authorize.searchParams.set("prompt", "select_account");
+    return new Response(null, { status: 302, headers: { Location: authorize.toString(), "Set-Cookie": googleStateCookie(state, 600) } });
+  }
+  if (url.pathname === "/api/auth/google/callback" && request.method === "GET") {
+    if (url.searchParams.get("error")) return googleErrorRedirect(env, "google_denied");
+    const state = url.searchParams.get("state") || "";
+    const code = url.searchParams.get("code") || "";
+    if (!state || !code || !constantTimeEqual(state, requestCookie(request, "postveil_google_state"))) return googleErrorRedirect(env, "invalid_oauth_state");
+    const stateHash = await sha256Hex(new TextEncoder().encode(state));
+    const stored = await env.DB.prepare("SELECT state_hash,code_verifier,redirect_uri,expires_at FROM pv_oauth_states WHERE state_hash = ?1 AND expires_at > ?2 LIMIT 1").bind(stateHash, new Date().toISOString()).first<{ state_hash: string; code_verifier: string; redirect_uri: string; expires_at: string }>();
+    await env.DB.prepare("DELETE FROM pv_oauth_states WHERE state_hash = ?1").bind(stateHash).run();
+    if (!stored || !env.GOOGLE_CLIENT_ID) return googleErrorRedirect(env, "expired_oauth_state");
+    const tokenBody = new URLSearchParams({ client_id: env.GOOGLE_CLIENT_ID, code, code_verifier: stored.code_verifier, grant_type: "authorization_code", redirect_uri: stored.redirect_uri });
+    if (env.GOOGLE_CLIENT_SECRET) tokenBody.set("client_secret", env.GOOGLE_CLIENT_SECRET);
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: tokenBody });
+    if (!tokenResponse.ok) return googleErrorRedirect(env, "google_token_exchange_failed");
+    const tokenPayload = await tokenResponse.json() as JsonRecord;
+    const accessToken = String(tokenPayload.access_token || "");
+    if (!accessToken) return googleErrorRedirect(env, "google_access_token_missing");
+    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { authorization: `Bearer ${accessToken}` } });
+    if (!profileResponse.ok) return googleErrorRedirect(env, "google_profile_failed");
+    try {
+      const session = await findOrCreateGoogleSession(env, await profileResponse.json() as JsonRecord);
+      const handoffCode = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+      await env.DB.prepare("DELETE FROM pv_oauth_handoffs WHERE expires_at <= ?1").bind(new Date().toISOString()).run();
+      await env.DB.prepare("INSERT INTO pv_oauth_handoffs(code_hash,session_token,expires_at,created_at) VALUES (?1,?2,?3,?4)").bind(await sha256Hex(new TextEncoder().encode(handoffCode)), session.access_token, new Date(Date.now() + 2 * 60 * 1000).toISOString(), new Date().toISOString()).run();
+      const target = new URL(`https://${configuredAppDomain(env)}/`);
+      target.searchParams.set("oauth_code", handoffCode);
+      return new Response(null, { status: 302, headers: { Location: target.toString(), "Set-Cookie": googleStateCookie("", 0) } });
+    } catch {
+      return googleErrorRedirect(env, "google_account_failed");
+    }
+  }
+  if (url.pathname === "/api/auth/google/complete" && request.method === "GET") {
+    const code = url.searchParams.get("code") || "";
+    if (!code) return error("OAuth handoff code is required", 400);
+    const codeHash = await sha256Hex(new TextEncoder().encode(code));
+    const row = await env.DB.prepare("SELECT session_token FROM pv_oauth_handoffs WHERE code_hash = ?1 AND expires_at > ?2 LIMIT 1").bind(codeHash, new Date().toISOString()).first<{ session_token: string }>();
+    await env.DB.prepare("DELETE FROM pv_oauth_handoffs WHERE code_hash = ?1").bind(codeHash).run();
+    if (!row) return error("OAuth handoff has expired", 401);
+    const user = await userFromToken(env, row.session_token);
+    if (!user) return error("OAuth session is no longer valid", 401);
+    return json({ data: { user, session: d1SessionPayload(user, row.session_token) }, error: null });
+  }
+  return null;
+}
+
 async function handleD1Auth(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
+  const googleResponse = await handleGoogleAuth(request, env);
+  if (googleResponse) return googleResponse;
   if (url.pathname === "/api/auth/signup" && request.method === "POST") {
     try {
       const body = await request.json() as JsonRecord;
