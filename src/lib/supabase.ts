@@ -1,44 +1,175 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+export type JsonRecord = Record<string, unknown>;
 
-// These are intentionally public browser values. RLS protects the data; the
-// privileged secret key remains server-only in the Cloudflare Worker. Do not
-// ship owner-specific fallback values: forks must configure their own project.
-const supabaseUrl = String(import.meta.env.VITE_SUPABASE_URL ?? "").trim();
-const supabaseAnonKey = String(import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
-
-export let supabase: SupabaseClient | null = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    experimental: { passkey: true },
-  },
-}) : null;
-
-type RuntimeSupabaseConfig = {
-  supabaseUrl?: unknown;
-  supabaseAnonKey?: unknown;
+export type PostveilUser = {
+  id: string;
+  email?: string;
+  user_metadata?: JsonRecord;
+  app_metadata?: JsonRecord;
+  aud?: string;
+  role?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
-export async function initializeSupabase(): Promise<SupabaseClient | null> {
-  if (supabase) return supabase;
+export type Session = {
+  access_token: string;
+  refresh_token?: string;
+  expires_at?: number;
+  expires_in?: number;
+  token_type?: string;
+  user: PostveilUser;
+};
 
+type AuthError = { message: string; status?: number; name?: string };
+type AuthResponse<T> = { data: T; error: AuthError | null };
+type AuthListener = (event: string, session: Session | null) => void;
+type MfaFactorResponse = { all: any[]; totp: any[]; phone: any[] };
+type RealtimeChannel = {
+  on: (event: string, filter: JsonRecord, callback: () => void) => RealtimeChannel;
+  subscribe: (callback?: (status: string) => void) => RealtimeChannel;
+  unsubscribe: () => void;
+};
+
+const SESSION_KEY = "postveil.d1.session";
+let currentSession: Session | null = readSession();
+const listeners = new Set<AuthListener>();
+
+function readSession(): Session | null {
   try {
-    const response = await fetch("/api/client-config", { headers: { accept: "application/json" } });
-    if (!response.ok) return null;
-    const config = await response.json() as RuntimeSupabaseConfig;
-    const runtimeUrl = typeof config.supabaseUrl === "string" ? config.supabaseUrl.trim() : "";
-    const runtimeKey = typeof config.supabaseAnonKey === "string" ? config.supabaseAnonKey.trim() : "";
-    if (!runtimeUrl || !runtimeKey) return null;
-    supabase = createClient(runtimeUrl, runtimeKey, {
-      auth: {
-        experimental: { passkey: true },
-      },
-    });
-    return supabase;
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) as Session : null;
   } catch {
     return null;
   }
 }
 
+function writeSession(session: Session | null) {
+  currentSession = session;
+  try {
+    if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // Private browsing or storage quotas should not prevent the app from loading.
+  }
+}
+
+function authError(message: string, status?: number): AuthError {
+  return { message, status, name: "PostveilAuthError" };
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<AuthResponse<T>> {
+  try {
+    const response = await fetch(path, {
+      ...init,
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        ...(currentSession?.access_token ? { authorization: `Bearer ${currentSession.access_token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+    const payload = await response.json().catch(() => ({})) as JsonRecord;
+    if (!response.ok) return { data: {} as T, error: authError(String(payload.error ?? payload.message ?? `Request failed (${response.status})`), response.status) };
+    return { data: payload as T, error: null };
+  } catch (error) {
+    return { data: {} as T, error: authError(error instanceof Error ? error.message : "Network request failed") };
+  }
+}
+
+function emit(event: string, session: Session | null) {
+  listeners.forEach((listener) => listener(event, session));
+}
+
+function unsupported<T>(message: string): Promise<AuthResponse<T>> {
+  return Promise.resolve({ data: {} as T, error: authError(message, 501) });
+}
+
+const auth = {
+  async getSession(): Promise<AuthResponse<{ session: Session | null }>> {
+    if (!currentSession) return { data: { session: null }, error: null };
+    const result = await request<{ session: Session | null }>("/api/auth/session");
+    if (result.error) {
+      writeSession(null);
+      return { data: { session: null }, error: null };
+    }
+    writeSession(result.data.session);
+    return result;
+  },
+  async signUp({ email, password, options }: { email: string; password: string; options?: JsonRecord }): Promise<AuthResponse<{ user: PostveilUser | null; session: Session | null }>> {
+    const result = await request<{ user: PostveilUser; session: Session | null }>("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password, data: options?.data ?? {} }) });
+    if (!result.error) {
+      writeSession(result.data.session);
+      emit("SIGNED_IN", result.data.session);
+    }
+    return result;
+  },
+  async signInWithPassword({ email, password }: { email: string; password: string }): Promise<AuthResponse<{ user: PostveilUser | null; session: Session | null }>> {
+    const result = await request<{ user: PostveilUser; session: Session | null }>("/api/auth/signin", { method: "POST", body: JSON.stringify({ email, password }) });
+    if (!result.error) {
+      writeSession(result.data.session);
+      emit("SIGNED_IN", result.data.session);
+    }
+    return result;
+  },
+  async signOut(options?: { scope?: "global" | "others" | "local" }): Promise<AuthResponse<{}>> {
+    const result = await request<{}>("/api/auth/signout", { method: "POST", body: JSON.stringify({ scope: options?.scope ?? "local" }) });
+    if (options?.scope !== "others") {
+      writeSession(null);
+      emit("SIGNED_OUT", null);
+    }
+    return result;
+  },
+  async resetPasswordForEmail(email: string, options?: { redirectTo?: string }): Promise<AuthResponse<{}>> {
+    return request<{}>("/api/auth/reset-password", { method: "POST", body: JSON.stringify({ email, redirectTo: options?.redirectTo }) });
+  },
+  async updateUser(attributes: { password?: string; data?: JsonRecord }): Promise<AuthResponse<{ user: PostveilUser | null }>> {
+    const result = await request<{ user: PostveilUser }>("/api/auth/user", { method: "PUT", body: JSON.stringify(attributes) });
+    if (!result.error && result.data.user && currentSession) writeSession({ ...currentSession, user: result.data.user });
+    return result;
+  },
+  async refreshSession(): Promise<AuthResponse<{ session: Session | null; user: PostveilUser | null }>> {
+    const result = await this.getSession();
+    return { data: { session: result.data.session, user: result.data.session?.user ?? null }, error: result.error };
+  },
+  getAuthenticatorAssuranceLevel: async (): Promise<AuthResponse<{ currentLevel: "aal1"; nextLevel: "aal1" }>> => ({ data: { currentLevel: "aal1", nextLevel: "aal1" }, error: null }),
+  onAuthStateChange(listener: AuthListener) {
+    listeners.add(listener);
+    listener("INITIAL_SESSION", currentSession);
+    return { data: { subscription: { unsubscribe: () => { listeners.delete(listener); } } } };
+  },
+  mfa: {
+    listFactors: (): Promise<AuthResponse<MfaFactorResponse>> => Promise.resolve({ data: { all: [], totp: [], phone: [] }, error: null }),
+    challenge: (_params?: JsonRecord) => unsupported<{ id: string }>("TOTP enrollment is not available in the D1-only adapter yet."),
+    verify: (_params?: JsonRecord) => unsupported<{ session: Session | null }>("TOTP verification is not available in the D1-only adapter yet."),
+    enroll: (_params?: JsonRecord) => unsupported<{ id: string; type: string; totp: { qr_code: string; secret: string; uri: string } }>("TOTP enrollment is not available in the D1-only adapter yet."),
+    unenroll: (_params?: JsonRecord) => unsupported<{}>("TOTP enrollment is not available in the D1-only adapter yet."),
+    getAuthenticatorAssuranceLevel: async (): Promise<AuthResponse<{ currentLevel: "aal1" | "aal2"; nextLevel: "aal1" | "aal2" }>> => ({ data: { currentLevel: "aal1", nextLevel: "aal1" }, error: null }),
+  },
+  passkey: {
+    list: (): Promise<AuthResponse<any[]>> => Promise.resolve({ data: [], error: null }),
+    update: (_params?: JsonRecord) => unsupported<{}>("Passkeys are not available in the D1-only adapter yet."),
+    delete: (_params?: JsonRecord) => unsupported<{}>("Passkeys are not available in the D1-only adapter yet."),
+  },
+  registerPasskey: (_params?: JsonRecord) => unsupported<{}>("Passkeys are not available in the D1-only adapter yet."),
+};
+
+export const supabase = {
+  auth,
+  channel: (_name: string): RealtimeChannel => {
+    const channel: RealtimeChannel = {
+      on: (_event, _filter, _callback) => channel,
+      subscribe: (callback) => { callback?.("CLOSED"); return channel; },
+      unsubscribe: () => undefined,
+    };
+    return channel;
+  },
+  removeChannel: (_channel: unknown) => undefined,
+};
+
+export async function initializeSupabase() {
+  return supabase;
+}
+
 export function requireSupabase() {
-  if (!supabase) throw new Error("Supabase is not configured yet.");
   return supabase;
 }

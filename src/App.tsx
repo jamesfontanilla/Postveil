@@ -61,8 +61,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { Session } from "@supabase/supabase-js";
-import { requireSupabase, supabase } from "./lib/supabase";
+import { requireSupabase, supabase, type Session } from "./lib/supabase";
 import { sanitizeEmailHtml } from "./lib/email-html";
 import { qrImageSource } from "./lib/qr";
 import RichEmailBody from "./components/RichEmailBody";
@@ -2958,7 +2957,7 @@ function SettingsPanel({
               </div>
               {passkeys.map((passkey) => <div className="settings-item security-factor" key={passkey.id}><div><strong>{passkey.friendly_name || "Passkey"}</strong><small>Added {new Date(passkey.created_at).toLocaleDateString()}{passkey.last_used_at ? ` · last used ${new Date(passkey.last_used_at).toLocaleDateString()}` : ""}</small></div><div className="security-actions"><button className="text-button" onClick={() => void renamePasskey(passkey)} disabled={passkeyBusy}>Rename</button><button className="text-button danger-text-button" onClick={() => void removePasskey(passkey)} disabled={passkeyBusy}>Remove</button></div></div>)}
               <div className="security-actions"><button className="secondary-button" onClick={() => void registerPasskey()} disabled={passkeyBusy}><ShieldAlert size={15} /> {passkeyBusy ? "Working…" : "Add passkey"}</button><button className="text-button" onClick={() => void revokeOtherSessions()} disabled={securityBusy}>Sign out other devices</button></div>
-              <small className="field-help">Passkeys require Supabase Auth passkey support to be enabled for this project and the production relying-party domain to be configured.</small>
+              <small className="field-help">Passkeys require a WebAuthn credential service and the production relying-party domain to be configured.</small>
             </div>
             <div className="setting-card">
               <div className="setting-card-head"><div><h3>Recovery codes</h3><p>One-time backup codes can help you regain access if your authenticator is unavailable.</p></div><span className="rule-count">{recoveryCodeCount}/10</span></div>
@@ -3649,7 +3648,7 @@ function SettingsPanel({
             <div className="setting-card">
               <h3>Add an address</h3>
               <p>
-                Each address can send through Brevo and receive through
+                Each address can send through the configured delivery provider and receive through
                 Cloudflare routing.
               </p>
               <input
@@ -5890,14 +5889,6 @@ function AppContent() {
       <div className="loading-screen">
         <div className="brand-mark">P</div>
         <p>Loading Postveil…</p>
-      </div>
-    );
-  if (!supabase)
-    return (
-      <div className="loading-screen">
-        <div className="brand-mark">P</div>
-        <h2>Supabase is not configured</h2>
-        <p>Add the public project URL and key to the deployment environment.</p>
       </div>
     );
   if (recovering) return <PasswordResetScreen onComplete={() => setRecovering(false)} />;

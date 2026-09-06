@@ -1,13 +1,13 @@
 # Postveil — self-hosted custom-domain mail
 
-Postveil is a Cloudflare Worker and React webmail application for a custom domain. It can receive mail through Cloudflare Email Routing, parse MIME messages, store metadata in Supabase Postgres, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through a prioritized provider pool.
+Postveil is a Cloudflare Worker and React webmail application for a custom domain. It can receive mail through Cloudflare Email Routing, parse MIME messages, store metadata in Cloudflare D1, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through Amazon SES.
 
-This repository is a self-hosted reference implementation. It is currently designed around one owner per deployment; it is not a hosted multi-tenant service. Each deployment must use its own Supabase project, provider accounts, storage bucket, domain, and secrets.
+This repository is a self-hosted reference implementation. It is currently designed around one owner per deployment; it is not a hosted multi-tenant service. Each deployment must use its own D1 database, provider accounts, storage bucket, domain, and secrets.
 
 - Cloudflare Email Routing sends inbound mail to the email Worker.
-- The Worker parses MIME messages, stores metadata in Supabase Postgres, and stores raw messages/attachments in a private Backblaze B2 bucket.
-- Supabase Auth provides the application session and Row Level Security protects direct database access.
-- The Worker supports Brevo, Amazon SES, Mailgun, Postmark, SendGrid, and an HTTPS generic-SMTP relay. Providers are selected by priority and fail over when a provider is unavailable.
+- The Worker parses MIME messages, stores metadata in D1, and stores raw messages/attachments in a private Backblaze B2 bucket.
+- The Worker owns authentication and session tokens in D1; the browser never receives a database credential.
+- Amazon SES provides outbound delivery. Other provider adapter interfaces can be added later, but no provider secret is required in the browser.
 - Provider webhooks update delivery state, bounce/complaint suppression, reputation, and the message timeline with replay protection.
 - Scheduled and recurring sends are durable Worker outbox jobs. Mail merge expands into one private outbound message per recipient and substitutes contact variables server-side.
 - Delivery, read, and confirmation requests are emitted as standards-based message headers where supported by the selected provider; provider callbacks are normalized into receipt events.
@@ -17,8 +17,8 @@ This repository is a self-hosted reference implementation. It is currently desig
 
 ## Security boundaries
 
-- The browser receives only the Supabase publishable/anonymous key. Never expose `SUPABASE_SERVICE_ROLE_KEY`, Brevo credentials, or Backblaze application keys to the browser.
-- Supabase RLS and explicit grants protect direct database access.
+- The browser receives no database or provider key. Never expose AWS SES or Backblaze application keys to the browser.
+- D1 access is only through authenticated Worker routes, with owner-scoped queries and server-side authorization.
 - Backblaze B2 must use a private bucket and an application key limited to the required object operations.
 - Attachment checks are static type and size checks. They are not antivirus scanning.
 - The public health endpoint intentionally returns only a generic liveness response.
@@ -27,23 +27,19 @@ This repository is a self-hosted reference implementation. It is currently desig
 ## Local development
 
 1. Copy `.env.example` to `.env.local`.
-2. Set the two `VITE_` values for your own Supabase project.
+2. Configure the Worker variables and secrets described below.
 3. Run `npm ci`.
 4. Run `npm run dev`.
 
-The Vite app can start without configuration and will display a configuration message. Never place service keys, Brevo keys, or Backblaze application keys in `VITE_` variables.
+The Vite app does not require provider credentials. Never place AWS SES or Backblaze application keys in browser build variables.
 
-## Supabase setup
+## D1 setup
 
-Run every file in `supabase/migrations/` in filename order in the Supabase SQL
-Editor. The migrations add the mail model, custom folders, labels, contacts,
-rules, signatures, automatic replies, calendar events, tasks, mailbox
-membership, integrations, spam feedback, full-text search, threading metadata,
-scheduled send, snooze, message flags, owner-based RLS policies, durable audit
-records, trust and attachment evidence, sender policies, saved searches,
-address profiles, collaboration records, push devices, domain checks,
-account-security controls, mailbox administration, delivery operations, inbox
-management, and powerful search.
+Apply `migrations/0001_records.sql` to the target D1 database with Wrangler.
+The Worker uses a compatibility record adapter so existing mail routes can be
+migrated without exposing D1 directly to the browser. The adapter stores
+tenant-scoped JSON records in D1 and keeps authentication sessions in separate
+tables.
 
 Powerful search uses the `search_vector` GIN index for full-text queries and
 owner-scoped indexes for dates, size, spam score, links, authentication
@@ -55,25 +51,21 @@ supports field syntax such as `from:`, `to:`, `subject:`, `filename:`,
 filter with `-` to exclude it, and use quotes for phrases. Natural-language
 shortcuts such as `unread from alex@example.com this week` are also accepted.
 
-The migrations create the mail, organization, screening, recovery, and collaboration data model, including owner-based RLS policies and explicit API grants where client access is required.
+The record adapter preserves owner-scoped authorization in the Worker. Before
+hosting multiple organizations in one deployment, replace the compatibility
+store with normalized D1 tables and add organization-scoped indexes.
 
 ## Configuration
 
 Set these as Cloudflare Worker variables or secrets. Variables identify the deployment; secrets contain credentials.
 
 ```text
-SUPABASE_URL
-SUPABASE_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY
-BREVO_API_KEY
 B2_ENDPOINT
 B2_REGION
 B2_KEY_ID
 B2_APPLICATION_KEY
 B2_BUCKET
-OWNER_USER_ID
 INBOUND_SHARED_SECRET
-BREVO_WEBHOOK_SECRET
 INTERNAL_TEST_TOKEN
 OUTLOOK_FORWARD_TO (optional)
 AWS_ACCESS_KEY_ID (optional, SES)
@@ -106,17 +98,16 @@ Configure each provider webhook to send `POST` requests with the deployment's pr
 
 ## Deployment
 
-1. Create your Supabase project and apply the migrations.
-2. Create a private Backblaze B2 bucket and a least-privilege, expiring application key.
-3. Authenticate your sending domain and sender with the provider(s) you enable. Amazon SES accounts must be out of the sandbox before sending to arbitrary recipients.
+1. Create the D1 database and apply `migrations/0001_records.sql`.
+2. Create a private Backblaze B2 bucket and a least-privilege application key.
+3. Authenticate your sending domain and sender with Amazon SES. SES accounts must be out of the sandbox before sending to arbitrary recipients.
 4. Configure DNS for MX, SPF, DKIM, and DMARC.
-5. For a Cloudflare Git deployment, set the build variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the project's build settings. The publishable key is intended for the browser; never use a service-role key here.
-6. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
-7. Set your domain values in `wrangler.toml` and configure the Cloudflare custom domain in the dashboard.
-8. Run `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
-9. Deploy with `npm run deploy` and verify authenticated API routes, inbound mail, outbound mail, webhook delivery, and signed attachment downloads.
+5. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
+6. Set your domain values in `wrangler.toml` and configure the Cloudflare custom domain.
+7. Run `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
+8. Deploy with `npm run deploy` and verify authenticated API routes, inbound mail, outbound mail, webhook delivery, and signed attachment downloads.
 
-Do not deploy the example domain or example credentials. Do not reuse another deployment's Supabase project, B2 bucket, Brevo account, or secrets.
+Do not deploy the example domain or example credentials. Do not reuse another deployment's D1 database, B2 bucket, SES account, or secrets.
 
 ## Routes
 
@@ -164,10 +155,10 @@ Do not deploy the example domain or example credentials. Do not reuse another de
 
 The application implements the mail workflow, local spam scoring, static
 attachment safety checks, custom organization, scheduled send, snooze, PWA
-shell, polling, optional Supabase Realtime updates, mailbox administration,
+shell, polling, D1-backed authentication, mailbox administration,
 delegated mailboxes, and organization group-address expansion. Passkeys use
-the experimental Supabase Auth passkey API and require the corresponding Auth
-configuration in the target project. Outbound provider credentials and inbound
+and TOTP require a separately implemented D1/WebAuthn service before they can
+be enabled in this configuration. Outbound provider credentials and inbound
 webhook signing secrets are intentionally Worker-only. The HTTPS generic SMTP
 adapter requires a relay because Cloudflare Workers do not provide arbitrary
 outbound TCP sockets. Provider-specific

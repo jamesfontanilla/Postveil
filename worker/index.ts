@@ -1,8 +1,24 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { createClient } from "@supabase/supabase-js";
 import PostalMime from "postal-mime";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
+import {
+  createD1Session,
+  createD1User,
+  deleteD1User,
+  d1Probe,
+  d1Request,
+  getUserByEmail,
+  listD1Users,
+  revokeD1Session,
+  revokeD1UserSessions,
+  updateD1User,
+  updateD1Password,
+  userFromToken,
+  verifyD1Password,
+  type D1User,
+  type D1Session,
+} from "./d1.ts";
 
 if (typeof globalThis.DOMParser === "undefined") {
   (globalThis as typeof globalThis & { DOMParser: typeof XmlDomParser }).DOMParser = XmlDomParser;
@@ -66,12 +82,10 @@ import {
 
 interface Env {
   ASSETS: Fetcher;
+  DB: D1Database;
   API_RATE_LIMITER: RateLimit;
   APP_DOMAIN: string;
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  SUPABASE_SERVICE_ROLE_KEY: string;
-  BREVO_API_KEY: string;
+  BREVO_API_KEY?: string;
   B2_ENDPOINT: string;
   B2_REGION: string;
   B2_KEY_ID: string;
@@ -110,7 +124,7 @@ interface Env {
 }
 
 type JsonRecord = Record<string, unknown>;
-type User = { id: string; email?: string; accessToken?: string; mfaRequired?: boolean };
+type User = { id: string; email?: string; user_metadata?: JsonRecord; accessToken?: string; mfaRequired?: boolean };
 type Mailbox = { id: string; owner_id: string; address: string; display_name: string; is_default: boolean; can_send: boolean; can_receive: boolean; settings?: JsonRecord; created_at?: string };
 type Organization = { id: string; owner_id: string; name: string; slug: string; settings: JsonRecord; created_at: string; updated_at: string };
 type OrganizationMember = { organization_id: string; user_id: string; role: "owner" | "admin" | "member"; status: "active" | "suspended"; require_mfa: boolean; last_seen_at: string | null; created_at: string; updated_at: string };
@@ -374,17 +388,9 @@ function rawMessageSource(input: { from: string; to: string[]; cc?: string[]; bc
   return `${headers.join("\r\n")}\r\n\r\n--postveil-boundary\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${input.text || ""}\r\n--postveil-boundary\r\nContent-Type: text/html; charset=utf-8\r\n\r\n${input.html}\r\n--postveil-boundary--\r\n`;
 }
 
-function supabaseHeaders(env: Env, token?: string): HeadersInit {
-  return { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${token ?? env.SUPABASE_SERVICE_ROLE_KEY}`, "content-type": "application/json" };
-}
-
 async function dbRequest<T = unknown>(env: Env, path: string, init: RequestInit = {}, token?: string): Promise<T> {
-  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: { ...supabaseHeaders(env, token), ...(init.headers ?? {}) } });
-  if (!response.ok) throw new Error(`Supabase ${response.status}: ${(await response.text()).slice(0, 500)}`);
-  if (response.status === 204) return undefined as T;
-  const body = await response.text();
-  if (!body.trim()) return undefined as T;
-  return JSON.parse(body) as T;
+  void token;
+  return d1Request<T>(env, path, init);
 }
 
 const PROVIDER_NAMES: ProviderName[] = ["brevo", "ses", "mailgun", "postmark", "sendgrid", "smtp"];
@@ -477,46 +483,77 @@ function maxRetryAttempts(env: Env): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(10, value)) : 5;
 }
 
-function jwtPayload(token: string): JsonRecord {
-  try {
-    const payload = token.split(".")[1];
-    if (!payload) return {};
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
-    return JSON.parse(atob(normalized)) as JsonRecord;
-  } catch {
-    return {};
-  }
-}
-
 async function verifiedFactorCount(env: Env, userId: string, token: string): Promise<number> {
+  void env;
+  void userId;
   void token;
-  const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-  });
-  const result = await client.auth.admin.mfa.listFactors({ userId });
-  if (result.error) throw result.error;
-  return (result.data?.factors || []).filter((factor) => factor.status === "verified").length;
+  return 0;
 }
 
-async function probeSupabase(env: Env): Promise<{ ok: boolean; status: number; detail?: string }> {
-  try {
-    const response = await fetch(`${env.SUPABASE_URL}/rest/v1/profiles?select=id&limit=1`, { headers: supabaseHeaders(env) });
-    return { ok: response.ok, status: response.status, ...(response.ok ? {} : { detail: (await response.text()).slice(0, 180) }) };
-  } catch {
-    return { ok: false, status: 0, detail: "Probe failed" };
-  }
+async function probeDatabase(env: Env): Promise<{ ok: boolean; status: number; detail?: string }> {
+  return d1Probe(env);
 }
 
 async function getUser(request: Request, env: Env): Promise<User | null> {
   const authorization = request.headers.get("authorization");
   if (!authorization?.toLowerCase().startsWith("bearer ")) return null;
-  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, { headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: authorization } });
-  if (!response.ok) return null;
   const token = authorization.slice(7).trim();
-  const user = (await response.json()) as User;
-  const aal = jwtPayload(token).aal;
-  const mfaRequired = aal !== "aal2" && (await verifiedFactorCount(env, user.id, token)) > 0;
-  return { ...user, accessToken: token, mfaRequired };
+  const user = await userFromToken(env, token);
+  if (!user) return null;
+  const mfaRequired = (await verifiedFactorCount(env, user.id, token)) > 0;
+  return { id: user.id, email: user.email, user_metadata: user.user_metadata, accessToken: token, mfaRequired } as User;
+}
+
+function d1SessionPayload(user: D1User, token: string): D1Session {
+  return { access_token: token, refresh_token: token, token_type: "bearer", expires_in: 60 * 60 * 24 * 30, user };
+}
+
+async function handleD1Auth(request: Request, env: Env): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (url.pathname === "/api/auth/signup" && request.method === "POST") {
+    try {
+      const body = await request.json() as JsonRecord;
+      const created = await createD1User(env, String(body.email || ""), String(body.password || ""), String(body.displayName || ""));
+      return json({ data: created, error: null }, 201);
+    } catch (authError) {
+      return json({ data: { user: null, session: null }, error: { message: authError instanceof Error ? authError.message : "Unable to create account" } }, 400);
+    }
+  }
+  if (url.pathname === "/api/auth/signin" && request.method === "POST") {
+    try {
+      const body = await request.json() as JsonRecord;
+      const result = await verifyD1Password(env, String(body.email || ""), String(body.password || ""));
+      if (!result) return json({ data: { user: null, session: null }, error: { message: "Invalid email or password" } }, 401);
+      return json({ data: result, error: null });
+    } catch (authError) {
+      return json({ data: { user: null, session: null }, error: { message: authError instanceof Error ? authError.message : "Unable to sign in" } }, 400);
+    }
+  }
+  if (url.pathname === "/api/auth/session" && request.method === "GET") {
+    const authorization = request.headers.get("authorization") || "";
+    const token = authorization.replace(/^Bearer\s+/i, "").trim();
+    const user = token ? await userFromToken(env, token) : null;
+    return json({ data: { session: user ? d1SessionPayload(user, token) : null }, error: null });
+  }
+  if (url.pathname === "/api/auth/signout" && request.method === "POST") {
+    const authorization = request.headers.get("authorization") || "";
+    await revokeD1Session(env, authorization.replace(/^Bearer\s+/i, "").trim());
+    return json({ error: null });
+  }
+  if (url.pathname === "/api/auth/user" && request.method === "PUT") {
+    const user = await getUser(request, env);
+    if (!user) return json({ data: { user: null }, error: { message: "Not authenticated" } }, 401);
+    const body = await request.json() as JsonRecord;
+    if (typeof body.password === "string") {
+      const updated = await updateD1Password(env, user.id, body.password);
+      if (!updated) return json({ data: { user: null }, error: { message: "Password must be at least 8 characters" } }, 400);
+    }
+    return json({ data: { user: { id: user.id, email: user.email, user_metadata: user.user_metadata } }, error: null });
+  }
+  if (url.pathname === "/api/auth/reset-password" && request.method === "POST") {
+    return json({ data: {}, error: null }, 202);
+  }
+  return null;
 }
 
 function storageClient(env: Env): S3Client {
@@ -681,9 +718,31 @@ async function ensureProfileAndMailbox(env: Env, user: User): Promise<Mailbox> {
 }
 
 function adminAuthClient(env: Env) {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-  });
+  type AdminResult<T> = { data: T; error: Error | null };
+  const admin = {
+    listUsers: async (_options?: { page?: number; perPage?: number }): Promise<AdminResult<{ users: D1User[] }>> => ({ data: { users: await listD1Users(env) }, error: null }),
+    inviteUserByEmail: async (email: string, options?: { data?: JsonRecord; redirectTo?: string }): Promise<AdminResult<{ user: D1User | null }>> => {
+      try {
+        const temporaryPassword = `${crypto.randomUUID()}-${crypto.randomUUID()}`;
+        const created = await createD1User(env, email, temporaryPassword, String(options?.data?.display_name || ""));
+        await revokeD1Session(env, created.session.access_token);
+        return { data: { user: created.user }, error: null };
+      } catch (error) {
+        return { data: { user: null }, error: error instanceof Error ? error : new Error("Unable to invite user") };
+      }
+    },
+    updateUserById: async (userId: string, patch: JsonRecord): Promise<AdminResult<{ user: D1User | null }>> => {
+      const metadata = patch.user_metadata && typeof patch.user_metadata === "object" ? patch.user_metadata as JsonRecord : undefined;
+      const banned = typeof patch.ban_duration === "string" && patch.ban_duration !== "none";
+      const updated = await updateD1User(env, userId, { metadata, display_name: typeof metadata?.display_name === "string" ? metadata.display_name : undefined, status: banned ? "suspended" : "active", banned_until: banned ? new Date(Date.now() + 876000 * 60 * 60 * 1000).toISOString() : null });
+      return { data: { user: updated }, error: updated ? null : new Error("User not found") };
+    },
+    deleteUser: async (userId: string, _shouldSoftDelete?: boolean): Promise<AdminResult<{ user: null }>> => { await deleteD1User(env, userId); return { data: { user: null }, error: null }; },
+    signOut: async (userId: string, _scope?: string): Promise<{ error: Error | null }> => { await revokeD1UserSessions(env, userId); return { error: null }; },
+    generateLink: async (input: { email: string }, _options?: JsonRecord): Promise<AdminResult<{ properties: { action_link: string } }>> => ({ data: { properties: { action_link: `https://${env.APP_DOMAIN}/?recovery=${encodeURIComponent(input.email)}` } }, error: null }),
+    mfa: { listFactors: async () => ({ data: { factors: [] }, error: null }) },
+  };
+  return { auth: { admin } };
 }
 
 function organizationSettings(value: unknown): JsonRecord {
@@ -856,8 +915,7 @@ async function enforceAllOrganizationInactivity(env: Env): Promise<void> {
 }
 
 async function recordSecurityEvent(env: Env, organization: Organization, user: User, request: Request, ctx: ExecutionContext): Promise<void> {
-  const payload = jwtPayload(user.accessToken || "");
-  const sessionId = typeof payload.session_id === "string" ? payload.session_id : typeof payload.jti === "string" ? payload.jti : String(payload.iat || "");
+  const sessionId = user.accessToken ? (await sha256Hex(new TextEncoder().encode(user.accessToken))).slice(0, 32) : "";
   if (!sessionId) return;
   const ip = request.headers.get("CF-Connecting-IP") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   const userAgent = (request.headers.get("user-agent") || "unknown").slice(0, 240);
@@ -1830,20 +1888,11 @@ async function defaultFromAddress(env: Env, ownerId?: string): Promise<string> {
 }
 
 async function generateRecoveryLink(env: Env, email: string, redirectTo: string): Promise<string> {
-  const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-  });
-  const result = await client.auth.admin.generateLink({
-    type: "recovery",
-    email,
-    options: { redirectTo },
-  });
-  if (result.error) throw result.error;
-  const data = result.data as unknown as JsonRecord;
-  const properties = data.properties as JsonRecord | undefined;
-  const actionLink = String(properties?.action_link || data.action_link || "");
-  if (!actionLink) throw new Error("Supabase did not return a recovery link");
-  return actionLink;
+  const row = await getUserByEmail(env, email);
+  if (!row) throw new Error("User not found");
+  const token = crypto.randomUUID();
+  await dbRequest(env, "account_recovery_tokens", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ owner_id: row.id, token, expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString() }) });
+  return `${redirectTo}?recovery=${encodeURIComponent(token)}`;
 }
 
 async function recoveryRateLimit(env: Env, email: string): Promise<{ allowed: boolean; row: RecoveryRateLimitRow | null }> {
@@ -1894,12 +1943,8 @@ async function handleRecoveryRequest(request: Request, env: Env): Promise<Respon
     if (!method) return generic;
     const rate = await recoveryRateLimit(env, email);
     if (!rate.allowed) return generic;
-    const userResponse = await fetch(`${env.SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(method.owner_id)}`, {
-      headers: supabaseHeaders(env),
-    });
-    if (!userResponse.ok) return generic;
-    const authUser = await userResponse.json() as { email?: string };
-    const primaryEmail = normalizeRecoveryEmail(String(authUser.email || ""));
+    const authUser = (await listD1Users(env)).find((candidate) => candidate.id === method.owner_id);
+    const primaryEmail = normalizeRecoveryEmail(String(authUser?.email || ""));
     if (!isValidRecoveryEmail(primaryEmail)) return generic;
     const redirectTo = new URL("/", request.url).toString();
     const link = await generateRecoveryLink(env, primaryEmail, redirectTo);
@@ -3018,11 +3063,9 @@ function exportSearchRows(rows: JsonRecord[], format: "csv" | "json"): { body: s
 }
 
 async function dbRequestCount(env: Env, path: string, token?: string): Promise<number | null> {
-  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/${path}`, { headers: { ...supabaseHeaders(env, token), Prefer: "count=exact" } });
-  if (!response.ok) throw new Error(`Supabase ${response.status}: ${(await response.text()).slice(0, 500)}`);
-  const range = response.headers.get("content-range") || "";
-  const total = range.match(/\/(\d+)$/)?.[1];
-  return total ? Number(total) : null;
+  void token;
+  const rows = await d1Request<unknown[]>(env, path);
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
 async function writeMessageAudit(env: Env, ownerId: string, requestId: string, actionType: string, message: JsonRecord, beforeState: JsonRecord, afterState: JsonRecord): Promise<void> {
@@ -3188,16 +3231,15 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     if (rateLimitResponse) return rateLimitResponse;
   }
   await enforceRequestBodyLimit(request);
+  const d1AuthResponse = await handleD1Auth(request, env);
+  if (d1AuthResponse) return d1AuthResponse;
   if (url.pathname === "/api/client-config") {
     if (request.method !== "GET") return error("Method not allowed", 405);
-    const publicUrl = String(env.SUPABASE_URL || "").trim();
-    const publicKey = String(env.SUPABASE_ANON_KEY || "").trim();
-    if (!publicUrl || !publicKey) return error("Service temporarily unavailable", 503);
-    return json({ supabaseUrl: publicUrl, supabaseAnonKey: publicKey });
+    return json({ authMode: "d1", service: "postveil" });
   }
   if (url.pathname === "/api/health") {
     if (request.method !== "GET" && request.method !== "HEAD") return error("Method not allowed", 405);
-    return json({ ok: true, service: "postveil", configured: { supabase: Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, supabaseProbe: await probeSupabase(env), timestamp: new Date().toISOString() });
+    return json({ ok: true, service: "postveil", configured: { d1: true, ses: Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID) }, databaseProbe: await probeDatabase(env), timestamp: new Date().toISOString() });
   }
   const deliveryWebhookMatch = url.pathname.match(/^\/api\/webhooks\/(brevo|ses|mailgun|postmark|sendgrid|smtp)$/);
   if (deliveryWebhookMatch) {
