@@ -842,6 +842,19 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(initialNotice);
+  const [verificationPending, setVerificationPending] = useState(false);
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const passwordChecks = {
+    length: password.length >= 12,
+    letter: /[A-Za-z]/.test(password),
+    number: /\d/.test(password),
+  };
+  useEffect(() => {
+    if (resendCooldown <= 0) return undefined;
+    const timer = window.setInterval(() => setResendCooldown((current) => Math.max(0, current - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldown]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -866,8 +879,11 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
           ? await client.auth.signInWithPassword({ email, password })
           : await client.auth.signUp({ email, password });
         if (result.error) throw result.error;
-        if (mode === "signup" && !result.data.session)
-          setNotice("Check your inbox to confirm the account, then sign in here.");
+        if (mode === "signup" && !result.data.session) {
+          setVerificationEmail(email.trim());
+          setVerificationPending(true);
+          setResendCooldown(45);
+        }
       }
     } catch (authError) {
       setError(
@@ -880,26 +896,55 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
     }
   }
   async function resendVerification() {
+    if (resendCooldown > 0) return;
     setBusy(true);
     setError("");
     try {
       const result = await publicApiFetch<{ message?: string }>("/api/auth/resend-verification", { method: "POST", body: JSON.stringify({ email, password }) });
       setNotice(result.message || "If the account can receive mail, a verification link will arrive shortly.");
+      setResendCooldown(45);
     } catch (resendError) {
       setError(resendError instanceof Error ? resendError.message : "Could not resend the verification email");
     } finally {
       setBusy(false);
     }
   }
+  if (verificationPending && mode === "signup") return (
+    <main className="auth-shell auth-shell-verification">
+      <section className="auth-card auth-verification-card">
+        <div className="brand-mark">P</div>
+        <div className="auth-journey" aria-label="Signup progress"><span className="active">Account</span><span className="active">Verify</span><span>Set up</span></div>
+        <div className="auth-verification-icon"><Mail size={24} aria-hidden="true" /></div>
+        <p className="eyebrow">STEP 2 / 3 · CHECK YOUR INBOX</p>
+        <h1>Confirm your email.</h1>
+        <p className="auth-copy">We sent a verification link to <strong>{verificationEmail}</strong>. Confirm it before you choose a domain or create a mailbox.</p>
+        <div className="auth-verification-next">
+          <div><span className="auth-verification-number">01</span><span><strong>Open the message</strong><small>Look for “Verify your Postveil email address.”</small></span></div>
+          <div><span className="auth-verification-number">02</span><span><strong>Confirm the address</strong><small>The link is single-use and stays valid for 24 hours.</small></span></div>
+          <div><span className="auth-verification-number">03</span><span><strong>Start your mailbox</strong><small>We’ll take you straight into the five-step setup.</small></span></div>
+        </div>
+        {error && <div className="form-error" role="alert">{error}</div>}
+        {notice && <div className="form-notice" role="status">{notice}</div>}
+        <button className="primary-button auth-wide-action" type="button" onClick={() => { setVerificationPending(false); setMode("signin"); setEmail(verificationEmail); setPassword(""); setError(""); setNotice("After you confirm your email, sign in here to begin setup."); }}>I’ve confirmed — sign in <ArrowRight size={16} /></button>
+        <button className="secondary-button auth-wide-action" type="button" onClick={() => { setVerificationPending(false); setEmail(""); setPassword(""); setError(""); setNotice(""); }}>Use a different email</button>
+        <button className="text-button auth-link" type="button" onClick={() => void resendVerification()} disabled={busy || resendCooldown > 0}>{busy ? "Sending…" : resendCooldown > 0 ? `Resend available in ${resendCooldown}s` : "Resend verification email"}</button>
+        <p className="auth-microcopy"><ShieldCheck size={14} aria-hidden="true" /> Your domain setup starts only after your account is verified.</p>
+      </section>
+      <aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> account first</div><p className="aside-quote">A small gate before your domain.</p><p className="aside-meta">Postveil asks you to confirm the address you’ll use to manage your private mailbox. No provider credentials are needed here.</p></aside>
+    </main>
+  );
   return (
     <main className="auth-shell">
       <section className="auth-card">
         {onBack && <button type="button" className="auth-back-link" onClick={onBack}><ArrowLeft size={14} /> Back to overview</button>}
         <div className="brand-mark">P</div>
+        {mode === "signup" && <div className="auth-journey" aria-label="Signup progress"><span className="active">Account</span><span>Verify</span><span>Set up</span></div>}
         <p className="eyebrow">PRIVATE MAIL / {new Date().getFullYear()}</p>
-        <h1>{mode === "forgot" || mode === "recovery" ? "Get back in safely." : "Keep your address close."}</h1>
+        <h1>{mode === "signup" ? "Start with your account." : mode === "forgot" || mode === "recovery" ? "Get back in safely." : "Keep your address close."}</h1>
         <p className="auth-copy">
-          {mode === "forgot"
+          {mode === "signup"
+            ? "Create your Postveil account first. We’ll verify your email, then guide you through connecting a domain."
+            : mode === "forgot"
             ? "We’ll send a one-time reset link to your sign-in address or a verified recovery email."
             : mode === "recovery"
               ? "Use one unused recovery code to request a one-time password reset link."
@@ -928,6 +973,7 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
                 placeholder={mode === "signup" ? "12+ characters with a number" : "Your password"}
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
               />
+              {mode === "signup" && <span className="auth-password-checks" aria-live="polite"><span className={passwordChecks.length ? "met" : ""}><Check size={12} /> 12+ characters</span><span className={passwordChecks.letter ? "met" : ""}><Check size={12} /> One letter</span><span className={passwordChecks.number ? "met" : ""}><Check size={12} /> One number</span></span>}
             </label>}
           {mode === "recovery" && <label>
             Recovery code
@@ -6194,6 +6240,8 @@ function AppContent() {
         }
         currentUrl.searchParams.delete("verify_email");
         window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+        setAuthMode("signin");
+        setShowPublicHome(false);
       }
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
