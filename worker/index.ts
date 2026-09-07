@@ -1357,20 +1357,29 @@ async function enforceAllOrganizationInactivity(env: Env): Promise<void> {
   for (const organization of organizations) await enforceInactivity(env, organization, organization.owner_id).catch(() => undefined);
 }
 
-async function recordSecurityEvent(env: Env, organization: Organization, user: User, request: Request, ctx: ExecutionContext): Promise<void> {
+async function recordSecurityEvent(env: Env, organization: Organization, user: User, request: Request, ctx: ExecutionContext, authMethod: "password" | "oauth" = "password"): Promise<void> {
   const sessionId = user.accessToken ? (await sha256Hex(new TextEncoder().encode(user.accessToken))).slice(0, 32) : "";
   if (!sessionId) return;
   const ip = request.headers.get("CF-Connecting-IP") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   const userAgent = (request.headers.get("user-agent") || "unknown").slice(0, 240);
   const ipHash = await sha256Hex(new TextEncoder().encode(ip));
-  const recent = await dbRequest<SecurityEvent[]>(env, `account_security_events?organization_id=eq.${encodeURIComponent(organization.id)}&subject_user_id=eq.${encodeURIComponent(user.id)}&event_type=eq.login&order=created_at.desc&limit=20`).catch(() => []);
   const eventKey = `${user.id}:${sessionId}:${ipHash}`;
+  const existing = await dbRequest<Array<{ id: string }>>(env, `account_security_events?organization_id=eq.${encodeURIComponent(organization.id)}&subject_user_id=eq.${encodeURIComponent(user.id)}&event_type=eq.login&event_key=eq.${encodeURIComponent(eventKey)}&select=id&limit=1`).catch(() => []);
+  if (existing[0]) return;
+  const recent = await dbRequest<SecurityEvent[]>(env, `account_security_events?organization_id=eq.${encodeURIComponent(organization.id)}&subject_user_id=eq.${encodeURIComponent(user.id)}&event_type=eq.login&order=created_at.desc&limit=20`).catch(() => []);
   const suspicious = recent.length > 0 && !recent.some((event) => event.ip_hash === ipHash && event.user_agent === userAgent);
-  await dbRequest(env, "account_security_events", {
-    method: "POST",
-    headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
-    body: JSON.stringify({ organization_id: organization.id, actor_id: user.id, subject_user_id: user.id, event_type: "login", event_key: eventKey, session_id: sessionId, ip_hash: ipHash, user_agent: userAgent, is_suspicious: suspicious, details: { method: request.method, path: new URL(request.url).pathname } }),
-  }).catch(() => undefined);
+  let inserted: SecurityEvent[] = [];
+  try {
+    inserted = await dbRequest<SecurityEvent[]>(env, "account_security_events", {
+      method: "POST",
+      headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+      body: JSON.stringify({ organization_id: organization.id, actor_id: user.id, subject_user_id: user.id, event_type: "login", event_key: eventKey, session_id: sessionId, ip_hash: ipHash, user_agent: userAgent, is_suspicious: suspicious, details: { method: authMethod, path: "/api/auth/login-event" } }),
+    });
+  } catch {
+    // A failed or concurrent insert must never send a duplicate security alert.
+    return;
+  }
+  if (!inserted[0]) return;
   await dbRequest(env, `organization_members?organization_id=eq.${encodeURIComponent(organization.id)}&user_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }) }).catch(() => undefined);
   if (suspicious && user.email) {
     ctx.waitUntil(sendSystemMessage(env, {
@@ -3872,7 +3881,8 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (url.pathname === "/api/internal/send-test") { if (!env.INTERNAL_TEST_TOKEN || request.headers.get("x-internal-test-token") !== env.INTERNAL_TEST_TOKEN) return error("Unauthorized", 401); try { return await handleSend(env, null, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
   const user = await getUser(request, env);
   if (!user) return error("Sign in required", 401);
-  if (user.mfaRequired) return error("Complete two-step verification to continue", 401);
+  const isLoginEventRoute = request.method === "POST" && url.pathname === "/api/auth/login-event";
+  if (user.mfaRequired && !isLoginEventRoute) return error("Complete two-step verification to continue", 401);
   const userRateLimitResponse = await enforceEdgeRateLimit(request, env, user.id);
   if (userRateLimitResponse) return userRateLimitResponse;
 
@@ -3972,9 +3982,14 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   let organization: Organization | null = null;
   try {
     organization = await ensureOrganization(env, user);
+    if (isLoginEventRoute) {
+      const body = (await request.json().catch(() => ({}))) as JsonRecord;
+      const authMethod = body.method === "oauth" ? "oauth" : "password";
+      ctx.waitUntil(recordSecurityEvent(env, organization, user, request, ctx, authMethod));
+      return json({ ok: true });
+    }
     const mfaSetupRoute = url.pathname === "/api/recovery-methods" || url.pathname.startsWith("/api/recovery-methods/") || url.pathname === "/api/recovery-codes" || url.pathname === "/api/recovery-codes/status" || url.pathname === "/api/admin/organization" || url.pathname === "/api/admin/overview";
     if (!mfaSetupRoute && await organizationMfaBlocked(env, user, organization)) return error("Your workspace requires two-step verification before continuing", 401);
-    ctx.waitUntil(recordSecurityEvent(env, organization, user, request, ctx));
   } catch {
     // The administration migration is optional during staged rollouts. The
     // regular mailbox remains available while it is being applied.

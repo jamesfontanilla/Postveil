@@ -625,6 +625,15 @@ async function publicApiFetch<T>(path: string, init: RequestInit = {}): Promise<
   return payload as T;
 }
 
+async function recordExplicitSignIn(session: Session | null, method: "password" | "oauth" = "password"): Promise<void> {
+  if (!session?.access_token) return;
+  await fetch("/api/auth/login-event", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ method }),
+  }).catch(() => undefined);
+}
+
 type AppDialogOptions = {
   message: string;
   title?: string;
@@ -920,6 +929,7 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
           ? await client.auth.signInWithPassword({ email, password })
           : await client.auth.signUp({ email, password, options: { captchaToken } });
         if (result.error) throw result.error;
+        if (mode === "signin") await recordExplicitSignIn(result.data.session, "password");
         if (mode === "signup" && !result.data.session) {
           setVerificationEmail(email.trim());
           setVerificationPending(true);
