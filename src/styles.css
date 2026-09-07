@@ -1588,6 +1588,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .dns-row strong { color: #2a4237; font-size: 12px; }
 .dns-row small { margin-top: 3px; color: #89988f; font-size: 10px; line-height: 1.45; }
 .dns-row > span:last-child { color: #93a197; font: 10px "IBM Plex Mono", monospace; }
+.dns-record-row { display: grid; grid-template-columns: 34px minmax(86px, .45fr) minmax(0, 1.55fr); gap: 9px; align-items: center; border-top: 1px solid #edf1ee; padding: 10px 16px; color: #6c8075; font-size: 10px; }
+.dns-record-row > span { color: #477b63; font: 600 9px "IBM Plex Mono", monospace; letter-spacing: .05em; }
+.dns-record-row code { min-width: 0; overflow: hidden; color: #476256; font: 10px "IBM Plex Mono", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.dns-preview-actions { display: flex; justify-content: flex-end; border-top: 1px solid #edf1ee; padding: 8px 16px; }
+.dns-preview-actions .text-button { color: #2b6755; font-size: 10px; }
 .email-composer { display: flex; align-items: center; overflow: hidden; border: 1px solid #d6e2da; border-radius: 7px; background: #fbfdfb; }
 .email-composer:focus-within { border-color: #2b6755; box-shadow: 0 0 0 4px rgba(43, 103, 85, .1); }
 .email-composer input { min-width: 0; border: 0; box-shadow: none; background: transparent; }
@@ -1618,6 +1623,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .onboarding-header { padding: 21px 24px 17px; }
   .onboarding-progress { padding: 0 24px; }
   .onboarding-body { padding: 37px 24px 34px; }
+  .dns-record-row { grid-template-columns: 34px minmax(0, 1fr); }
+  .dns-record-row code:last-child { grid-column: 2; overflow-wrap: anywhere; white-space: normal; }
   .onboarding-footer { margin-top: 0; padding: 17px 24px; }
   .cloudflare-connect-card { align-items: flex-start; flex-direction: column; }
   .cloudflare-connect-card .secondary-button { width: 100%; }

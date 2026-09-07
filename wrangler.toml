@@ -42,7 +42,10 @@ TURNSTILE_SITE_KEY = "0x4AAAAAAEqXXuhzdUlMoSuz"
 PROVIDER_FAILOVER_ENABLED = "false"
 GOOGLE_CLIENT_ID = "585169946821-gu9e4aldgf7ro3vfmb7a4djsu57t0vn0.apps.googleusercontent.com"
 CLOUDFLARE_OAUTH_CLIENT_ID = "3944177cefa074b8c330aff1b76f36af"
+# The OAuth client must also include Zone Settings Write and Email Routing
+# Rules Edit before automatic customer-domain setup can change DNS or routes.
 CLOUDFLARE_OAUTH_SCOPES = "zone.read dns.read"
+CLOUDFLARE_EMAIL_WORKER_NAME = "postveil"
 
 [[routes]]
 pattern = "postveil.jamesfontanilla.com"

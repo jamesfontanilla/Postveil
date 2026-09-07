@@ -104,18 +104,31 @@ CONFIDENTIAL_ENCRYPTION_KEY (required for confidential mode)
 
 `APP_DOMAIN`, `DEFAULT_FROM_EMAIL`, and `SYSTEM_FROM_EMAIL` must use domains that are verified with your email provider. `SYSTEM_FROM_EMAIL` is the sender used for new-account email verification. `ALLOWED_SENDER_DOMAINS` may contain additional verified domains separated by commas. The default mailbox is `DEFAULT_FROM_EMAIL`, or `postmaster@APP_DOMAIN` when no default is set.
 
-### Cloudflare one-click domain verification
+### Customer-domain DNS and inbound routing
 
 Create a Cloudflare OAuth client with the authorization-code flow, the redirect
-URL `https://YOUR_APP_DOMAIN/api/cloudflare/oauth/callback`, and the read-only
-scopes `zone.read dns.read`. Configure the token endpoint authentication method
-as `client_secret_post`, then store the client ID as a Worker variable and the
-client secret with `wrangler secret put CLOUDFLARE_OAUTH_CLIENT_SECRET`. The
-onboarding button uses the OAuth grant to confirm the user controls the zone;
-the access token is exchanged and discarded, never stored by Postveil. Mailbox
-enablement additionally requires a public MX lookup to match one of the exact
-`INBOUND_MX_TARGETS`; an arbitrary MX record no longer counts. SPF/DKIM/DMARC
-setup remains a separate DNS handoff.
+URL `https://YOUR_APP_DOMAIN/api/cloudflare/oauth/callback`, and the scopes
+needed by the deployment. Read-only verification uses `zone.read dns.read`.
+Automatic setup additionally needs the OAuth permissions corresponding to Zone
+Settings Write and Email Routing Rules Edit; select those in the Cloudflare
+OAuth client and set the matching scope IDs in `CLOUDFLARE_OAUTH_SCOPES`.
+Configure the token endpoint authentication method as `client_secret_post`,
+then store the client ID as a Worker variable and the client secret with
+`wrangler secret put CLOUDFLARE_OAUTH_CLIENT_SECRET`. The access token is used
+only during the callback and is discarded, never stored by Postveil.
+
+When write access is granted, Postveil enables Cloudflare Email Routing (which
+provisions the required MX/SPF handoff), creates or updates the zone catch-all
+route to the deployed email Worker, stores only the route result, and verifies
+the exact public MX target before enabling a mailbox. An existing active
+catch-all route is never overwritten. The user must reconnect the zone after
+adding write scopes. If the zone is not managed by Cloudflare, Postveil shows
+the exact MX and ownership TXT records for manual setup; it cannot create a
+Cloudflare Worker route in a registrar-only DNS zone.
+
+SPF/DKIM/DMARC for outbound sending remains provider-specific and must not be
+solved by blindly adding a second SPF record. Configure the sending provider's
+identity records separately, then keep the inbound MX and route checks here.
 
 Configure each provider webhook to send `POST` requests with the deployment's provider secret in the `x-webhook-secret` header. Query-string webhook tokens are deliberately not accepted. Amazon SES may also send native Amazon SNS `Notification` messages: the Worker validates the SNS signing certificate and signature, optionally checks `SES_SNS_TOPIC_ARN`, handles subscription confirmation, and then applies the same idempotent delivery processing. Provider-specific webhook payloads are normalized for delivery, bounce, complaint, open, click, and receipt events; the provider must still be configured to emit those events.
 
@@ -126,7 +139,7 @@ Configure each provider webhook to send `POST` requests with the deployment's pr
 3. Authenticate each sending domain and sender with Amazon SES. For password signups, verify the `SYSTEM_FROM_EMAIL` domain and move the SES account out of the sandbox before sending verification messages to arbitrary recipients.
 4. Configure DNS for the exact inbound MX target(s) in `INBOUND_MX_TARGETS`, plus SPF, DKIM, and DMARC.
 5. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
-6. Set your deployment domain values in `wrangler.toml` and configure the Cloudflare custom domain. Do not treat the onboarding domain field as automatic provider provisioning: custom-domain SaaS operation requires a separate verified-domain and routing workflow.
+6. Set your deployment domain values in `wrangler.toml` and configure the Cloudflare custom domain. For customer-domain automation, update the OAuth client's write scopes and set `CLOUDFLARE_EMAIL_WORKER_NAME` to the deployed Worker name.
 7. Run `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
 8. Deploy with `npm run deploy` and verify authenticated API routes, inbound mail, outbound mail, webhook delivery, and signed attachment downloads.
 
@@ -156,6 +169,8 @@ Do not deploy the example domain or example credentials. Do not reuse another de
 - `/api/drafts/:id/versions` — draft history and version restore
 - `/api/send` — authenticated provider-routed send with threading, CC/BCC, attachments, quotas, suppression checks, tracking controls, and scheduled send
 - `/api/attachments` — private B2 upload and signed download URLs
+- `/api/domains/dns-records` — tenant-scoped domain ownership, DNS, and inbound-route status with manual records when needed
+- `/api/domains/verification/refresh` — exact public MX/TXT verification for manual domains and route-state refresh
 - `/api/webhooks/:provider` — provider delivery callback with idempotency and replay protection
 - `/api/webhooks/inbound/:provider` — normalized inbound webhook adapter
 - `/api/mail/:id/inspection` — delivery attempts, provider events, headers, and MIME metadata

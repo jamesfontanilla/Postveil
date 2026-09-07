@@ -113,6 +113,7 @@ interface Env {
   CLOUDFLARE_OAUTH_CLIENT_ID?: string;
   CLOUDFLARE_OAUTH_CLIENT_SECRET?: string;
   CLOUDFLARE_OAUTH_SCOPES?: string;
+  CLOUDFLARE_EMAIL_WORKER_NAME?: string;
   MAILGUN_API_KEY?: string;
   MAILGUN_DOMAIN?: string;
   MAILGUN_BASE_URL?: string;
@@ -514,7 +515,12 @@ async function isVerifiedMailboxDomain(env: Env, userId: string, domain: string)
   const normalized = normalizeProviderDomain(domain);
   if (!normalized) return false;
   if (configuredSenderDomains(env).includes(normalized)) return true;
-  const row = await env.DB.prepare("SELECT id FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 AND status = 'verified' LIMIT 1").bind(userId, normalized).first<{ id: string }>();
+  const row = await env.DB.prepare(`SELECT v.id
+    FROM pv_domain_verifications v
+    LEFT JOIN pv_domain_integrations i ON i.user_id = v.user_id AND i.domain = v.domain
+    WHERE v.user_id = ?1 AND v.domain = ?2 AND v.status = 'verified' AND v.dns_ready = 1
+      AND (i.id IS NULL OR (i.dns_status = 'ready' AND i.inbound_route_status = 'ready'))
+    LIMIT 1`).bind(userId, normalized).first<{ id: string }>();
   return Boolean(row?.id);
 }
 
@@ -726,6 +732,126 @@ type CloudflareDomainVerification = {
   updated_at: string;
 };
 
+type CloudflareDnsRecord = { type?: string; name?: string; content?: string; priority?: number | null; ttl?: number | null };
+type CloudflareEmailRoute = {
+  id?: string;
+  enabled?: boolean;
+  actions?: Array<{ type?: string; value?: string[] }>;
+  name?: string;
+  source?: string;
+};
+type DomainIntegration = {
+  id: string;
+  user_id: string;
+  domain: string;
+  provider: string;
+  zone_id: string | null;
+  account_id: string | null;
+  ownership_status: string;
+  dns_status: string;
+  inbound_route_status: string;
+  route_id: string | null;
+  route_target: string | null;
+  ownership_token: string | null;
+  ownership_record_name: string | null;
+  records_json: string;
+  last_error: string | null;
+  last_checked_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function parseJsonArray(value: unknown): JsonRecord[] {
+  if (Array.isArray(value)) return value.filter((item): item is JsonRecord => Boolean(item && typeof item === "object" && !Array.isArray(item)));
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed.filter((item): item is JsonRecord => Boolean(item && typeof item === "object" && !Array.isArray(item))) : [];
+  } catch { return []; }
+}
+
+function cloudflareWorkerName(env: Pick<Env, "CLOUDFLARE_EMAIL_WORKER_NAME">): string {
+  return String(env.CLOUDFLARE_EMAIL_WORKER_NAME || "postveil").trim().slice(0, 64) || "postveil";
+}
+
+function cloudflareApiMessage(payload: JsonRecord, fallback: string): string {
+  const errors = Array.isArray(payload.errors) ? payload.errors : [];
+  const detail = errors.map((item) => {
+    if (!item || typeof item !== "object") return "";
+    const value = item as JsonRecord;
+    return `${value.code ? `(${value.code}) ` : ""}${String(value.message || "")}`.trim();
+  }).filter(Boolean).join("; ");
+  return (detail || fallback).slice(0, 500);
+}
+
+async function cloudflareApi<T>(accessToken: string, path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set("authorization", `Bearer ${accessToken}`);
+  headers.set("accept", "application/json");
+  if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+  const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, { ...init, headers });
+  const payload = await response.json().catch(() => ({})) as JsonRecord;
+  if (!response.ok || payload.success !== true) throw new Error(cloudflareApiMessage(payload, `Cloudflare API request failed (${response.status})`));
+  return payload.result as T;
+}
+
+function manualInboundRecords(env: Pick<Env, "INBOUND_MX_TARGETS">, domain: string, ownershipToken?: string | null): JsonRecord[] {
+  const records = configuredInboundMxTargets(env).map((content, index) => ({
+    name: domain,
+    type: "MX",
+    content,
+    priority: 10 + index * 10,
+    ttl: 3600,
+    status: "manual",
+  }));
+  if (ownershipToken) records.push({ name: `_postveil-verification.${domain}`, type: "TXT", content: `postveil-domain-verification=${ownershipToken}`, priority: 0, ttl: 3600, status: "manual" });
+  return records;
+}
+
+async function exactDnsTxtReady(domain: string, expected: string): Promise<boolean> {
+  if (!expected) return false;
+  try {
+    const dnsUrl = new URL("https://cloudflare-dns.com/dns-query");
+    dnsUrl.searchParams.set("name", `_postveil-verification.${domain}`);
+    dnsUrl.searchParams.set("type", "TXT");
+    const response = await fetch(dnsUrl, { headers: { accept: "application/dns-json" } });
+    if (!response.ok) return false;
+    const payload = await response.json() as { Answer?: Array<{ type?: number; data?: string }> };
+    const expectedValue = `postveil-domain-verification=${expected}`;
+    return (payload.Answer || []).some((answer) => Number(answer.type) === 16 && String(answer.data || "").replace(/^"|"$/g, "").includes(expectedValue));
+  } catch { return false; }
+}
+
+async function getDomainIntegration(env: Env, userId: string, domain: string): Promise<DomainIntegration | null> {
+  return env.DB.prepare("SELECT * FROM pv_domain_integrations WHERE user_id = ?1 AND domain = ?2 LIMIT 1").bind(userId, domain).first<DomainIntegration>();
+}
+
+async function saveDomainIntegration(env: Env, input: {
+  userId: string;
+  domain: string;
+  provider: string;
+  zoneId?: string | null;
+  accountId?: string | null;
+  ownershipStatus: string;
+  dnsStatus: string;
+  routeStatus: string;
+  routeId?: string | null;
+  routeTarget?: string | null;
+  ownershipToken?: string | null;
+  ownershipRecordName?: string | null;
+  records?: unknown[];
+  lastError?: string | null;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  await env.DB.prepare(`INSERT INTO pv_domain_integrations(id,user_id,domain,provider,zone_id,account_id,ownership_status,dns_status,inbound_route_status,route_id,route_target,ownership_token,ownership_record_name,records_json,last_error,last_checked_at,created_at,updated_at)
+    VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?16,?16)
+    ON CONFLICT(user_id,domain) DO UPDATE SET provider=excluded.provider,zone_id=excluded.zone_id,account_id=excluded.account_id,ownership_status=excluded.ownership_status,dns_status=excluded.dns_status,inbound_route_status=excluded.inbound_route_status,route_id=excluded.route_id,route_target=excluded.route_target,ownership_token=excluded.ownership_token,ownership_record_name=excluded.ownership_record_name,records_json=excluded.records_json,last_error=excluded.last_error,last_checked_at=excluded.last_checked_at,updated_at=excluded.updated_at`)
+    .bind(
+      crypto.randomUUID(), input.userId, input.domain, input.provider, input.zoneId || null, input.accountId || null,
+      input.ownershipStatus, input.dnsStatus, input.routeStatus, input.routeId || null, input.routeTarget || null,
+      input.ownershipToken || null, input.ownershipRecordName || null, JSON.stringify(input.records || []), input.lastError ? String(input.lastError).slice(0, 500) : null, now,
+    ).run();
+}
+
 function normalizeProviderDomain(value: string): string {
   return value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/\.$/, "");
 }
@@ -799,6 +925,52 @@ async function cloudflareZoneForDomain(accessToken: string, domain: string, env:
   return { zone, dnsReady: await exactInboundMxReady(env, domain) };
 }
 
+async function cloudflareEmailRoutingDns(accessToken: string, zone: CloudflareZone, domain: string): Promise<CloudflareDnsRecord[]> {
+  try {
+    await cloudflareApi<JsonRecord>(accessToken, `/zones/${encodeURIComponent(zone.id)}/email/routing/dns`, {
+      method: "POST",
+      body: JSON.stringify({ name: domain }),
+    });
+  } catch (enableError) {
+    // Email Routing returns an error when it is already enabled. Keep going
+    // only when the settings endpoint confirms an enabled, usable zone; do
+    // not hide MX conflicts or insufficient OAuth scope.
+    const settings = await cloudflareApi<JsonRecord>(accessToken, `/zones/${encodeURIComponent(zone.id)}/email/routing`);
+    const status = String(settings.status || "").toLowerCase();
+    if (settings.enabled !== true || (status && !["ready", "unlocked"].includes(status))) throw enableError;
+  }
+  return cloudflareApi<CloudflareDnsRecord[]>(accessToken, `/zones/${encodeURIComponent(zone.id)}/email/routing/dns`);
+}
+
+function isPostveilWorkerRoute(route: CloudflareEmailRoute | null, workerName: string): boolean {
+  return Boolean(route?.enabled && (route.actions || []).some((action) => action.type === "worker" && (action.value || []).includes(workerName)));
+}
+
+async function cloudflareInboundRoute(accessToken: string, zone: CloudflareZone, domain: string, env: Pick<Env, "CLOUDFLARE_EMAIL_WORKER_NAME">): Promise<CloudflareEmailRoute> {
+  const path = `/zones/${encodeURIComponent(zone.id)}/email/routing/rules/catch_all`;
+  const workerName = cloudflareWorkerName(env);
+  let current: CloudflareEmailRoute | null = null;
+  try { current = await cloudflareApi<CloudflareEmailRoute>(accessToken, path); } catch { current = null; }
+  if (current?.enabled && !isPostveilWorkerRoute(current, workerName)) {
+    throw new Error("The domain already has an active catch-all route. Postveil left it unchanged; choose a dedicated inbound route before continuing.");
+  }
+  return cloudflareApi<CloudflareEmailRoute>(accessToken, path, {
+    method: "PUT",
+    body: JSON.stringify({
+      actions: [{ type: "worker", value: [workerName] }],
+      enabled: true,
+      name: `Postveil inbound · ${domain}`,
+      source: "api",
+    }),
+  });
+}
+
+function domainAutomationStatus(input: { dnsReady: boolean; routeReady: boolean }): "ready" | "dns_pending" | "route_pending" {
+  if (input.dnsReady && input.routeReady) return "ready";
+  if (!input.dnsReady) return "dns_pending";
+  return "route_pending";
+}
+
 async function promoteVerifiedMailboxes(env: Env, userId: string, domain: string, mailReady: boolean): Promise<void> {
   const mailboxes = await d1Request<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(userId)}&select=id,address,settings`).catch(() => []);
   await Promise.all(mailboxes.filter((mailbox) => domainOf(mailbox.address) === domain).map(async (mailbox) => {
@@ -831,12 +1003,43 @@ async function handleCloudflareOAuthCallback(request: Request, env: Env): Promis
   if (!match) return cloudflareErrorRedirect(env, "zone_not_found", pending.domain);
   const now = new Date().toISOString();
   const zone = match.zone;
-  const verificationStatus = match.dnsReady ? "verified" : "dns_pending";
+  const workerName = cloudflareWorkerName(env);
+  let dnsRecords: CloudflareDnsRecord[] = [];
+  let route: CloudflareEmailRoute | null = null;
+  let automationError: string | null = null;
+  try {
+    dnsRecords = await cloudflareEmailRoutingDns(accessToken, zone, pending.domain);
+    route = await cloudflareInboundRoute(accessToken, zone, pending.domain, env);
+  } catch (provisionError) {
+    automationError = provisionError instanceof Error ? provisionError.message : "Cloudflare automation could not finish";
+    // The zone proof remains useful, but mailboxes stay disabled until both
+    // the exact public MX and the Worker route are ready.
+    try { dnsRecords = await cloudflareApi<CloudflareDnsRecord[]>(accessToken, `/zones/${encodeURIComponent(zone.id)}/email/routing/dns`); } catch { /* manual instructions below */ }
+  }
+  const dnsReady = await exactInboundMxReady(env, pending.domain);
+  const routeReady = isPostveilWorkerRoute(route, workerName);
+  const verificationStatus = dnsReady && routeReady ? "verified" : dnsReady ? "route_pending" : "dns_pending";
   await env.DB.prepare(`INSERT INTO pv_domain_verifications(id,user_id,domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at,created_at,updated_at)
     VALUES (?1,?2,?3,'cloudflare',?4,?5,?6,?7,?8,?8,?8,?8)
     ON CONFLICT(user_id,domain) DO UPDATE SET provider='cloudflare',status=excluded.status,zone_id=excluded.zone_id,account_id=excluded.account_id,dns_ready=excluded.dns_ready,verified_at=excluded.verified_at,last_checked_at=excluded.last_checked_at,updated_at=excluded.updated_at`)
-    .bind(crypto.randomUUID(), pending.user_id, pending.domain, verificationStatus, String(zone.id), zone.account?.id ? String(zone.account.id) : null, match.dnsReady ? 1 : 0, now).run();
-  await promoteVerifiedMailboxes(env, pending.user_id, pending.domain, match.dnsReady);
+    .bind(crypto.randomUUID(), pending.user_id, pending.domain, verificationStatus, String(zone.id), zone.account?.id ? String(zone.account.id) : null, dnsReady ? 1 : 0, dnsReady && routeReady ? now : null, now).run();
+  await saveDomainIntegration(env, {
+    userId: pending.user_id,
+    domain: pending.domain,
+    provider: "cloudflare",
+    zoneId: String(zone.id),
+    accountId: zone.account?.id ? String(zone.account.id) : null,
+    ownershipStatus: "verified",
+    dnsStatus: dnsReady ? "ready" : "pending",
+    routeStatus: routeReady ? "ready" : "pending",
+    routeId: route?.id || null,
+    routeTarget: workerName,
+    ownershipToken: null,
+    ownershipRecordName: null,
+    records: dnsRecords.length ? dnsRecords : manualInboundRecords(env, pending.domain),
+    lastError: automationError,
+  });
+  await promoteVerifiedMailboxes(env, pending.user_id, pending.domain, dnsReady && routeReady);
   return new Response(null, { status: 302, headers: { Location: `https://${configuredAppDomain(env)}/?cloudflare=connected&domain=${encodeURIComponent(pending.domain)}`, "Set-Cookie": cloudflareStateCookie("", 0) } });
 }
 
@@ -3945,23 +4148,46 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     return new Response(response.body, { status: response.status, headers });
   }
 
-  if (request.method === "GET" && url.pathname === "/api/domains/cloudflare/status") {
+  if (request.method === "GET" && (url.pathname === "/api/domains/cloudflare/status" || url.pathname === "/api/domains/dns-records")) {
     const domain = normalizeProviderDomain(url.searchParams.get("domain") || "");
     if (!isValidDomain(domain)) return error("A valid domain is required", 400);
     const verification = await env.DB.prepare("SELECT domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 LIMIT 1").bind(user.id, domain).first<CloudflareDomainVerification>();
-    return json({ domain, ownershipVerified: Boolean(verification), verified: verification?.status === "verified" && Number(verification?.dns_ready || 0) === 1, provider: verification?.provider || null, zoneId: verification?.zone_id || null, dnsReady: Number(verification?.dns_ready || 0) === 1, expectedMxTargets: configuredInboundMxTargets(env), verifiedAt: verification?.verified_at || null, lastCheckedAt: verification?.last_checked_at || null });
+    const integration = await getDomainIntegration(env, user.id, domain);
+    const dnsReady = Number(verification?.dns_ready || 0) === 1;
+    const routeReady = !integration || integration.inbound_route_status === "ready";
+    const ownershipVerified = verification?.provider === "cloudflare" ? Boolean(verification) : integration?.ownership_status === "verified";
+    const records = integration?.records_json ? parseJsonArray(integration.records_json) : manualInboundRecords(env, domain, integration?.ownership_token);
+    return json({ domain, ownershipVerified, verified: Boolean(verification) && verification?.status === "verified" && dnsReady && routeReady && ownershipVerified, provider: verification?.provider || integration?.provider || null, zoneId: verification?.zone_id || integration?.zone_id || null, accountId: verification?.account_id || integration?.account_id || null, dnsReady, routeReady, automationStatus: domainAutomationStatus({ dnsReady, routeReady }), inboundRouteStatus: integration?.inbound_route_status || "not_configured", routeId: integration?.route_id || null, routeTarget: integration?.route_target || null, records, manualRecords: manualInboundRecords(env, domain, integration?.ownership_token), ownershipRecordName: integration?.ownership_record_name || `_postveil-verification.${domain}`, lastError: integration?.last_error || null, expectedMxTargets: configuredInboundMxTargets(env), verifiedAt: verification?.verified_at || null, lastCheckedAt: verification?.last_checked_at || null });
   }
 
   if (request.method === "POST" && url.pathname === "/api/domains/verification/refresh") {
-    const domain = normalizeProviderDomain(String((await request.json().catch(() => ({})) as JsonRecord).domain || ""));
+    const body = await request.json().catch(() => ({})) as JsonRecord;
+    const domain = normalizeProviderDomain(String(body.domain || ""));
     if (!isValidDomain(domain)) return error("A valid domain is required", 400);
-    const verification = await env.DB.prepare("SELECT domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 LIMIT 1").bind(user.id, domain).first<CloudflareDomainVerification>();
-    if (!verification) return error("Verify ownership with Cloudflare before checking mail DNS", 409);
+    let verification = await env.DB.prepare("SELECT domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 LIMIT 1").bind(user.id, domain).first<CloudflareDomainVerification>();
+    if (!verification) {
+      const provider = String(body.provider || "manual").trim().slice(0, 40) || "manual";
+      const now = new Date().toISOString();
+      await env.DB.prepare(`INSERT INTO pv_domain_verifications(id,user_id,domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at,created_at,updated_at)
+        VALUES (?1,?2,?3,?4,'dns_pending',NULL,NULL,0,NULL,?5,?5,?5)
+        ON CONFLICT(user_id,domain) DO NOTHING`).bind(crypto.randomUUID(), user.id, domain, provider, now).run();
+      verification = await env.DB.prepare("SELECT domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at FROM pv_domain_verifications WHERE user_id = ?1 AND domain = ?2 LIMIT 1").bind(user.id, domain).first<CloudflareDomainVerification>();
+    }
     const dnsReady = await exactInboundMxReady(env, domain);
+    let integration = await getDomainIntegration(env, user.id, domain);
+    if (!integration && String(verification?.provider || body.provider || "manual") !== "cloudflare") {
+      const token = base64UrlEncode(crypto.getRandomValues(new Uint8Array(18)));
+      await saveDomainIntegration(env, { userId: user.id, domain, provider: String(verification?.provider || body.provider || "manual"), ownershipStatus: "pending", dnsStatus: "pending", routeStatus: "pending", ownershipToken: token, ownershipRecordName: `_postveil-verification.${domain}`, records: manualInboundRecords(env, domain, token) });
+      integration = await getDomainIntegration(env, user.id, domain);
+    }
     const now = new Date().toISOString();
-    await env.DB.prepare("UPDATE pv_domain_verifications SET status = ?1, dns_ready = ?2, last_checked_at = ?3, updated_at = ?3 WHERE user_id = ?4 AND domain = ?5").bind(dnsReady ? "verified" : "dns_pending", dnsReady ? 1 : 0, now, user.id, domain).run();
-    await promoteVerifiedMailboxes(env, user.id, domain, dnsReady);
-    return json({ domain, ownershipVerified: true, verified: dnsReady, dnsReady, expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now });
+    const ownershipReady = verification?.provider === "cloudflare" ? true : await exactDnsTxtReady(domain, integration?.ownership_token || "");
+    const effectiveRouteReady = integration ? integration.inbound_route_status === "ready" : verification?.provider === "cloudflare";
+    const effectiveStatus = domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady });
+    await env.DB.prepare("UPDATE pv_domain_verifications SET status = ?1, dns_ready = ?2, verified_at = ?3, last_checked_at = ?4, updated_at = ?4 WHERE user_id = ?5 AND domain = ?6").bind(ownershipReady && effectiveStatus === "ready" ? "verified" : effectiveStatus, dnsReady ? 1 : 0, ownershipReady && effectiveStatus === "ready" ? now : null, now, user.id, domain).run();
+    await saveDomainIntegration(env, { userId: user.id, domain, provider: String(verification?.provider || body.provider || "manual"), zoneId: verification?.zone_id || null, accountId: verification?.account_id || null, ownershipStatus: ownershipReady ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: integration?.route_id || null, routeTarget: integration?.route_target || null, ownershipToken: integration?.ownership_token || null, ownershipRecordName: integration?.ownership_record_name || `_postveil-verification.${domain}`, records: integration?.records_json ? parseJsonArray(integration.records_json) : manualInboundRecords(env, domain, integration?.ownership_token), lastError: integration?.last_error || null });
+    await promoteVerifiedMailboxes(env, user.id, domain, ownershipReady && dnsReady && effectiveRouteReady);
+    return json({ domain, ownershipVerified: ownershipReady, verified: ownershipReady && dnsReady && effectiveRouteReady, dnsReady, routeReady: effectiveRouteReady, automationStatus: effectiveStatus, inboundRouteStatus: integration?.inbound_route_status || "not_configured", records: integration?.records_json ? parseJsonArray(integration.records_json) : manualInboundRecords(env, domain, integration?.ownership_token), manualRecords: manualInboundRecords(env, domain, integration?.ownership_token), ownershipRecordName: integration?.ownership_record_name || `_postveil-verification.${domain}`, expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now });
   }
 
   const mailbox = await ensureProfileAndMailbox(env, user);
