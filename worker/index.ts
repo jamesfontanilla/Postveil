@@ -4140,7 +4140,10 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     authorize.searchParams.set("response_type", "code");
     authorize.searchParams.set("client_id", env.CLOUDFLARE_OAUTH_CLIENT_ID);
     authorize.searchParams.set("redirect_uri", redirectUri);
-    authorize.searchParams.set("scope", env.CLOUDFLARE_OAUTH_SCOPES || "zone.read dns.read");
+    authorize.searchParams.set(
+        "scope",
+        env.CLOUDFLARE_OAUTH_SCOPES || "zone.read dns.read zone_settings.write email_routing_rules.write",
+      );
     authorize.searchParams.set("state", state);
     const response = json({ authorizationUrl: authorize.toString(), domain });
     const headers = new Headers(response.headers);

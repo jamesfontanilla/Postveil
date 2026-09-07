@@ -78,7 +78,7 @@ AWS_SES_REGION (optional, defaults to us-east-1)
 INBOUND_MX_TARGETS (required for mailbox enablement; comma-separated exact MX targets)
 CLOUDFLARE_OAUTH_CLIENT_ID (optional, one-click domain verification)
 CLOUDFLARE_OAUTH_CLIENT_SECRET (optional, one-click domain verification)
-CLOUDFLARE_OAUTH_SCOPES (optional, defaults to zone.read dns.read)
+CLOUDFLARE_OAUTH_SCOPES (optional, defaults to zone.read dns.read zone_settings.write email_routing_rules.write)
 MAILGUN_API_KEY (optional)
 MAILGUN_DOMAIN (optional)
 MAILGUN_BASE_URL (optional)
@@ -107,11 +107,11 @@ CONFIDENTIAL_ENCRYPTION_KEY (required for confidential mode)
 ### Customer-domain DNS and inbound routing
 
 Create a Cloudflare OAuth client with the authorization-code flow, the redirect
-URL `https://YOUR_APP_DOMAIN/api/cloudflare/oauth/callback`, and the scopes
-needed by the deployment. Read-only verification uses `zone.read dns.read`.
-Automatic setup additionally needs the OAuth permissions corresponding to Zone
-Settings Write and Email Routing Rules Edit; select those in the Cloudflare
-OAuth client and set the matching scope IDs in `CLOUDFLARE_OAUTH_SCOPES`.
+URL `https://YOUR_APP_DOMAIN/api/cloudflare/oauth/callback`, and the four
+scopes needed by the deployment: `zone.read`, `dns.read`,
+`zone_settings.write`, and `email_routing_rules.write`. The first two read
+the zone and its public records; the latter two enable Email Routing DNS and
+the catch-all Worker route.
 Configure the token endpoint authentication method as `client_secret_post`,
 then store the client ID as a Worker variable and the client secret with
 `wrangler secret put CLOUDFLARE_OAUTH_CLIENT_SECRET`. The access token is used
