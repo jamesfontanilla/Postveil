@@ -1070,42 +1070,31 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
 }
 
 function PublicHome({ onSignIn, onSignUp }: { onSignIn: () => void; onSignUp: () => void }) {
-  const [tilt, setTilt] = useState({ x: 0, y: 0 });
-  function moveScene(event: ReactPointerEvent<HTMLDivElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - bounds.left) / bounds.width - .5) * 2;
-    const y = ((event.clientY - bounds.top) / bounds.height - .5) * 2;
-    setTilt({ x: Math.max(-1, Math.min(1, y)), y: Math.max(-1, Math.min(1, x)) });
-  }
   return (
-    <main className="public-home">
-      <nav className="home-nav" aria-label="Postveil navigation">
+    <main className="public-home landing-home">
+      <nav className="home-nav landing-nav" aria-label="Postveil navigation">
         <a className="home-brand" href="#top" aria-label="Postveil home"><span className="home-brand-mark">P</span><span><strong>Postveil</strong><small>private mail</small></span></a>
-        <div className="home-nav-links"><a href="#how-it-works">How it works</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><button type="button" className="home-signin" onClick={onSignIn}>Sign in</button></div>
+        <div className="home-nav-links"><a href="#product">Product</a><a href="#how-it-works">How it works</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><button type="button" className="home-signin" onClick={onSignIn}>Sign in</button><button type="button" className="landing-nav-cta" onClick={onSignUp}>Create account</button></div>
       </nav>
-      <section className="home-hero" id="top">
-        <div className="home-copy">
-          <p className="home-kicker"><span className="home-kicker-dot" /> custom-domain mail, made quiet</p>
-          <h1>Your domain.<br /><em>Your room.</em></h1>
-          <p className="home-lede">A private mailbox for the address you already own—without making you learn the deployment stack behind it.</p>
-          <div className="home-actions"><button type="button" className="home-primary" onClick={onSignUp}>Create your mailbox <ArrowRight size={17} /></button><button type="button" className="home-secondary" onClick={onSignIn}>I already have an account</button></div>
-          <p className="home-note"><ShieldCheck size={14} /> Provider credentials stay behind Postveil. Your inbox stays yours.</p>
+      <section className="landing-hero" id="top">
+        <div className="landing-hero-copy">
+          <p className="landing-eyebrow"><ShieldCheck size={15} aria-hidden="true" /> Private email for the domain you own</p>
+          <h1>A calmer inbox for your <em>own domain.</em></h1>
+          <p className="landing-lede">Postveil turns a domain you already have into a clear, capable mailbox—without sending you through a maze of provider consoles.</p>
+          <div className="landing-actions"><button type="button" className="landing-primary" onClick={onSignUp}>Get started free <ArrowRight size={17} /></button><button type="button" className="landing-secondary" onClick={onSignIn}>Sign in</button></div>
+          <p className="landing-microcopy"><Check size={14} /> Guided domain setup · privacy-first defaults · built for desktop and mobile</p>
         </div>
-        <div className="home-scene-wrap" onPointerMove={moveScene} onPointerLeave={() => setTilt({ x: 0, y: 0 })} aria-label="A 3D illustration of a private mailbox" role="img">
-          <div className="home-scene" style={{ "--scene-x": `${tilt.x * 5}deg`, "--scene-y": `${tilt.y * 7}deg` } as CSSProperties}>
-            <div className="scene-orbit orbit-one" /><div className="scene-orbit orbit-two" />
-            <div className="scene-letter scene-letter-back"><span>MX</span><strong>route</strong><small>incoming</small></div>
-            <div className="scene-letter scene-letter-front"><span>DKIM</span><strong>signed</strong><small>outgoing</small></div>
-            <div className="scene-mailbox">
-              <div className="mailbox-shadow" />
-              <div className="mailbox-body"><div className="mailbox-side" /><div className="mailbox-door"><span className="mailbox-slot" /><span className="mailbox-badge">P</span></div><div className="mailbox-flag"><span /></div></div>
-              <div className="mailbox-envelope"><div /><span>hello@yourdomain.com</span></div>
-            </div>
-            <div className="scene-label"><span className="scene-label-dot" /> private by default <strong>01</strong></div>
+        <div className="landing-product-shot" id="product" aria-label="Postveil inbox preview">
+          <div className="mock-window-bar"><span className="mock-window-brand"><span className="mock-window-mark">P</span> Postveil</span><span className="mock-window-status"><span /> private mailbox</span></div>
+          <div className="mock-mail-app">
+            <aside className="mock-sidebar"><button type="button" className="mock-compose">Compose <PenLine size={13} /></button><p className="mock-section-label">Mailbox</p><div className="mock-folder active"><Inbox size={15} /> Inbox <b>4</b></div><div className="mock-folder"><Star size={15} /> Starred</div><div className="mock-folder"><Send size={15} /> Sent</div><div className="mock-folder"><Archive size={15} /> Archive</div><p className="mock-section-label">Your domain</p><div className="mock-domain"><span>hello</span>@yourdomain.com</div></aside>
+            <section className="mock-inbox"><div className="mock-inbox-head"><div><span>Mailbox</span><strong>Inbox</strong></div><div className="mock-search"><Search size={14} /> Search mail</div></div><div className="mock-tabs"><span className="selected">Focused</span><span>Other</span><span className="mock-count">4 unread</span></div><div className="mock-message unread"><span className="mock-avatar">A</span><div><b>Alex Morgan</b><strong>Project notes for Thursday</strong><p>Here are the details we discussed...</p></div><time>9:42</time></div><div className="mock-message"><span className="mock-avatar olive">N</span><div><b>Northline Studio</b><strong>Welcome to the team</strong><p>Your workspace is ready to review.</p></div><time>Yesterday</time></div><div className="mock-message"><span className="mock-avatar rose">J</span><div><b>James Fontanilla</b><strong>Re: domain setup</strong><p>Everything is connected and verified.</p></div><time>Aug 30</time></div></section>
           </div>
         </div>
       </section>
-      <section className="home-proof" id="how-it-works"><div><span className="home-proof-index">01</span><strong>Bring the name</strong><p>Enter a domain you control. Postveil guides the DNS handoff in plain language.</p></div><div><span className="home-proof-index">02</span><strong>Make the address</strong><p>Create hello@, you@, or a shared address without opening an AWS console.</p></div><div id="privacy"><span className="home-proof-index">03</span><strong>Keep the room yours</strong><p>Provider keys stay server-side, and your mailbox is separated from the machinery that delivers it.</p></div></section>
+      <section className="landing-trust" aria-label="Postveil highlights"><span><ShieldCheck size={16} /> Privacy-first by default</span><span><Globe2 size={16} /> Bring any domain you control</span><span><Mail size={16} /> One familiar inbox</span></section>
+      <section className="landing-features" id="how-it-works"><div className="landing-section-heading"><p className="landing-eyebrow">A better starting point</p><h2>Everything you need to feel at home in your inbox.</h2><p>Postveil keeps the familiar parts of email and makes the domain setup feel human.</p></div><div className="landing-feature-grid"><article><span className="landing-feature-number">01</span><h3>Bring the name</h3><p>Connect a domain you already own with a guided DNS checklist in plain language.</p><a href="#top">See how it works <ArrowRight size={14} /></a></article><article><span className="landing-feature-number">02</span><h3>Make the address</h3><p>Create hello@, you@, or a shared address without opening a deployment console.</p><a href="#top">Create your mailbox <ArrowRight size={14} /></a></article><article id="privacy"><span className="landing-feature-number">03</span><h3>Keep the room yours</h3><p>Provider credentials stay behind Postveil, with clear privacy controls around your mail.</p><a href="/privacy">Read our privacy promise <ArrowRight size={14} /></a></article></div></section>
+      <section className="landing-privacy"><div><p className="landing-eyebrow">A private place for your mail</p><h2>Useful like Gmail. Clear like Outlook. Yours by design.</h2></div><p>Search, organize, compose, and read without learning a new mental model. Postveil is deliberately familiar where it should be—and deliberate about your domain, data, and control where it matters.</p></section>
       <footer className="home-footer"><span>Postveil / private mail for the domains you own · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></span><button type="button" onClick={onSignUp}>Start with your domain <ArrowRight size={14} /></button></footer>
     </main>
   );
