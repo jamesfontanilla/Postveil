@@ -100,6 +100,7 @@ SES_CONFIGURATION_SET_NAME (optional; attaches SES sends to the event configurat
 SMTP_WEBHOOK_SECRET (optional)
 CONFIDENTIAL_LINK_SECRET (required for confidential mode)
 CONFIDENTIAL_ENCRYPTION_KEY (required for confidential mode)
+MFA_ENCRYPTION_KEY (required for D1-backed TOTP; encrypts authenticator secrets)
 ```
 
 `APP_DOMAIN`, `DEFAULT_FROM_EMAIL`, and `SYSTEM_FROM_EMAIL` must use domains that are verified with your email provider. `SYSTEM_FROM_EMAIL` is the sender used for new-account email verification. `ALLOWED_SENDER_DOMAINS` may contain additional verified domains separated by commas. The default mailbox is `DEFAULT_FROM_EMAIL`, or `postmaster@APP_DOMAIN` when no default is set.
@@ -129,6 +130,16 @@ Cloudflare Worker route in a registrar-only DNS zone.
 SPF/DKIM/DMARC for outbound sending remains provider-specific and must not be
 solved by blindly adding a second SPF record. Configure the sending provider's
 identity records separately, then keep the inbound MX and route checks here.
+
+### Administrator MFA
+
+Set `MFA_ENCRYPTION_KEY` as a Worker secret before enabling administrator access.
+Postveil encrypts TOTP secrets with AES-GCM, binds verification challenges to
+the current session, limits each challenge to five attempts, and upgrades the
+session to `aal2` after successful verification. Workspace owners and
+administrators are required to enroll an authenticator before using workspace
+administration. General-user TOTP is available from Security & access but is
+not mandatory by default. Passkeys remain a follow-up WebAuthn integration.
 
 Configure each provider webhook to send `POST` requests with the deployment's provider secret in the `x-webhook-secret` header. Query-string webhook tokens are deliberately not accepted. Amazon SES may also send native Amazon SNS `Notification` messages: the Worker validates the SNS signing certificate and signature, optionally checks `SES_SNS_TOPIC_ARN`, handles subscription confirmation, and then applies the same idempotent delivery processing. Provider-specific webhook payloads are normalized for delivery, bounce, complaint, open, click, and receipt events; the provider must still be configured to emit those events.
 
@@ -195,9 +206,11 @@ The application implements the mail workflow, local spam scoring, static
 attachment safety checks, custom organization, scheduled send, snooze, PWA
 shell, polling, D1-backed authentication, email verification, account-level
 sign-in lockouts, mailbox administration,
-delegated mailboxes, and organization group-address expansion. Passkeys use
-and TOTP require a separately implemented D1/WebAuthn service before they can
-be enabled in this configuration. Outbound provider credentials and inbound
+delegated mailboxes, and organization group-address expansion. Administrator
+TOTP is backed by encrypted D1 factors and session-bound challenges, and
+administrator access is gated until an authenticator is verified. General-user
+TOTP is available from Security & access; passkeys still require a separately
+implemented WebAuthn credential service. Outbound provider credentials and inbound
 webhook signing secrets are intentionally Worker-only. The HTTPS generic SMTP
 adapter requires a relay because Cloudflare Workers do not provide arbitrary
 outbound TCP sockets. Provider-specific

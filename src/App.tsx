@@ -1467,6 +1467,53 @@ type MfaFactor = { id: string; friendly_name?: string; factor_type: "totp" | "ph
 type RecoveryMethod = { id: string; email_masked: string; verified_at: string | null; pending: boolean; last_sent_at?: string | null };
 type Passkey = { id: string; friendly_name?: string; created_at: string; last_used_at?: string | null };
 
+function MfaSetupRequiredScreen({ onVerified }: { onVerified: () => void }) {
+  const [setup, setSetup] = useState<{ id: string; qrCode: string; secret: string; uri: string } | null>(null);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function begin() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await requireSupabase().auth.mfa.enroll({ factorType: "totp", friendlyName: "Postveil authenticator" });
+      if (result.error) throw result.error;
+      setSetup({ id: result.data.id, qrCode: result.data.totp.qr_code, secret: result.data.totp.secret, uri: result.data.totp.uri });
+    } catch (setupError) {
+      setError(setupError instanceof Error ? setupError.message : "Administrator MFA setup is unavailable");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => { void begin(); }, []);
+
+  async function verify(event: FormEvent) {
+    event.preventDefault();
+    if (!setup || code.length !== 6) { setError("Enter the six-digit code from your authenticator app."); return; }
+    setBusy(true);
+    setError("");
+    try {
+      const challenge = await requireSupabase().auth.mfa.challenge({ factorId: setup.id });
+      if (challenge.error) throw challenge.error;
+      const result = await requireSupabase().auth.mfa.verify({ factorId: setup.id, challengeId: challenge.data.id, code });
+      if (result.error) throw result.error;
+      const refreshed = await requireSupabase().auth.refreshSession();
+      if (refreshed.error) throw refreshed.error;
+      onVerified();
+    } catch (verifyError) {
+      setError(verifyError instanceof Error ? verifyError.message : "That authenticator code was not accepted");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="auth-shell"><section className="auth-card"><div className="brand-mark">P</div><p className="eyebrow">ADMINISTRATOR MFA</p><h1>Protect workspace administration.</h1><p className="auth-copy">Administrator access requires a verified authenticator app. Your mailbox stays available, but workspace changes remain locked until this one-time setup is complete.</p>{setup ? <form onSubmit={verify} className="auth-form mfa-required-form"><div className="mfa-setup-key"><strong>1. Add Postveil to your authenticator</strong><small>Scan the QR code if your authenticator supports it, or enter the setup key manually.</small>{setup.qrCode && qrImageSource(setup.qrCode) && <img className="mfa-qr" src={qrImageSource(setup.qrCode)} alt="QR code for administrator MFA" />}{!setup.qrCode && <div className="mfa-qr-fallback">Use the setup key below. It is shown only during this setup.</div>}<code>{setup.secret}</code><details><summary>Show authenticator URI</summary><code>{setup.uri}</code></details></div><label>2. Enter the six-digit code<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" disabled={busy || code.length !== 6}>{busy ? "Checking…" : "Verify and protect admin access"}</button></form> : <><div className="form-error" role="alert">{error || "Preparing your secure setup…"}</div><button className="secondary-button" onClick={() => void begin()} disabled={busy}>{busy ? "Preparing…" : "Try again"}</button></>}<p className="auth-microcopy"><ShieldCheck size={14} aria-hidden="true" /> TOTP secrets are encrypted before storage and are never sent to a third party.</p></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> workspace protection</div><p className="aside-quote">Your password is only the first lock.</p><p className="aside-meta">Keep your authenticator available. Passkeys can be added later when the WebAuthn credential service is enabled.</p></aside></main>
+  );
+}
+
 function MfaChallengeScreen({ onVerified }: { onVerified: () => void }) {
   const [factors, setFactors] = useState<MfaFactor[]>([]);
   const [factorId, setFactorId] = useState("");
@@ -3401,7 +3448,7 @@ function SettingsPanel({
               <div className="setting-card-head">
                 <div>
                   <h3>Two-step verification</h3>
-                  <p>Use an authenticator app after your password. Postveil will require it at every new sign-in.</p>
+                  <p>Use an authenticator app after your password. Workspace administrators must verify it at every new sign-in.</p>
                 </div>
                 <span className={`security-status ${mfaFactors.length ? "enabled" : mfaPendingFactor ? "pending" : ""}`}>{mfaFactors.length ? "On" : mfaPendingFactor ? "Setup paused" : "Off"}</span>
               </div>
@@ -3426,8 +3473,8 @@ function SettingsPanel({
                 <span className="security-status enabled">{passkeys.length} saved</span>
               </div>
               {passkeys.map((passkey) => <div className="settings-item security-factor" key={passkey.id}><div><strong>{passkey.friendly_name || "Passkey"}</strong><small>Added {new Date(passkey.created_at).toLocaleDateString()}{passkey.last_used_at ? ` · last used ${new Date(passkey.last_used_at).toLocaleDateString()}` : ""}</small></div><div className="security-actions"><button className="text-button" onClick={() => void renamePasskey(passkey)} disabled={passkeyBusy}>Rename</button><button className="text-button danger-text-button" onClick={() => void removePasskey(passkey)} disabled={passkeyBusy}>Remove</button></div></div>)}
-              <div className="security-actions"><button className="secondary-button" onClick={() => void registerPasskey()} disabled={passkeyBusy}><ShieldAlert size={15} /> {passkeyBusy ? "Working…" : "Add passkey"}</button><button className="text-button" onClick={() => void revokeOtherSessions()} disabled={securityBusy}>Sign out other devices</button></div>
-              <small className="field-help">Passkeys require a WebAuthn credential service and the production relying-party domain to be configured.</small>
+              <div className="security-actions"><button className="secondary-button" disabled title="Passkey support will be enabled after the WebAuthn credential service is added"><ShieldAlert size={15} /> Passkeys coming soon</button><button className="text-button" onClick={() => void revokeOtherSessions()} disabled={securityBusy}>Sign out other devices</button></div>
+              <small className="field-help">Passkeys require a WebAuthn credential service and production relying-party configuration. TOTP authenticator apps are available now.</small>
             </div>
             <div className="setting-card">
               <div className="setting-card-head"><div><h3>Recovery codes</h3><p>One-time backup codes can help you regain access if your authenticator is unavailable.</p></div><span className="rule-count">{recoveryCodeCount}/10</span></div>
@@ -6328,6 +6375,7 @@ function AppContent() {
   const [recovering, setRecovering] = useState(false);
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaSetupRequired, setMfaSetupRequired] = useState(false);
   useEffect(() => {
     if (!supabase) {
       setReady(true);
@@ -6365,6 +6413,7 @@ function AppContent() {
         if (event === "SIGNED_OUT") {
           setRecovering(false);
           setMfaRequired(false);
+          setMfaSetupRequired(false);
           setShowPublicHome(true);
         }
         setSession(nextSession);
@@ -6375,11 +6424,15 @@ function AppContent() {
   useEffect(() => {
     if (!session || recovering || !supabase) {
       setMfaRequired(false);
+      setMfaSetupRequired(false);
       return;
     }
     let active = true;
     void supabase.auth.mfa.getAuthenticatorAssuranceLevel().then(({ data, error }) => {
-      if (active && !error) setMfaRequired(data.currentLevel === "aal1" && data.nextLevel === "aal2");
+      if (active && !error) {
+        setMfaRequired(data.currentLevel === "aal1" && data.nextLevel === "aal2");
+        setMfaSetupRequired(data.setupRequired === true);
+      }
     });
     return () => { active = false; };
   }, [session, recovering]);
@@ -6421,6 +6474,7 @@ function AppContent() {
   if (!session) return showPublicHome
     ? <PublicHome onSignIn={() => { setAuthMode("signin"); setShowPublicHome(false); }} onSignUp={() => { setAuthMode("signup"); setShowPublicHome(false); }} />
     : <AuthScreen initialMode={authMode} initialNotice={emailVerificationNotice} onBack={() => setShowPublicHome(true)} />;
+  if (mfaSetupRequired) return <MfaSetupRequiredScreen onVerified={() => { setMfaSetupRequired(false); setMfaRequired(false); }} />;
   if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
   if (!onboardingChecked) return <div className="loading-screen"><div className="brand-mark">P</div><p>Preparing your private desk…</p></div>;
   if (onboardingRequired) return <OnboardingWizard session={session} onComplete={() => setOnboardingRequired(false)} />;

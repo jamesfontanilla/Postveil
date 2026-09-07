@@ -15,6 +15,7 @@ export type D1Session = {
   refresh_token: string;
   token_type: "bearer";
   expires_in: number;
+  aal?: "aal1" | "aal2";
   user: D1User;
 };
 
@@ -324,7 +325,21 @@ export async function createD1Session(env: D1Env, user: D1User): Promise<D1Sessi
   const expiresAt = new Date(Date.now() + SESSION_SECONDS * 1000).toISOString();
   await env.DB.prepare("INSERT INTO pv_sessions(token_hash,user_id,created_at,expires_at,aal,revoked) VALUES (?1,?2,?3,?4,'aal1',0)")
     .bind(await tokenHash(token), user.id, now(), expiresAt).run();
-  return { access_token: token, refresh_token: token, token_type: "bearer", expires_in: SESSION_SECONDS, user };
+  return { access_token: token, refresh_token: token, token_type: "bearer", expires_in: SESSION_SECONDS, aal: "aal1", user };
+}
+
+export async function getD1SessionAal(env: D1Env, token: string): Promise<"aal1" | "aal2" | null> {
+  if (!token) return null;
+  const row = await env.DB.prepare("SELECT aal FROM pv_sessions WHERE token_hash = ?1 AND revoked = 0 AND expires_at > ?2 LIMIT 1")
+    .bind(await tokenHash(token), now()).first<{ aal?: string }>();
+  return row?.aal === "aal2" ? "aal2" : row ? "aal1" : null;
+}
+
+export async function upgradeD1SessionAal(env: D1Env, token: string): Promise<boolean> {
+  if (!token) return false;
+  const result = await env.DB.prepare("UPDATE pv_sessions SET aal = 'aal2' WHERE token_hash = ?1 AND revoked = 0 AND expires_at > ?2")
+    .bind(await tokenHash(token), now()).run();
+  return Number(result.meta?.changes || 0) === 1;
 }
 
 export async function userFromToken(env: D1Env, token: string): Promise<D1User | null> {

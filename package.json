@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "npm run test:security && npm run test:phase1 && npm run test:phase2 && npm run test:phase3 && npm run test:phase4 && npm run test:spam && npm run test:delivery && npm run test:input && npm run test:renderer",
+    "test": "npm run test:security && npm run test:phase1 && npm run test:phase2 && npm run test:phase3 && npm run test:phase4 && npm run test:spam && npm run test:delivery && npm run test:input && npm run test:renderer && npm run test:mfa",
     "test:security": "node --experimental-strip-types --test tests/account-security.test.ts",
     "test:phase1": "node --experimental-strip-types --test tests/phase1-search.test.ts",
     "test:phase2": "node --experimental-strip-types --test tests/phase2-rules-work.test.ts",
@@ -19,6 +19,7 @@
     "test:delivery": "node --experimental-strip-types --test tests/delivery.test.ts",
     "test:input": "node --experimental-strip-types --test tests/input-security.test.ts",
     "test:renderer": "node --experimental-strip-types --test tests/email-renderer.test.ts",
+    "test:mfa": "node --experimental-strip-types --test tests/mfa.test.ts",
     "test:prod": "node scripts/prod-smoke.mjs"
   },
   "dependencies": {

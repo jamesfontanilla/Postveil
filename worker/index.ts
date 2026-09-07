@@ -12,12 +12,14 @@ import {
   deleteD1User,
   d1Probe,
   d1Request,
+  getD1SessionAal,
   getUserByEmail,
   listD1Users,
   revokeD1Session,
   revokeD1UserSessions,
   recordD1AuthEvent,
   recordD1SignInFailure,
+  upgradeD1SessionAal,
   updateD1User,
   updateD1Password,
   userFromToken,
@@ -85,6 +87,7 @@ import {
   type DeliveryInput,
   type ProviderName,
 } from "./delivery.ts";
+import { constantTimeEqual as mfaConstantTimeEqual, decryptTotpSecret, encryptTotpSecret, generateTotpSecret, totpCode, totpUri } from "./mfa.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -140,6 +143,7 @@ interface Env {
   TURNSTILE_SECRET_KEY?: string;
   TURNSTILE_SITE_KEY?: string;
   ATTACHMENTS_ENABLED?: string;
+  MFA_ENCRYPTION_KEY?: string;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -551,11 +555,47 @@ function maxRetryAttempts(env: Env): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(10, value)) : 5;
 }
 
-async function verifiedFactorCount(env: Env, userId: string, token: string): Promise<number> {
-  void env;
-  void userId;
-  void token;
-  return 0;
+type MfaProfile = {
+  administrator: boolean;
+  required: boolean;
+  factors: Array<{ id: string; friendly_name: string; factor_type: "totp"; status: "verified" | "unverified"; created_at: string; last_used_at: string | null }>;
+  currentLevel: "aal1" | "aal2";
+  nextLevel: "aal1" | "aal2";
+};
+
+async function mfaFactorRows(env: Env, userId: string): Promise<MfaProfile["factors"]> {
+  const result = await env.DB.prepare(`SELECT id, friendly_name, factor_type, status, created_at, last_used_at
+    FROM pv_mfa_factors WHERE user_id = ?1 AND factor_type = 'totp' ORDER BY created_at DESC`).bind(userId).all<Record<string, unknown>>();
+  return (result.results || []).map((row) => ({
+    id: String(row.id),
+    friendly_name: String(row.friendly_name || "Authenticator app"),
+    factor_type: "totp" as const,
+    status: String(row.status) === "verified" ? "verified" as const : "unverified" as const,
+    created_at: String(row.created_at),
+    last_used_at: row.last_used_at ? String(row.last_used_at) : null,
+  }));
+}
+
+async function mfaProfile(env: Env, user: User, token: string, bootstrapWorkspace = false): Promise<MfaProfile> {
+  if (bootstrapWorkspace) await ensureOrganization(env, user).catch(() => undefined);
+  const memberships = await dbRequest<OrganizationMember[]>(env, `organization_members?user_id=eq.${encodeURIComponent(user.id)}&status=eq.active&limit=100`).catch(() => []);
+  let administrator = memberships.some((member) => member.role === "owner" || member.role === "admin");
+  let required = administrator || memberships.some((member) => member.require_mfa === true);
+  if (!memberships.length) {
+    const owned = await dbRequest<Array<{ id: string }>>(env, `organizations?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    administrator = owned.length > 0;
+    required = administrator;
+  }
+  const factors = await mfaFactorRows(env, user.id);
+  const verified = factors.some((factor) => factor.status === "verified");
+  const currentLevel = await getD1SessionAal(env, token) === "aal2" ? "aal2" : "aal1";
+  return { administrator, required, factors, currentLevel, nextLevel: verified && required ? "aal2" : "aal1" };
+}
+
+async function verifiedFactorCount(env: Env, userId: string, _token: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM pv_mfa_factors WHERE user_id = ?1 AND factor_type = 'totp' AND status = 'verified'")
+    .bind(userId).first<{ count?: number }>();
+  return Number(row?.count || 0);
 }
 
 async function probeDatabase(env: Env): Promise<{ ok: boolean; status: number; detail?: string }> {
@@ -568,12 +608,13 @@ async function getUser(request: Request, env: Env): Promise<User | null> {
   const token = authorization.slice(7).trim();
   const user = await userFromToken(env, token);
   if (!user) return null;
-  const mfaRequired = (await verifiedFactorCount(env, user.id, token)) > 0;
+  const mfa = await mfaProfile(env, user, token);
+  const mfaRequired = mfa.required && mfa.factors.some((factor) => factor.status === "verified") && mfa.currentLevel !== "aal2";
   return { id: user.id, email: user.email, user_metadata: user.user_metadata, accessToken: token, mfaRequired } as User;
 }
 
-function d1SessionPayload(user: D1User, token: string): D1Session {
-  return { access_token: token, refresh_token: token, token_type: "bearer", expires_in: 60 * 60 * 24 * 30, user };
+function d1SessionPayload(user: D1User, token: string, aal: "aal1" | "aal2" = "aal1"): D1Session {
+  return { access_token: token, refresh_token: token, token_type: "bearer", expires_in: 60 * 60 * 24 * 30, aal, user };
 }
 
 function requestCookie(request: Request, name: string): string {
@@ -1051,6 +1092,8 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
   };
   const googleResponse = await handleGoogleAuth(request, env);
   if (googleResponse) return googleResponse;
+  const mfaResponse = await handleD1Mfa(request, env);
+  if (mfaResponse) return mfaResponse;
   if (url.pathname === "/api/auth/signup" && request.method === "POST") {
     try {
       const body = await request.json() as JsonRecord;
@@ -1134,7 +1177,8 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
     const authorization = request.headers.get("authorization") || "";
     const token = authorization.replace(/^Bearer\s+/i, "").trim();
     const user = token ? await userFromToken(env, token) : null;
-    return json({ data: { session: user ? d1SessionPayload(user, token) : null }, error: null });
+    const aal = user ? await getD1SessionAal(env, token) || "aal1" : "aal1";
+    return json({ data: { session: user ? d1SessionPayload(user, token, aal) : null }, error: null });
   }
   if (url.pathname === "/api/auth/signout" && request.method === "POST") {
     const authorization = request.headers.get("authorization") || "";
@@ -1445,9 +1489,10 @@ async function organizationAdmin(env: Env, user: User): Promise<{ organization: 
 
 async function organizationMfaBlocked(env: Env, user: User, organization: Organization): Promise<boolean> {
   const member = await organizationMember(env, organization.id, user.id);
-  const required = Boolean(member?.require_mfa || organizationSettings(organization.settings).require_mfa === true);
+  const required = Boolean(member && (member.role === "owner" || member.role === "admin" || member.require_mfa || organizationSettings(organization.settings).require_mfa === true));
   if (!required) return false;
-  return (await verifiedFactorCount(env, user.id, user.accessToken || "")) === 0;
+  const profile = await mfaProfile(env, user, user.accessToken || "");
+  return !profile.factors.some((factor) => factor.status === "verified") || profile.currentLevel !== "aal2";
 }
 
 async function getMailboxAdminSettings(env: Env, mailbox: Mailbox, organizationId?: string): Promise<MailboxAdminSettings | null> {
@@ -1691,10 +1736,110 @@ async function createManagedUser(env: Env, organization: Organization, actor: Or
   return { user_id: createdUser.id, email, display_name: displayName, role, status: "active", invited: true };
 }
 
+function mfaStatusPayload(profile: MfaProfile): JsonRecord {
+  const verified = profile.factors.some((factor) => factor.status === "verified");
+  return {
+    administrator: profile.administrator,
+    required: profile.required,
+    setupRequired: profile.required && !verified,
+    challengeRequired: profile.required && verified && profile.currentLevel !== "aal2",
+    currentLevel: profile.currentLevel,
+    nextLevel: profile.nextLevel,
+    factors: profile.factors,
+  };
+}
+
+function mfaToken(request: Request): string {
+  return (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+}
+
+async function handleD1Mfa(request: Request, env: Env): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (!url.pathname.startsWith("/api/auth/mfa/")) return null;
+  const user = await getUser(request, env);
+  if (!user) return error("Sign in required", 401);
+  const token = mfaToken(request);
+
+  if (url.pathname === "/api/auth/mfa/status") {
+    if (request.method !== "GET") return error("Method not allowed", 405);
+    const profile = await mfaProfile(env, user, token, true);
+    return json(mfaStatusPayload(profile));
+  }
+
+  if (url.pathname === "/api/auth/mfa/enroll") {
+    if (request.method !== "POST") return error("Method not allowed", 405);
+    if (!env.MFA_ENCRYPTION_KEY) return error("Administrator MFA is not configured yet", 503);
+    const body = await request.json() as JsonRecord;
+    const secret = generateTotpSecret();
+    const encrypted = await encryptTotpSecret(env.MFA_ENCRYPTION_KEY, secret);
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const friendlyName = String(body.friendlyName || "Postveil authenticator").trim().slice(0, 120) || "Postveil authenticator";
+    await env.DB.prepare("DELETE FROM pv_mfa_factors WHERE user_id = ?1 AND status = 'unverified'").bind(user.id).run();
+    await env.DB.prepare(`INSERT INTO pv_mfa_factors(id,user_id,factor_type,friendly_name,secret_ciphertext,secret_iv,status,created_at,verified_at,last_used_at,updated_at)
+      VALUES (?1,?2,'totp',?3,?4,?5,'unverified',?6,NULL,NULL,?6)`).bind(id, user.id, friendlyName, encrypted.ciphertext, encrypted.iv, createdAt).run();
+    return json({ id, type: "totp", totp: { qr_code: "", secret, uri: totpUri(secret, user.email || user.id) } });
+  }
+
+  const factorMatch = url.pathname.match(/^\/api\/auth\/mfa\/factors\/([^/]+)$/);
+  if (factorMatch && request.method === "DELETE") {
+    const factorId = decodeURIComponent(factorMatch[1]).slice(0, 128);
+    const result = await env.DB.prepare("DELETE FROM pv_mfa_factors WHERE id = ?1 AND user_id = ?2").bind(factorId, user.id).run();
+    if (Number(result.meta?.changes || 0) !== 1) return error("Authenticator not found", 404);
+    await env.DB.prepare("DELETE FROM pv_mfa_challenges WHERE factor_id = ?1 OR user_id = ?2").bind(factorId, user.id).run();
+    return json({});
+  }
+
+  if (url.pathname === "/api/auth/mfa/challenge" && request.method === "POST") {
+    const body = await request.json() as JsonRecord;
+    const factorId = String(body.factorId || "").slice(0, 128);
+    const factor = await env.DB.prepare("SELECT id FROM pv_mfa_factors WHERE id = ?1 AND user_id = ?2 AND factor_type = 'totp' AND status IN ('unverified','verified') LIMIT 1")
+      .bind(factorId, user.id).first<{ id: string }>();
+    if (!factor) return error("Authenticator not found", 404);
+    await env.DB.prepare("DELETE FROM pv_mfa_challenges WHERE user_id = ?1 AND (used_at IS NOT NULL OR expires_at <= ?2)").bind(user.id, new Date().toISOString()).run();
+    const challengeId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const sessionHash = await sha256Hex(new TextEncoder().encode(token));
+    await env.DB.prepare("INSERT INTO pv_mfa_challenges(id,factor_id,user_id,session_token_hash,expires_at,attempts,used_at,created_at) VALUES (?1,?2,?3,?4,?5,0,NULL,?6)")
+      .bind(challengeId, factor.id, user.id, sessionHash, expiresAt, new Date().toISOString()).run();
+    return json({ id: challengeId });
+  }
+
+  if (url.pathname === "/api/auth/mfa/verify" && request.method === "POST") {
+    const body = await request.json() as JsonRecord;
+    const factorId = String(body.factorId || "").slice(0, 128);
+    const challengeId = String(body.challengeId || "").slice(0, 128);
+    const code = String(body.code || "").replace(/\D/g, "").slice(0, 6);
+    if (!/^\d{6}$/.test(code)) return error("Enter a six-digit authenticator code", 400);
+    const sessionHash = await sha256Hex(new TextEncoder().encode(token));
+    const challenge = await env.DB.prepare(`SELECT c.id, c.factor_id, c.attempts, c.expires_at, f.secret_ciphertext, f.secret_iv
+      FROM pv_mfa_challenges c JOIN pv_mfa_factors f ON f.id = c.factor_id
+      WHERE c.id = ?1 AND c.factor_id = ?2 AND c.user_id = ?3 AND c.session_token_hash = ?4 AND c.used_at IS NULL
+        AND c.expires_at > ?5 AND c.attempts < 5 AND f.user_id = ?3 LIMIT 1`).bind(challengeId, factorId, user.id, sessionHash, new Date().toISOString()).first<{ id: string; factor_id: string; attempts: number; expires_at: string; secret_ciphertext: string; secret_iv: string }>();
+    if (!challenge) return error("That verification attempt is invalid or expired", 401);
+    const secret = await decryptTotpSecret(env.MFA_ENCRYPTION_KEY || "", challenge.secret_iv, challenge.secret_ciphertext);
+    const currentTime = Date.now();
+    const valid = await Promise.all([-1, 0, 1].map((offset) => totpCode(secret, currentTime + offset * 30_000))).then((codes) => codes.some((candidate) => mfaConstantTimeEqual(candidate, code)));
+    if (!valid) {
+      await env.DB.prepare("UPDATE pv_mfa_challenges SET attempts = attempts + 1 WHERE id = ?1 AND used_at IS NULL").bind(challenge.id).run();
+      return error("That authenticator code was not accepted", 401);
+    }
+    const verifiedAt = new Date().toISOString();
+    await env.DB.prepare("UPDATE pv_mfa_challenges SET used_at = ?1 WHERE id = ?2 AND used_at IS NULL").bind(verifiedAt, challenge.id).run();
+    await env.DB.prepare("UPDATE pv_mfa_factors SET status = 'verified', verified_at = COALESCE(verified_at, ?1), last_used_at = ?1, updated_at = ?1 WHERE id = ?2 AND user_id = ?3").bind(verifiedAt, factorId, user.id).run();
+    if (!await upgradeD1SessionAal(env, token)) return error("Your session has expired. Sign in again", 401);
+    await recordD1AuthEvent(env, { userId: user.id, email: user.email || "", eventType: "mfa_verified", ip: request.headers.get("cf-connecting-ip") || undefined, userAgent: request.headers.get("user-agent") || undefined });
+    return json({ session: null, aal: "aal2" });
+  }
+
+  return error("MFA route not found", 404);
+}
+
 async function adminApi(request: Request, env: Env, ctx: ExecutionContext, actor: User): Promise<Response> {
   const access = await organizationAdmin(env, actor);
   if (!access) return error("Workspace administrator access is required", 403);
   const { organization, member: actorMember } = access;
+  if (await organizationMfaBlocked(env, actor, organization)) return error("Administrator two-step verification must be enabled before using workspace administration", 403);
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/api/admin/delivery-ops") return json(await deliveryOperations(env, organization.id));
   if (request.method === "GET" && url.pathname === "/api/admin/providers") {

@@ -16,6 +16,7 @@ export type Session = {
   refresh_token?: string;
   expires_at?: number;
   expires_in?: number;
+  aal?: "aal1" | "aal2";
   token_type?: string;
   user: PostveilUser;
 };
@@ -23,7 +24,7 @@ export type Session = {
 type AuthError = { message: string; status?: number; name?: string };
 type AuthResponse<T> = { data: T; error: AuthError | null };
 type AuthListener = (event: string, session: Session | null) => void;
-type MfaFactorResponse = { all: any[]; totp: any[]; phone: any[] };
+type MfaFactorResponse = { all: any[]; totp: any[]; phone: any[]; setupRequired?: boolean; challengeRequired?: boolean; administrator?: boolean };
 type RealtimeChannel = {
   on: (event: string, filter: JsonRecord, callback: () => void) => RealtimeChannel;
   subscribe: (callback?: (status: string) => void) => RealtimeChannel;
@@ -161,19 +162,30 @@ const auth = {
     const result = await this.getSession();
     return { data: { session: result.data.session, user: result.data.session?.user ?? null }, error: result.error };
   },
-  getAuthenticatorAssuranceLevel: async (): Promise<AuthResponse<{ currentLevel: "aal1"; nextLevel: "aal1" }>> => ({ data: { currentLevel: "aal1", nextLevel: "aal1" }, error: null }),
+  getAuthenticatorAssuranceLevel: async (): Promise<AuthResponse<{ currentLevel: "aal1" | "aal2"; nextLevel: "aal1" | "aal2"; setupRequired?: boolean; challengeRequired?: boolean; administrator?: boolean }>> => {
+    const result = await request<MfaFactorResponse & { currentLevel: "aal1" | "aal2"; nextLevel: "aal1" | "aal2"; setupRequired?: boolean; challengeRequired?: boolean; administrator?: boolean }>("/api/auth/mfa/status");
+    return result;
+  },
   onAuthStateChange(listener: AuthListener) {
     listeners.add(listener);
     listener("INITIAL_SESSION", currentSession);
     return { data: { subscription: { unsubscribe: () => { listeners.delete(listener); } } } };
   },
   mfa: {
-    listFactors: (): Promise<AuthResponse<MfaFactorResponse>> => Promise.resolve({ data: { all: [], totp: [], phone: [] }, error: null }),
-    challenge: (_params?: JsonRecord) => unsupported<{ id: string }>("TOTP enrollment is not available in the D1-only adapter yet."),
-    verify: (_params?: JsonRecord) => unsupported<{ session: Session | null }>("TOTP verification is not available in the D1-only adapter yet."),
-    enroll: (_params?: JsonRecord) => unsupported<{ id: string; type: string; totp: { qr_code: string; secret: string; uri: string } }>("TOTP enrollment is not available in the D1-only adapter yet."),
-    unenroll: (_params?: JsonRecord) => unsupported<{}>("TOTP enrollment is not available in the D1-only adapter yet."),
-    getAuthenticatorAssuranceLevel: async (): Promise<AuthResponse<{ currentLevel: "aal1" | "aal2"; nextLevel: "aal1" | "aal2" }>> => ({ data: { currentLevel: "aal1", nextLevel: "aal1" }, error: null }),
+    listFactors: async (): Promise<AuthResponse<MfaFactorResponse>> => {
+      const result = await request<MfaFactorResponse & { factors?: any[] }>("/api/auth/mfa/status");
+      if (result.error) return result;
+      const factors = result.data.factors || [];
+      return { data: { ...result.data, all: factors, totp: factors.filter((factor) => factor.factor_type === "totp"), phone: [] }, error: null };
+    },
+    challenge: (params?: JsonRecord) => request<{ id: string }>("/api/auth/mfa/challenge", { method: "POST", body: JSON.stringify({ factorId: params?.factorId }) }),
+    verify: (params?: JsonRecord) => request<{ session: Session | null; aal: "aal2" }>("/api/auth/mfa/verify", { method: "POST", body: JSON.stringify({ factorId: params?.factorId, challengeId: params?.challengeId, code: params?.code }) }),
+    enroll: (params?: JsonRecord) => request<{ id: string; type: string; totp: { qr_code: string; secret: string; uri: string } }>("/api/auth/mfa/enroll", { method: "POST", body: JSON.stringify({ factorType: params?.factorType, friendlyName: params?.friendlyName }) }),
+    unenroll: (params?: JsonRecord) => request<{}>(`/api/auth/mfa/factors/${encodeURIComponent(String(params?.factorId || ""))}`, { method: "DELETE" }),
+    getAuthenticatorAssuranceLevel: async (): Promise<AuthResponse<{ currentLevel: "aal1" | "aal2"; nextLevel: "aal1" | "aal2"; setupRequired?: boolean; challengeRequired?: boolean; administrator?: boolean }>> => {
+      const result = await request<MfaFactorResponse & { currentLevel: "aal1" | "aal2"; nextLevel: "aal1" | "aal2"; setupRequired?: boolean; challengeRequired?: boolean; administrator?: boolean }>("/api/auth/mfa/status");
+      return result;
+    },
   },
   passkey: {
     list: (): Promise<AuthResponse<any[]>> => Promise.resolve({ data: [], error: null }),

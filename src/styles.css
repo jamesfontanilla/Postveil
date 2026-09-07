@@ -861,6 +861,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .mfa-enrollment summary { cursor: pointer; color: var(--accent); font-weight: 700; }
 .mfa-enrollment code { display: block; overflow-wrap: anywhere; margin-top: 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink-soft); padding: 8px; font: 10px "DM Mono", monospace; }
 .mfa-enrollment details small { display: block; margin-top: 9px; color: var(--muted); font-size: 10px; }
+.mfa-required-form { gap: 14px; }
+.mfa-setup-key { display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); padding: 13px; }
+.mfa-setup-key strong { color: var(--ink-soft); font-size: 12px; }
+.mfa-setup-key small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.mfa-setup-key code { display: block; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised, #fff); color: var(--ink-soft); padding: 10px; font: 11px "DM Mono", monospace; letter-spacing: .06em; }
+.mfa-setup-key details { color: var(--muted); font-size: 11px; }
+.mfa-setup-key summary { cursor: pointer; color: var(--accent); font-weight: 700; }
 .security-recovery-form { align-items: start; }
 .security-recovery-form input { min-width: 0; }
 .verification-box { grid-column: 1 / -1; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface)); padding: 12px; }

@@ -33,6 +33,10 @@ not a substitute for provider approval, a restore exercise, or legal review.
   enforces its configured per-source and per-user API rate limit.
 - D1 Time Travel is available for `postveil-prod`; the current database exposes
   a restore bookmark. A destructive production restore has not been performed.
+- Administrator TOTP is backed by encrypted D1 factors and session-bound,
+  five-attempt challenges. Owners and administrators cannot use workspace
+  administration until an authenticator is verified. General-user TOTP is
+  available from Security & access; passkeys still require WebAuthn support.
 
 ## Still requires an operator or provider
 
@@ -52,6 +56,8 @@ not a substitute for provider approval, a restore exercise, or legal review.
 
 ### Security operations
 
+- Set the `MFA_ENCRYPTION_KEY` Worker secret and complete administrator
+  authenticator enrollment for each owner/administrator account.
 - Add custom Cloudflare WAF and rate-limit rules after upgrading to a plan that
   supports them, then confirm a 429/blocked response with a staging-only rule.
 - Operate antivirus scanning before re-enabling attachments. The production
