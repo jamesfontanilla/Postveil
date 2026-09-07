@@ -1073,7 +1073,7 @@ function PublicHome({ onSignIn, onSignUp }: { onSignIn: () => void; onSignUp: ()
   return (
     <main className="public-home landing-home">
       <nav className="home-nav landing-nav" aria-label="Postveil navigation">
-        <a className="home-brand" href="#top" aria-label="Postveil home"><span className="home-brand-mark">P</span><span><strong>Postveil</strong><small>private mail</small></span></a>
+        <a className="home-brand" href="#top" aria-label="Postveil home"><span className="home-brand-mark"><img src="/postveil-logo.svg" alt="" /></span><span><strong>Postveil</strong><small>private mail</small></span></a>
         <div className="home-nav-links"><a href="#product">Product</a><a href="#how-it-works">How it works</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><button type="button" className="home-signin" onClick={onSignIn}>Sign in</button><button type="button" className="landing-nav-cta" onClick={onSignUp}>Create account</button></div>
       </nav>
       <section className="landing-hero" id="top">
@@ -1085,7 +1085,7 @@ function PublicHome({ onSignIn, onSignUp }: { onSignIn: () => void; onSignUp: ()
           <p className="landing-microcopy"><Check size={14} /> Guided domain setup · privacy-first defaults · built for desktop and mobile</p>
         </div>
         <div className="landing-product-shot" id="product" aria-label="Postveil inbox preview">
-          <div className="mock-window-bar"><span className="mock-window-brand"><span className="mock-window-mark">P</span> Postveil</span><span className="mock-window-status"><span /> private mailbox</span></div>
+          <div className="mock-window-bar"><span className="mock-window-brand"><span className="mock-window-mark"><img src="/postveil-logo.svg" alt="" /></span> Postveil</span><span className="mock-window-status"><span /> private mailbox</span></div>
           <div className="mock-mail-app">
             <aside className="mock-sidebar"><button type="button" className="mock-compose">Compose <PenLine size={13} /></button><p className="mock-section-label">Mailbox</p><div className="mock-folder active"><Inbox size={15} /> Inbox <b>4</b></div><div className="mock-folder"><Star size={15} /> Starred</div><div className="mock-folder"><Send size={15} /> Sent</div><div className="mock-folder"><Archive size={15} /> Archive</div><p className="mock-section-label">Your domain</p><div className="mock-domain"><span>hello</span>@yourdomain.com</div></aside>
             <section className="mock-inbox"><div className="mock-inbox-head"><div><span>Mailbox</span><strong>Inbox</strong></div><div className="mock-search"><Search size={14} /> Search mail</div></div><div className="mock-tabs"><span className="selected">Focused</span><span>Other</span><span className="mock-count">4 unread</span></div><div className="mock-message unread"><span className="mock-avatar">A</span><div><b>Alex Morgan</b><strong>Project notes for Thursday</strong><p>Here are the details we discussed...</p></div><time>9:42</time></div><div className="mock-message"><span className="mock-avatar olive">N</span><div><b>Northline Studio</b><strong>Welcome to the team</strong><p>Your workspace is ready to review.</p></div><time>Yesterday</time></div><div className="mock-message"><span className="mock-avatar rose">J</span><div><b>James Fontanilla</b><strong>Re: domain setup</strong><p>Everything is connected and verified.</p></div><time>Aug 30</time></div></section>
@@ -6375,6 +6375,13 @@ function AppContent() {
     }
     const initialize = async () => {
       const currentUrl = new URL(window.location.href);
+      const oauthAttempt = currentUrl.searchParams.has("oauth_code") || currentUrl.searchParams.has("oauth_error");
+      if (oauthAttempt) {
+        // OAuth callbacks must never fall through to the marketing page. Keep
+        // the user in the sign-in surface while the one-time handoff resolves.
+        setAuthMode("signin");
+        setShowPublicHome(false);
+      }
       const verificationToken = currentUrl.searchParams.get("verify_email");
       if (verificationToken) {
         try {
@@ -6388,9 +6395,14 @@ function AppContent() {
         setAuthMode("signin");
         setShowPublicHome(false);
       }
-      const { data } = await supabase.auth.getSession();
+      const { data, error: sessionError } = await supabase.auth.getSession();
       setSession(data.session);
       if (data.session) setShowPublicHome(false);
+      if (oauthAttempt && (sessionError || !data.session)) {
+        setAuthMode("signin");
+        setEmailVerificationNotice("Google sign-in could not be completed. Please try again.");
+        setShowPublicHome(false);
+      }
       const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       const token = currentUrl.searchParams.get("recovery");
       setRecoveryToken(token);

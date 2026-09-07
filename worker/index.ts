@@ -739,7 +739,8 @@ async function handleGoogleAuth(request: Request, env: Env): Promise<Response | 
       const target = new URL(`https://${configuredAppDomain(env)}/`);
       target.searchParams.set("oauth_code", handoffCode);
       return new Response(null, { status: 302, headers: { Location: target.toString(), "Set-Cookie": googleStateCookie("", 0) } });
-    } catch {
+    } catch (oauthAccountError) {
+      console.warn("Google OAuth account provisioning failed", oauthAccountError instanceof Error ? oauthAccountError.message : "unknown error");
       return googleErrorRedirect(env, "google_account_failed");
     }
   }

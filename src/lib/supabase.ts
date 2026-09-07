@@ -96,6 +96,7 @@ const auth = {
   async getSession(): Promise<AuthResponse<{ session: Session | null }>> {
     const currentUrl = new URL(window.location.href);
     const oauthCode = currentUrl.searchParams.get("oauth_code");
+    const oauthError = currentUrl.searchParams.get("oauth_error");
     // The callback must win over any cached session. Otherwise an expired token
     // in localStorage can cause a successful OAuth handoff to be ignored.
     if (oauthCode) {
@@ -111,11 +112,12 @@ const auth = {
       }
       return result;
     }
+    if (oauthError) {
+      currentUrl.searchParams.delete("oauth_error");
+      window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+      return { data: { session: null }, error: authError("Google sign-in could not be completed", 400) };
+    }
     if (!currentSession) {
-      if (currentUrl.searchParams.has("oauth_error")) {
-        currentUrl.searchParams.delete("oauth_error");
-        window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
-      }
       return { data: { session: null }, error: null };
     }
     const result = await request<{ session: Session | null }>("/api/auth/session");
