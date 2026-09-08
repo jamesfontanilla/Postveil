@@ -1,3 +1,5 @@
+import * as QRCode from "qrcode";
+
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -59,6 +61,20 @@ export function totpUri(secret: string, email: string, issuer = "Postveil"): str
   const label = `${issuer}:${email}`;
   const params = new URLSearchParams({ secret, issuer, algorithm: "SHA1", digits: "6", period: "30" });
   return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`;
+}
+
+/**
+ * Render the provisioning URI locally as SVG so authenticator setup never
+ * sends the TOTP secret to an external QR-code service.
+ */
+export async function totpQrCode(uri: string): Promise<string> {
+  return QRCode.toString(uri, {
+    type: "svg",
+    errorCorrectionLevel: "M",
+    margin: 4,
+    width: 256,
+    color: { dark: "#132b26", light: "#ffffff" },
+  });
 }
 
 export async function totpCode(secret: string, timestamp = Date.now()): Promise<string> {

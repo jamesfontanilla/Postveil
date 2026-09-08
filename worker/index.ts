@@ -87,7 +87,7 @@ import {
   type DeliveryInput,
   type ProviderName,
 } from "./delivery.ts";
-import { constantTimeEqual as mfaConstantTimeEqual, decryptTotpSecret, encryptTotpSecret, generateTotpSecret, totpCode, totpUri } from "./mfa.ts";
+import { constantTimeEqual as mfaConstantTimeEqual, decryptTotpSecret, encryptTotpSecret, generateTotpSecret, totpCode, totpQrCode, totpUri } from "./mfa.ts";
 
 interface Env {
   ASSETS: Fetcher;
@@ -1779,7 +1779,9 @@ async function handleD1Mfa(request: Request, env: Env): Promise<Response | null>
     await env.DB.prepare("DELETE FROM pv_mfa_factors WHERE user_id = ?1 AND status = 'unverified'").bind(user.id).run();
     await env.DB.prepare(`INSERT INTO pv_mfa_factors(id,user_id,factor_type,friendly_name,secret_ciphertext,secret_iv,status,created_at,verified_at,last_used_at,updated_at)
       VALUES (?1,?2,'totp',?3,?4,?5,'unverified',?6,NULL,NULL,?6)`).bind(id, user.id, friendlyName, encrypted.ciphertext, encrypted.iv, createdAt).run();
-    return json({ id, type: "totp", totp: { qr_code: "", secret, uri: totpUri(secret, user.email || user.id) } });
+    const uri = totpUri(secret, user.email || user.id);
+    const qrCode = await totpQrCode(uri);
+    return json({ id, type: "totp", totp: { qr_code: qrCode, secret, uri } });
   }
 
   const factorMatch = url.pathname.match(/^\/api\/auth\/mfa\/factors\/([^/]+)$/);
