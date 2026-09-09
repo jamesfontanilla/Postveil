@@ -6072,7 +6072,7 @@ function MailboxApp({ session }: { session: Session }) {
                      </div>
                      <div className="command-ribbon-group" aria-label="Message tools">
                        <span>Tools</span>
-                       <button className="command-ribbon-button" onClick={() => void openRawSource()} title="Open the raw message source"><MoreHorizontal size={14} /> More</button>
+                       <button className="command-ribbon-button" onClick={() => void openRawSource()} title="Open the raw message source"><Download size={14} /> Source</button>
                      </div>
                    </div>
                  </div>
