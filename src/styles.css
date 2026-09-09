@@ -2319,3 +2319,38 @@ h1, h2, h3, h4,
   .landing-final-cta { align-items: flex-start; flex-direction: column; padding: 55px 0 60px; }
   .landing-final-cta .landing-primary { width: 100%; }
 }
+
+/* Ribbon interactions: tabs are real controls, while the toolbar keeps its
+   familiar command-strip rhythm at narrow widths. */
+.mail-ribbon-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.mail-ribbon-tab:hover { color: var(--ink); }
+.mail-ribbon-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.mail-ribbon-panel-intro { display: grid; min-width: min(280px, 34vw); align-content: center; gap: 2px; padding: 0 10px 0 2px; }
+.mail-ribbon-panel-intro svg { color: var(--accent); }
+.mail-ribbon-panel-intro span { color: var(--ink); font-size: 11px; font-weight: 700; }
+.mail-ribbon-panel-intro small { max-width: 340px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+.mail-ribbon-view-panel .mail-ribbon-filter { min-width: 76px; }
+.mail-ribbon-help-panel { align-items: center; }
+.mail-ribbon-help-panel .mail-ribbon-command { flex: 0 0 auto; }
+
+@media (max-width: 720px) {
+  .mail-ribbon-tabs { gap: 16px; overflow-x: auto; scrollbar-width: none; }
+  .mail-ribbon-tabs::-webkit-scrollbar, .mail-ribbon-toolbar::-webkit-scrollbar { display: none; }
+  .mail-ribbon-tab { flex: 0 0 auto; }
+  .mail-ribbon-context-label { max-width: 120px; }
+  .mail-ribbon-toolbar { gap: 7px; overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .mail-ribbon-panel-intro { min-width: 210px; max-width: 235px; padding-right: 3px; }
+  .mail-ribbon-panel-intro small { max-width: 220px; }
+  .mail-ribbon-view-panel .mail-ribbon-filter { min-width: 68px; }
+  .mail-ribbon-command { min-width: 48px; padding-right: 6px; padding-left: 6px; }
+  .mail-ribbon-command.primary { min-width: 72px; }
+  .mail-ribbon-group { padding-right: 7px; }
+  .mail-ribbon-group select { min-width: 105px; }
+}

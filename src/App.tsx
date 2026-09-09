@@ -547,6 +547,12 @@ function workStateLabel(state?: string | null) {
   if (state === "i_owe") return "I owe";
   return "No work state";
 }
+function displayWorkNote(value?: string | null) {
+  const note = value?.trim() || "";
+  if (!note) return "";
+  if (/\b(?:node is not defined|deserialization error|hidden field|\$response)\b/i.test(note)) return "Work details unavailable";
+  return note.length > 240 ? `${note.slice(0, 237)}…` : note;
+}
 function workDueLabel(value?: string | null) {
   if (!value) return "No follow-up date";
   const date = new Date(value);
@@ -4435,7 +4441,7 @@ function Workspace({
                     <span className="work-state-label">{workStateLabel(item.work_state)}</span>
                     <strong>{item.subject || "(no subject)"}</strong>
                     <small>{item.from_address} · {workDueLabel(item.follow_up_at)}</small>
-                    {item.work_note && <em>{item.work_note}</em>}
+                    {displayWorkNote(item.work_note) && <em>{displayWorkNote(item.work_note)}</em>}
                   </button>
                   <button className="icon-button compact-icon" onClick={() => onOpenMessage(item)} aria-label={`Open ${item.subject || "message"}`} title="Open message"><ArrowDown size={14} className="open-work-icon" /></button>
                 </article>
@@ -4523,6 +4529,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([]);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
   const [searchHelpOpen, setSearchHelpOpen] = useState(false);
+  const [ribbonTab, setRibbonTab] = useState<"home" | "view" | "help">("home");
   const [normalizedQuery, setNormalizedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -4652,6 +4659,7 @@ function MailboxApp({ session }: { session: Session }) {
     setNormalizedQuery("");
     setLoading(true);
     setDetailLoading(false);
+    setRibbonTab("home");
     clearListSelection();
     setMobileNav(false);
   }
@@ -5393,6 +5401,16 @@ function MailboxApp({ session }: { session: Session }) {
       },
     };
   }
+  function handleRibbonTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, current: "home" | "view" | "help") {
+    const tabs = ["home", "view", "help"] as const;
+    const index = tabs.indexOf(current);
+    const nextIndex = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const next = tabs[nextIndex];
+    setRibbonTab(next);
+    window.requestAnimationFrame(() => document.getElementById(`mail-ribbon-tab-${next}`)?.focus());
+  }
   return (
     <main
       className={`app-shell${selected ? " mobile-message-open" : ""} theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
@@ -5600,12 +5618,25 @@ function MailboxApp({ session }: { session: Session }) {
         <div className="mail-workspace">
           <div className="mail-ribbon" aria-label="Mail home ribbon">
             <div className="mail-ribbon-tabs" role="tablist" aria-label="Mail ribbon tabs">
-              <span className="mail-ribbon-tab active" role="tab" aria-selected="true">Home</span>
-              <span className="mail-ribbon-tab" role="tab" aria-selected="false">View</span>
-              <span className="mail-ribbon-tab" role="tab" aria-selected="false">Help</span>
+              {(["home", "view", "help"] as const).map((tabName) => (
+                <button
+                  key={tabName}
+                  id={`mail-ribbon-tab-${tabName}`}
+                  className={`mail-ribbon-tab ${ribbonTab === tabName ? "active" : ""}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={ribbonTab === tabName}
+                  aria-controls={`mail-ribbon-panel-${tabName}`}
+                  tabIndex={ribbonTab === tabName ? 0 : -1}
+                  onClick={() => setRibbonTab(tabName)}
+                  onKeyDown={(event) => handleRibbonTabKeyDown(event, tabName)}
+                >
+                  {tabName === "home" ? "Home" : tabName === "view" ? "View" : "Help"}
+                </button>
+              ))}
               {hasMailSelection && <span className="mail-ribbon-context-label">Selection tools · {selectAllResults ? `${resultTotal ?? "all"} matching` : `${selectedIds.size} selected`}</span>}
             </div>
-            <div className="mail-ribbon-toolbar">
+            {ribbonTab === "home" && <div className="mail-ribbon-toolbar" id="mail-ribbon-panel-home" role="tabpanel" aria-labelledby="mail-ribbon-tab-home">
               <div className="mail-ribbon-group" aria-label="Move and delete">
                 <button className="mail-ribbon-command primary" onClick={() => openCompose()} title="Create a new email message"><PenLine size={16} /><span>New mail</span><small>Create a new message</small></button>
                 <button className="mail-ribbon-command" onClick={() => void runBulkAction("archive")} disabled={!hasMailSelection || bulkBusy} title="Archive selected messages"><Archive size={15} /><span>Archive</span></button>
@@ -5648,7 +5679,27 @@ function MailboxApp({ session }: { session: Session }) {
                 <button className="mail-ribbon-command apply" onClick={() => void runBulkAction()} disabled={!hasMailSelection || bulkBusy}>{bulkBusy ? "Applying…" : "Apply"}</button>
               </div>
               <button className="mail-ribbon-refresh" onClick={() => void loadMessages()} title="Refresh messages" aria-label="Refresh messages"><RefreshCcw size={15} /></button>
-            </div>
+            </div>}
+            {ribbonTab === "view" && <div className="mail-ribbon-toolbar mail-ribbon-view-panel" id="mail-ribbon-panel-view" role="tabpanel" aria-labelledby="mail-ribbon-tab-view">
+              <div className="mail-ribbon-panel-intro"><Eye size={16} /><span>View options</span><small>Change how you scan this mailbox.</small></div>
+              <div className="mail-ribbon-group" aria-label="Sort messages">
+                <span className="mail-ribbon-group-label">Sort</span>
+                <select value={sort} onChange={(event) => { clearListSelection(); setSort(event.target.value); }} aria-label="Sort messages">
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
+              <div className="mail-ribbon-group" aria-label="Filter messages">
+                <span className="mail-ribbon-group-label">Show</span>
+                {[{ value: "all", label: "All mail" }, { value: "unread", label: "Unread" }, { value: "starred", label: "Starred" }, { value: "attachments", label: "Attachments" }].map((item) => (
+                  <button key={item.value} type="button" className={`mail-ribbon-command mail-ribbon-filter ${filter === item.value ? "is-active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }} aria-pressed={filter === item.value}>{item.label}</button>
+                ))}
+              </div>
+            </div>}
+            {ribbonTab === "help" && <div className="mail-ribbon-toolbar mail-ribbon-help-panel" id="mail-ribbon-panel-help" role="tabpanel" aria-labelledby="mail-ribbon-tab-help">
+              <div className="mail-ribbon-panel-intro"><HelpCircle size={16} /><span>Quick help</span><small>Select messages to unlock actions. Use the search guide to find mail by sender, folder, date, or attachment.</small></div>
+              <button type="button" className="mail-ribbon-command apply" onClick={() => { setRibbonTab("home"); setSearchFocused(true); setSearchHelpOpen(true); }}>Open search syntax</button>
+            </div>}
           </div>
           <div className="mail-columns">
           <section className="message-column">
@@ -5749,7 +5800,7 @@ function MailboxApp({ session }: { session: Session }) {
               )}
               <div className="search-filter-row" aria-label="Quick search filters">
                 {[{ value: "all", label: "All mail" }, { value: "unread", label: "Unread" }, { value: "starred", label: "Starred" }, { value: "attachments", label: "Attachments" }].map((item) => (
-                  <button key={item.value} className={`search-chip ${filter === item.value ? "active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }}>{item.label}</button>
+                  <button key={item.value} type="button" className={`search-chip ${filter === item.value ? "active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }} aria-pressed={filter === item.value}>{item.label}</button>
                 ))}
                 {query.trim() && normalizedQuery && <span className="search-status-copy">Query active · {resultTotal ?? 0} result{(resultTotal ?? 0) === 1 ? "" : "s"}</span>}
                </div>
@@ -6144,7 +6195,7 @@ function MailboxApp({ session }: { session: Session }) {
                 {selected.work_state && selected.work_state !== "none" && (
                   <div className={`work-state-callout ${selected.follow_up_at && new Date(selected.follow_up_at).getTime() <= Date.now() ? "overdue" : ""}`}>
                     <Briefcase size={15} />
-                    <div><strong>{workStateLabel(selected.work_state)}</strong><span>{workDueLabel(selected.follow_up_at)}{selected.work_note ? ` · ${selected.work_note}` : ""}</span></div>
+                    <div><strong>{workStateLabel(selected.work_state)}</strong><span>{workDueLabel(selected.follow_up_at)}{displayWorkNote(selected.work_note) ? ` · ${displayWorkNote(selected.work_note)}` : ""}</span></div>
                     <button className="text-button" onClick={() => void mutateMessage({ workState: "none" })}>Clear</button>
                   </div>
                 )}
