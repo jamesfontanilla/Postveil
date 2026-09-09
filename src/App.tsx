@@ -5371,6 +5371,7 @@ function MailboxApp({ session }: { session: Session }) {
     ? detailIdentityForMessage(selected, contacts, mailboxes)
     : null;
   const selectedContact = detailIdentity ? contactFor(detailIdentity.email, contacts) : undefined;
+  const hasMailSelection = selectedIds.size > 0 || selectAllResults;
   const customFolderDepth = (folderId: string): number => {
     let depth = 0;
     let parentId = folders.find((item) => item.id === folderId)?.parent_id || null;
@@ -5596,7 +5597,60 @@ function MailboxApp({ session }: { session: Session }) {
         </div>
       </aside>
       {view === "mail" ? (
-        <>
+        <div className="mail-workspace">
+          <div className="mail-ribbon" aria-label="Mail home ribbon">
+            <div className="mail-ribbon-tabs" role="tablist" aria-label="Mail ribbon tabs">
+              <span className="mail-ribbon-tab active" role="tab" aria-selected="true">Home</span>
+              <span className="mail-ribbon-tab" role="tab" aria-selected="false">View</span>
+              <span className="mail-ribbon-tab" role="tab" aria-selected="false">Help</span>
+              {hasMailSelection && <span className="mail-ribbon-context-label">Selection tools · {selectAllResults ? `${resultTotal ?? "all"} matching` : `${selectedIds.size} selected`}</span>}
+            </div>
+            <div className="mail-ribbon-toolbar">
+              <div className="mail-ribbon-group" aria-label="Move and delete">
+                <button className="mail-ribbon-command primary" onClick={() => openCompose()} title="Create a new email message"><PenLine size={16} /><span>New mail</span><small>Create a new message</small></button>
+                <button className="mail-ribbon-command" onClick={() => void runBulkAction("archive")} disabled={!hasMailSelection || bulkBusy} title="Archive selected messages"><Archive size={15} /><span>Archive</span></button>
+                <button className="mail-ribbon-command danger" onClick={() => void runBulkAction("trash")} disabled={!hasMailSelection || bulkBusy} title="Move selected messages to Trash"><Trash2 size={15} /><span>Delete</span></button>
+              </div>
+              <div className="mail-ribbon-group" aria-label="Tags and timing">
+                <button className="mail-ribbon-command" onClick={() => void runBulkAction("flag")} disabled={!hasMailSelection || bulkBusy} title="Flag selected messages"><Flag size={15} /><span>Flag</span></button>
+                <button className="mail-ribbon-command" onClick={() => void runBulkAction("snooze")} disabled={!hasMailSelection || bulkBusy} title="Snooze selected messages"><Clock3 size={15} /><span>Snooze</span></button>
+                <button className="mail-ribbon-command" onClick={() => void runBulkAction("spam")} disabled={!hasMailSelection || bulkBusy} title="Move selected messages to Spam"><ShieldAlert size={15} /><span>Junk</span></button>
+              </div>
+              <div className="mail-ribbon-group mail-ribbon-more-group" aria-label="More mail actions">
+                <span className="mail-ribbon-group-label">More</span>
+                <select value={bulkAction} onChange={(event) => setBulkAction(event.target.value)} disabled={!hasMailSelection || bulkBusy} aria-label="More mail actions">
+                  <option value="archive">Archive</option>
+                  <option value="move">Move to…</option>
+                  <option value="mark_read">Mark read</option>
+                  <option value="mark_unread">Mark unread</option>
+                  <option value="star">Star</option>
+                  <option value="unstar">Unstar</option>
+                  <option value="important">Mark important</option>
+                  <option value="not_important">Remove importance</option>
+                  <option value="mute">Mute conversations</option>
+                  <option value="unmute">Unmute conversations</option>
+                  <option value="ignore">Ignore threads</option>
+                  <option value="unignore">Stop ignoring threads</option>
+                  <option value="priority">Set priority</option>
+                  {labels.length > 0 && <option value="label">Add label…</option>}
+                  <option value="reminder">Remind me tomorrow</option>
+                  <option value="reply_later">Reply later</option>
+                  <option value="waiting_on">Waiting on</option>
+                  <option value="i_owe">I owe</option>
+                  <option value="create_task">Create task</option>
+                  <option value="export">Export JSON</option>
+                  <option value="spam">Move to Spam</option>
+                  <option value="trash">Move to Trash</option>
+                </select>
+                {bulkAction === "move" && <select value={bulkFolder} onChange={(event) => setBulkFolder(event.target.value)} disabled={!hasMailSelection || bulkBusy} aria-label="Move selected messages to">{(["inbox", "sent", "drafts", "archive", "trash", "spam", "quarantine"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}{folders.map((item) => <option key={item.id} value={`custom:${item.id}`}>{item.name}</option>)}</select>}
+                {bulkAction === "priority" && <select value={bulkPriority} onChange={(event) => setBulkPriority(event.target.value)} disabled={!hasMailSelection || bulkBusy} aria-label="Set message priority"><option value="0">Normal</option><option value="1">Important</option><option value="2">High</option></select>}
+                {bulkAction === "label" && <select value={bulkLabelId} onChange={(event) => setBulkLabelId(event.target.value)} disabled={!hasMailSelection || bulkBusy} aria-label="Add message label"><option value="">Choose label</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select>}
+                <button className="mail-ribbon-command apply" onClick={() => void runBulkAction()} disabled={!hasMailSelection || bulkBusy}>{bulkBusy ? "Applying…" : "Apply"}</button>
+              </div>
+              <button className="mail-ribbon-refresh" onClick={() => void loadMessages()} title="Refresh messages" aria-label="Refresh messages"><RefreshCcw size={15} /></button>
+            </div>
+          </div>
+          <div className="mail-columns">
           <section className="message-column">
             <div className="column-head">
               <div>
@@ -6383,7 +6437,8 @@ function MailboxApp({ session }: { session: Session }) {
               </article>
             )}
           </section>
-        </>
+          </div>
+        </div>
       ) : (
         <Workspace
           mode={view}

@@ -1871,6 +1871,33 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   grid-template-columns: 224px minmax(390px, .92fr) minmax(520px, 1.58fr);
   background: var(--canvas);
 }
+.mail-workspace { display: grid; grid-column: 2 / -1; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; background: var(--canvas); }
+.mail-columns { display: grid; grid-template-columns: minmax(390px, .92fr) minmax(0, 1.58fr); min-width: 0; min-height: 0; }
+.mail-ribbon { display: grid; grid-template-rows: 34px auto; min-width: 0; border-bottom: 1px solid var(--line-strong); background: var(--surface); }
+.mail-ribbon-tabs { display: flex; align-items: flex-end; gap: 22px; min-width: 0; border-bottom: 1px solid var(--line); padding: 0 18px; }
+.mail-ribbon-tab { position: relative; padding: 0 1px 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.mail-ribbon-tab.active { color: var(--ink); }
+.mail-ribbon-tab.active::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); }
+.mail-ribbon-context-label { overflow: hidden; margin-left: auto; padding-bottom: 8px; color: var(--accent); font: 9px var(--font-mono); letter-spacing: .06em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.mail-ribbon-toolbar { display: flex; align-items: stretch; min-width: 0; gap: 12px; overflow-x: auto; padding: 7px 12px 8px; scrollbar-width: thin; }
+.mail-ribbon-group { display: flex; align-items: stretch; flex: 0 0 auto; gap: 2px; border-right: 1px solid var(--line); padding-right: 12px; }
+.mail-ribbon-group:last-of-type { border-right: 0; }
+.mail-ribbon-command { display: grid; min-width: 57px; align-content: center; justify-items: center; gap: 4px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--ink-soft); padding: 5px 8px; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.mail-ribbon-command:hover, .mail-ribbon-command:focus-visible { border-color: var(--line-strong); background: var(--surface-muted); color: var(--accent); }
+.mail-ribbon-command.primary { min-width: 94px; border-color: var(--accent); background: var(--accent); color: #fff; }
+.mail-ribbon-command.primary:hover, .mail-ribbon-command.primary:focus-visible { border-color: var(--accent); background: #1e5745; color: #fff; }
+.mail-ribbon-command.danger { color: var(--danger); }
+.mail-ribbon-command.danger:hover, .mail-ribbon-command.danger:focus-visible { border-color: #dfaaaa; background: #fff3f3; color: var(--danger); }
+.mail-ribbon-command:disabled { cursor: not-allowed; color: var(--faint); opacity: .65; }
+.mail-ribbon-command small { color: inherit; font-size: 8px; font-weight: 400; opacity: .78; }
+.mail-ribbon-command.apply { border-color: var(--line-strong); background: var(--surface); color: var(--accent); }
+.mail-ribbon-group-label { align-self: center; margin-right: 5px; color: var(--muted); font: 8px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.mail-ribbon-group select { align-self: center; min-width: 112px; max-width: 150px; height: 30px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--surface); color: var(--ink-soft); padding: 0 7px; font-size: 10px; }
+.mail-ribbon-refresh { display: inline-grid; place-items: center; align-self: center; flex: 0 0 30px; height: 30px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+.mail-ribbon-refresh:hover, .mail-ribbon-refresh:focus-visible { border-color: var(--line-strong); background: var(--surface-muted); color: var(--accent); }
+.message-column > .command-ribbon { display: none !important; }
+.theme-dark .mail-ribbon { background: var(--surface); }
+.theme-dark .mail-ribbon-command.danger:hover, .theme-dark .mail-ribbon-command.danger:focus-visible { background: rgba(166,72,72,.16); }
 .sidebar {
   padding: 19px 12px 14px;
   border-right-color: var(--line);
@@ -2026,6 +2053,17 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   .app-shell { grid-template-columns: 210px minmax(350px, .9fr) minmax(430px, 1.3fr); }
 }
 @media (max-width: 720px) {
+  .mail-workspace { display: block; }
+  .mail-columns { grid-template-columns: 1fr; }
+  .mail-ribbon { grid-template-rows: 34px auto; }
+  .mail-ribbon-tabs { gap: 17px; padding: 0 13px; }
+  .mail-ribbon-toolbar { gap: 8px; padding: 6px 8px 7px; }
+  .mail-ribbon-group { padding-right: 8px; }
+  .mail-ribbon-command { min-width: 50px; padding-right: 6px; padding-left: 6px; }
+  .mail-ribbon-command.primary { min-width: 70px; }
+  .mail-ribbon-command small { display: none; }
+  .mail-ribbon-group-label { display: none; }
+  .mail-ribbon-context-label { max-width: 145px; }
   .mobile-topbar { height: 54px; border-bottom-color: var(--line); background: var(--surface); backdrop-filter: none; }
   .mini-brand { color: var(--ink); }
   .mini-brand span { border-radius: 5px 5px 5px 2px; background: var(--accent); }
