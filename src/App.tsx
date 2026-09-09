@@ -51,6 +51,7 @@ import {
   Pin,
   Plus,
   RefreshCcw,
+  Reply,
   RotateCcw,
   Search,
   Send,
@@ -4810,12 +4811,12 @@ function MailboxApp({ session }: { session: Session }) {
       setError(undoError instanceof Error ? undoError.message : "Undo is no longer available");
     }
   }
-  async function runBulkAction() {
+  async function runBulkAction(nextAction = bulkAction) {
     const allResults = selectAllResults;
     const visibleSelection = allResults ? messages.map((message) => message.id) : [...selectedIds];
     if (!visibleSelection.length && !allResults) { setError("Select at least one message"); return; }
     const countLabel = allResults ? `${resultTotal ?? "all"} matching messages` : `${visibleSelection.length} message${visibleSelection.length === 1 ? "" : "s"}`;
-    if (bulkAction === "trash" && !(await confirm({
+    if (nextAction === "trash" && !(await confirm({
       title: "Move messages to Trash?",
       message: `Move ${countLabel} to Trash? You can restore them later.`,
       confirmLabel: "Move to Trash",
@@ -4824,8 +4825,8 @@ function MailboxApp({ session }: { session: Session }) {
     setBulkBusy(true);
     setError("");
     setBulkNotice("");
-    const action: JsonSettings = { type: bulkAction };
-    if (bulkAction === "move") {
+    const action: JsonSettings = { type: nextAction };
+    if (nextAction === "move") {
       if (bulkFolder.startsWith("custom:")) {
         action.folder = "custom";
         action.customFolderId = bulkFolder.slice(7);
@@ -4833,12 +4834,12 @@ function MailboxApp({ session }: { session: Session }) {
         action.folder = bulkFolder;
       }
     }
-    if (bulkAction === "label") {
+    if (nextAction === "label") {
       if (!bulkLabelId) { setError("Choose a label first"); setBulkBusy(false); return; }
       action.labelId = bulkLabelId;
     }
-    if (bulkAction === "priority") action.priority = Number(bulkPriority);
-    if (bulkAction === "reminder") {
+    if (nextAction === "priority") action.priority = Number(bulkPriority);
+    if (nextAction === "reminder") {
       const reminder = new Date();
       reminder.setDate(reminder.getDate() + 1);
       reminder.setHours(9, 0, 0, 0);
@@ -4851,19 +4852,19 @@ function MailboxApp({ session }: { session: Session }) {
         method: "POST",
         body: JSON.stringify({ messageIds: allResults ? [] : visibleSelection, scope: allResults ? "all_results" : "selected", query: query.trim(), folder, action, idempotencyKey }),
       });
-      const movedOut = ["archive", "move", "trash", "spam", "restore", "snooze"].includes(bulkAction);
+      const movedOut = ["archive", "move", "trash", "spam", "restore", "snooze"].includes(nextAction);
       const selectedSet = new Set(payload.changedIds);
       setMessages((current) => movedOut ? current.filter((message) => !selectedSet.has(message.id)) : current.map((message) => {
         if (!selectedSet.has(message.id)) return message;
-        if (bulkAction === "mark_read" || bulkAction === "mark_unread") return { ...message, is_read: bulkAction === "mark_read" };
-        if (bulkAction === "star" || bulkAction === "unstar") return { ...message, is_starred: bulkAction === "star" };
-        if (bulkAction === "pin" || bulkAction === "unpin") return { ...message, is_pinned: bulkAction === "pin" };
-        if (bulkAction === "flag" || bulkAction === "unflag") return { ...message, is_flagged: bulkAction === "flag" };
+        if (nextAction === "mark_read" || nextAction === "mark_unread") return { ...message, is_read: nextAction === "mark_read" };
+        if (nextAction === "star" || nextAction === "unstar") return { ...message, is_starred: nextAction === "star" };
+        if (nextAction === "pin" || nextAction === "unpin") return { ...message, is_pinned: nextAction === "pin" };
+        if (nextAction === "flag" || nextAction === "unflag") return { ...message, is_flagged: nextAction === "flag" };
         return message;
       }));
       clearListSelection();
       await loadMessages(folder, false);
-      if (bulkAction === "export" && payload.exported?.length) {
+      if (nextAction === "export" && payload.exported?.length) {
         const download = document.createElement("a");
         download.href = URL.createObjectURL(new Blob([JSON.stringify(payload.exported, null, 2)], { type: "application/json" }));
         download.download = `postveil-export-${new Date().toISOString().slice(0, 10)}.json`;
@@ -4871,7 +4872,7 @@ function MailboxApp({ session }: { session: Session }) {
         URL.revokeObjectURL(download.href);
       }
       if (payload.failures.length) setError(`${payload.changedIds.length} changed; ${payload.failures.length} failed. ${payload.failures[0].error}`);
-      else setBulkNotice(`${payload.changedIds.length || (bulkAction === "export" ? visibleSelection.length : 0)} message${payload.changedIds.length === 1 ? "" : "s"} updated${payload.truncated ? " (first 500 matching messages)" : ""}`);
+      else setBulkNotice(`${payload.changedIds.length || (nextAction === "export" ? visibleSelection.length : 0)} message${payload.changedIds.length === 1 ? "" : "s"} updated${payload.truncated ? " (first 500 matching messages)" : ""}`);
       if (payload.undoable && payload.changedIds.length) setBulkUndo({ requestId: payload.requestId, label: "Undo change" });
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Bulk action failed");
@@ -5631,7 +5632,7 @@ function MailboxApp({ session }: { session: Session }) {
                 </button>
               </div>
             </div>
-            <div className="search-workbench">
+             <div className="search-workbench">
               <div className="search-box">
                 <Search size={16} />
                 <input
@@ -5697,9 +5698,86 @@ function MailboxApp({ session }: { session: Session }) {
                   <button key={item.value} className={`search-chip ${filter === item.value ? "active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }}>{item.label}</button>
                 ))}
                 {query.trim() && normalizedQuery && <span className="search-status-copy">Query active · {resultTotal ?? 0} result{(resultTotal ?? 0) === 1 ? "" : "s"}</span>}
-              </div>
-            </div>
-            <div className={`sync-status sync-${liveState}`} role="status" aria-live="polite">
+               </div>
+             </div>
+             <div className="command-ribbon" aria-label="Mail command ribbon">
+               <div className="command-ribbon-context">
+                 <span className="eyebrow">{selectedIds.size > 0 || selectAllResults ? "SELECTION" : currentLabel.toUpperCase()}</span>
+                 <strong>{selectedIds.size > 0 || selectAllResults ? (selectAllResults ? `${resultTotal ?? "All"} selected` : `${selectedIds.size} selected`) : "Mailbox actions"}</strong>
+                 <small>{selectedIds.size > 0 || selectAllResults ? "Apply one command to the selected messages." : "Common actions stay close to your inbox."}</small>
+               </div>
+               <div className="command-ribbon-groups">
+                 {selectedIds.size > 0 || selectAllResults ? (
+                   <>
+                     <div className="command-ribbon-group" aria-label="Organize messages">
+                       <span>Organize</span>
+                       <button className="command-ribbon-button" onClick={() => void runBulkAction("archive")} disabled={bulkBusy} title="Archive selected messages"><Archive size={14} /> Archive</button>
+                       <label className="command-ribbon-select"><span className="sr-only">Move selected messages to</span><select value={bulkFolder} onChange={(event) => setBulkFolder(event.target.value)} aria-label="Move selected messages to">{(["inbox", "sent", "drafts", "archive", "trash", "spam", "quarantine"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}{folders.map((item) => <option key={item.id} value={`custom:${item.id}`}>{item.name}</option>)}</select></label>
+                       <button className="command-ribbon-button" onClick={() => void runBulkAction("move")} disabled={bulkBusy} title="Move selected messages"><ArrowRight size={14} /> Move</button>
+                     </div>
+                     <div className="command-ribbon-group" aria-label="Mark messages">
+                       <span>Mark</span>
+                       <button className="command-ribbon-button" onClick={() => void runBulkAction("mark_read")} disabled={bulkBusy} title="Mark selected messages as read"><Mail size={14} /> Read</button>
+                       <button className="command-ribbon-button" onClick={() => void runBulkAction("star")} disabled={bulkBusy} title="Star selected messages"><Star size={14} /> Star</button>
+                       <button className="command-ribbon-button" onClick={() => void runBulkAction("flag")} disabled={bulkBusy} title="Flag selected messages"><Flag size={14} /> Flag</button>
+                     </div>
+                     <div className="command-ribbon-group" aria-label="Trust and removal">
+                       <span>Trust & remove</span>
+                       <button className="command-ribbon-button" onClick={() => void runBulkAction("spam")} disabled={bulkBusy} title="Move selected messages to Spam"><ShieldAlert size={14} /> Spam</button>
+                       <button className="command-ribbon-button danger" onClick={() => void runBulkAction("trash")} disabled={bulkBusy} title="Move selected messages to Trash"><Trash2 size={14} /> Trash</button>
+                     </div>
+                     <div className="command-ribbon-group command-ribbon-more" aria-label="More message actions">
+                       <span>More</span>
+                       <select value={bulkAction} onChange={(event) => setBulkAction(event.target.value)} aria-label="More message actions">
+                         <option value="archive">Archive</option>
+                         <option value="move">Move to…</option>
+                         <option value="mark_read">Mark read</option>
+                         <option value="mark_unread">Mark unread</option>
+                         <option value="star">Star</option>
+                         <option value="unstar">Unstar</option>
+                         <option value="flag">Flag</option>
+                         <option value="unflag">Unflag</option>
+                         <option value="important">Mark important</option>
+                         <option value="not_important">Remove importance</option>
+                         <option value="mute">Mute conversations</option>
+                         <option value="unmute">Unmute conversations</option>
+                         <option value="ignore">Ignore threads</option>
+                         <option value="unignore">Stop ignoring threads</option>
+                         <option value="priority">Set priority</option>
+                         {labels.length > 0 && <option value="label">Add label…</option>}
+                         <option value="snooze">Snooze 1 hour</option>
+                         <option value="reminder">Remind me tomorrow</option>
+                         <option value="reply_later">Reply later</option>
+                         <option value="waiting_on">Waiting on</option>
+                         <option value="i_owe">I owe</option>
+                         <option value="create_task">Create task</option>
+                         <option value="export">Export JSON</option>
+                         <option value="restore">Restore</option>
+                         <option value="spam">Move to Spam</option>
+                         <option value="trash">Move to Trash</option>
+                       </select>
+                       {bulkAction === "priority" && <select value={bulkPriority} onChange={(event) => setBulkPriority(event.target.value)} aria-label="More action priority"><option value="0">Normal</option><option value="1">Important</option><option value="2">High</option></select>}
+                       {bulkAction === "label" && <select value={bulkLabelId} onChange={(event) => setBulkLabelId(event.target.value)} aria-label="More action label"><option value="">Choose label</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select>}
+                       <button className="command-ribbon-button apply" onClick={() => void runBulkAction()} disabled={bulkBusy}>{bulkBusy ? "Applying…" : "Apply"}</button>
+                     </div>
+                     <button className="command-ribbon-clear" onClick={clearListSelection}>Clear</button>
+                   </>
+                 ) : (
+                   <>
+                     <div className="command-ribbon-group" aria-label="Mailbox actions">
+                       <span>Mailbox</span>
+                       <button className="command-ribbon-button primary" onClick={() => openCompose()} title="Write a new message"><PenLine size={14} /> New message</button>
+                       <button className="command-ribbon-button" onClick={() => void loadMessages()} title="Refresh messages"><RefreshCcw size={14} /> Refresh</button>
+                     </div>
+                     <div className="command-ribbon-group" aria-label="Selection actions">
+                       <span>Select</span>
+                       <button className="command-ribbon-button" onClick={selectCurrentPage} disabled={!messages.length || loading} title="Select messages on this page"><Check size={14} /> Select page</button>
+                     </div>
+                   </>
+                 )}
+               </div>
+             </div>
+             <div className={`sync-status sync-${liveState}`} role="status" aria-live="polite">
               <span className="sync-dot" />
               {liveState === "live" ? "Live updates" : liveState === "connecting" ? "Connecting to live updates…" : liveState === "reconnecting" ? "Reconnecting…" : "Polling for updates"}
             </div>
@@ -5721,57 +5799,6 @@ function MailboxApp({ session }: { session: Session }) {
                   <button className="text-button selection-all-button" onClick={() => setSelectAllResults(true)}>Select all {resultTotal} results</button>
                 )}
                 {selectAllResults && <span className="selection-all-label">All matching results selected</span>}
-              </div>
-            )}
-            {(selectedIds.size > 0 || selectAllResults) && (
-              <div className="bulk-toolbar" aria-label="Bulk message actions">
-                <strong>{selectAllResults ? `${resultTotal ?? "All"} selected` : `${selectedIds.size} selected`}</strong>
-                <select value={bulkAction} onChange={(event) => setBulkAction(event.target.value)} aria-label="Bulk action">
-                  <option value="archive">Archive</option>
-                  <option value="move">Move to…</option>
-                  <option value="mark_read">Mark read</option>
-                  <option value="mark_unread">Mark unread</option>
-                  <option value="star">Star</option>
-                  <option value="unstar">Unstar</option>
-                  <option value="flag">Flag</option>
-                  <option value="unflag">Unflag</option>
-                  <option value="important">Mark important</option>
-                  <option value="not_important">Remove importance</option>
-                  <option value="mute">Mute conversations</option>
-                  <option value="unmute">Unmute conversations</option>
-                  <option value="ignore">Ignore threads</option>
-                  <option value="unignore">Stop ignoring threads</option>
-                  <option value="priority">Set priority</option>
-                  {labels.length > 0 && <option value="label">Add label…</option>}
-                  <option value="snooze">Snooze 1 hour</option>
-                  <option value="reminder">Remind me tomorrow</option>
-                  <option value="reply_later">Reply later</option>
-                  <option value="waiting_on">Waiting on</option>
-                  <option value="i_owe">I owe</option>
-                  <option value="create_task">Create task</option>
-                  <option value="export">Export JSON</option>
-                  <option value="restore">Restore</option>
-                  <option value="spam">Move to Spam</option>
-                  <option value="trash">Move to Trash</option>
-                </select>
-                 {bulkAction === "move" && (
-                   <select value={bulkFolder} onChange={(event) => setBulkFolder(event.target.value)} aria-label="Bulk destination folder">
-                     {(["inbox", "sent", "drafts", "archive", "trash", "spam", "quarantine"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}
-                     {folders.map((item) => <option key={item.id} value={`custom:${item.id}`}>{item.name}</option>)}
-                   </select>
-                 )}
-                {bulkAction === "priority" && (
-                  <select value={bulkPriority} onChange={(event) => setBulkPriority(event.target.value)} aria-label="Bulk priority">
-                    <option value="0">Normal</option><option value="1">Important</option><option value="2">High</option>
-                  </select>
-                )}
-                {bulkAction === "label" && (
-                  <select value={bulkLabelId} onChange={(event) => setBulkLabelId(event.target.value)} aria-label="Bulk label">
-                    <option value="">Choose label</option>
-                    {labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}
-                  </select>
-                )}
-                <button className="primary-button" onClick={() => void runBulkAction()} disabled={bulkBusy}>{bulkBusy ? "Applying…" : "Apply"}</button>
               </div>
             )}
             {bulkNotice && (
@@ -6010,9 +6037,46 @@ function MailboxApp({ session }: { session: Session }) {
                         </button>
                       </>
                     )}
-                  </div>
-                </div>
-                {detailLoading && (
+                   </div>
+                 </div>
+                 <div className="message-command-ribbon" aria-label="Message actions">
+                   <div className="message-command-context">
+                     <span className="eyebrow">MESSAGE</span>
+                     <strong>Quick actions</strong>
+                     <small>Keep the next step close to the conversation.</small>
+                   </div>
+                   <div className="message-command-groups">
+                     <div className="command-ribbon-group" aria-label="Message organization">
+                       <span>Organize</span>
+                       {selected.folder === "trash" ? (
+                         <button className="command-ribbon-button" onClick={() => void restoreSelected()} disabled={trashBusy} title="Restore this message"><Undo2 size={14} /> Restore</button>
+                       ) : (
+                         <>
+                           <button className="command-ribbon-button" onClick={() => void mutateMessage({ folder: "archive" })} title="Archive this message"><Archive size={14} /> Archive</button>
+                           <button className="command-ribbon-button danger" onClick={() => void (async () => { if (await confirm({ title: "Move message to Trash?", message: "You can restore this message later.", confirmLabel: "Move to Trash", danger: true })) void mutateMessage({ folder: "trash" }); })()} title="Move this message to Trash"><Trash2 size={14} /> Trash</button>
+                         </>
+                       )}
+                     </div>
+                     <div className="command-ribbon-group" aria-label="Message responses">
+                       <span>Respond</span>
+                       <button className="command-ribbon-button primary" onClick={() => openCompose(selectedReplySeed)} title="Reply to this message"><Reply size={14} /> Reply</button>
+                       <button className="command-ribbon-button" onClick={() => openCompose(selectedReplyAllSeed)} title="Reply to everyone"><Users size={14} /> Reply all</button>
+                       <button className="command-ribbon-button" onClick={() => openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined)} title="Forward this message"><Forward size={14} /> Forward</button>
+                     </div>
+                     <div className="command-ribbon-group" aria-label="Message review">
+                       <span>Review</span>
+                       <button className={`command-ribbon-button ${selected.is_starred ? "is-active" : ""}`} onClick={() => void mutateMessage({ isStarred: !selected.is_starred })} title={selected.is_starred ? "Unstar message" : "Star message"}><Star size={14} fill={selected.is_starred ? "currentColor" : "none"} /> Star</button>
+                       <button className={`command-ribbon-button ${selected.is_important ? "is-active" : ""}`} onClick={() => void mutateMessage({ isImportant: !selected.is_important })} title={selected.is_important ? "Remove importance" : "Mark important"}><Flag size={14} fill={selected.is_important ? "currentColor" : "none"} /> Important</button>
+                       <button className="command-ribbon-button" onClick={() => void toggleTrustLens()} title="Inspect sender trust signals"><ShieldAlert size={14} /> Trust</button>
+                       <button className="command-ribbon-button" onClick={() => void toggleDeliveryInspection()} title="Inspect delivery details"><History size={14} /> Timeline</button>
+                     </div>
+                     <div className="command-ribbon-group" aria-label="Message tools">
+                       <span>Tools</span>
+                       <button className="command-ribbon-button" onClick={() => void openRawSource()} title="Open the raw message source"><MoreHorizontal size={14} /> More</button>
+                     </div>
+                   </div>
+                 </div>
+                 {detailLoading && (
                   <div className="detail-loading" role="status" aria-live="polite">
                     <span className="detail-loading-dot" /> Updating message…
                   </div>
