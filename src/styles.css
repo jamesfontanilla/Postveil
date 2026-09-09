@@ -113,7 +113,7 @@ input:focus, textarea:focus, select:focus { border-color: #2d5bff; background: #
 .icon-button { display: inline-grid; place-items: center; width: 33px; height: 33px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #8090a6; }
 .icon-button:hover { border-color: #dbe2ee; background: white; color: #2d5bff; }
 .mobile-topbar, .mobile-close { display: none; }
-.message-column { min-width: 0; overflow: hidden; border-right: 1px solid #e4e8f0; background: #f7f9fc; }
+.message-column { min-width: 0; overflow: hidden; container: message-column / inline-size; border-right: 1px solid #e4e8f0; background: #f7f9fc; }
 .column-head { display: flex; justify-content: space-between; align-items: flex-end; padding: 31px 25px 20px; }
 .column-head h1, .detail-head h2 { display: flex; align-items: center; gap: 10px; margin: 0; color: #1b2638; font-size: 24px; letter-spacing: -.045em; }
 .head-actions { display: flex; gap: 5px; }
@@ -672,6 +672,21 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .command-ribbon-more > span { margin-right: 1px; }
 .theme-dark .command-ribbon, .theme-dark .message-command-ribbon { background: var(--surface); }
 .theme-dark .command-ribbon-button.danger:hover, .theme-dark .command-ribbon-button.danger:focus-visible { background: rgba(166,72,72,.16); }
+@container message-column (max-width: 520px) {
+  .message-column .command-ribbon { display: block; overflow: visible; }
+  .message-column .command-ribbon-context { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-height: 38px; border-right: 0; border-bottom: 1px solid var(--line); padding: 7px 9px; }
+  .message-column .command-ribbon-context small { max-width: 150px; text-align: right; }
+  .message-column .command-ribbon-groups { min-height: 42px; flex-wrap: wrap; align-content: center; overflow: visible; padding: 3px 5px; }
+  .message-column .command-ribbon-group { border-left: 0; padding: 2px 3px; }
+  .message-column .command-ribbon-group > span { display: none; }
+  .message-column .command-ribbon-button { width: 30px; min-height: 28px; padding: 6px; font-size: 0; }
+  .message-column .command-ribbon-button svg { flex: 0 0 auto; }
+  .message-column .command-ribbon-select { width: 30px; padding: 0 4px; }
+  .message-column .command-ribbon-select select { width: 20px; max-width: 20px; color: transparent; }
+  .message-column .command-ribbon-more { flex-wrap: wrap; }
+  .message-column .command-ribbon-more select { max-width: 94px; font-size: 9px; }
+  .message-column .command-ribbon-clear { margin-right: 3px; padding: 4px 5px; font-size: 9px; }
+}
 .inline-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 16px 10px; border-radius: 6px; background: var(--accent-soft); color: var(--ink-soft); padding: 8px 10px; font-size: 10px; }
 .inline-notice .text-button { padding: 0; white-space: nowrap; }
 .message-row { cursor: pointer; }
