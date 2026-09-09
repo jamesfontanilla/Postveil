@@ -1918,17 +1918,38 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .compose-card { border-color: var(--line-strong); border-radius: 6px; background: var(--surface); box-shadow: 0 22px 55px rgba(23,34,30,.2); }
 .compose-head h2, .panel-title h2 { color: var(--ink); }
 
-/* Settings are a workbench: one navigation rail, one focused content area. */
+/* Settings workbench: searchable rail, grouped destinations, and one focused content pane. */
 .settings-panel { width: min(1040px, 100%); max-height: min(820px, calc(100vh - 32px)); overflow: hidden; border-color: var(--line-strong); border-radius: 6px; background: var(--surface); box-shadow: 0 26px 70px rgba(23,34,30,.22); padding: 0; }
 .settings-panel .panel-title { flex: 0 0 auto; border-bottom: 1px solid var(--line); padding: 22px 26px 18px; }
 .settings-panel .panel-title h2 { font-size: 23px; }
-.settings-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 0; height: calc(min(820px, 100vh - 32px) - 85px); }
-.settings-tabs { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; margin: 0; padding: 18px 10px; border-right: 1px solid var(--line); border-bottom: 0; background: var(--surface-muted); }
-.settings-panel .settings-tabs button { border: 0; border-left: 3px solid transparent; border-radius: 3px; padding: 10px 10px; color: var(--ink-soft); text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.settings-layout { display: grid; grid-template-columns: 238px minmax(0, 1fr); min-height: 0; height: calc(min(820px, 100vh - 32px) - 85px); }
+.settings-sidebar { display: flex; min-width: 0; flex-direction: column; border-right: 1px solid var(--line); background: var(--surface-muted); }
+.settings-search-field { display: flex; align-items: center; gap: 7px; margin: 17px 15px 14px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--muted); padding: 0 9px; }
+.settings-search-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent); }
+.settings-search-field input { min-width: 0; flex: 1; height: 34px; border: 0 !important; outline: 0; background: transparent !important; box-shadow: none !important; color: var(--ink); padding: 0; font-size: 11px; }
+.settings-search-field input::placeholder { color: var(--muted); }
+.settings-search-field button { display: grid; place-items: center; flex: 0 0 auto; width: 22px; height: 22px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.settings-search-field button:hover { color: var(--ink); }
+.settings-nav-label { margin: 0 17px 8px; color: var(--muted); font: 10px var(--font-mono); letter-spacing: .11em; text-transform: uppercase; }
+.settings-tabs { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 2px; overflow-y: auto; margin: 0; padding: 0 10px 14px; border: 0; background: transparent; }
+.settings-panel .settings-tabs button { display: flex; align-items: flex-start; gap: 10px; width: 100%; border: 0; border-left: 3px solid transparent; border-radius: 3px; padding: 10px 9px; color: var(--ink-soft); text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.settings-panel .settings-tabs button svg { flex: 0 0 auto; margin-top: 1px; color: var(--muted); }
+.settings-panel .settings-tabs button span { display: grid; min-width: 0; gap: 3px; }
+.settings-panel .settings-tabs button strong { color: inherit; font-size: 11px; font-weight: 650; }
+.settings-panel .settings-tabs button small { color: var(--muted); font-size: 9px; font-weight: 400; line-height: 1.35; }
 .settings-panel .settings-tabs button:hover { background: var(--surface); color: var(--ink); }
 .settings-panel .settings-tabs button.active { border-left-color: var(--accent); background: var(--surface); color: var(--accent); }
+.settings-panel .settings-tabs button.active svg { color: var(--accent); }
 .settings-panel .settings-tabs button::after { display: none; }
+.settings-search-empty { padding: 10px 9px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.settings-sidebar-note { display: flex; align-items: flex-start; gap: 8px; margin: auto 15px 16px; border-top: 1px solid var(--line); padding-top: 14px; color: var(--accent); font-size: 10px; }
+.settings-sidebar-note > span { display: grid; gap: 3px; color: var(--ink-soft); font-weight: 650; }
+.settings-sidebar-note small { color: var(--muted); font-size: 9px; font-weight: 400; line-height: 1.35; }
 .settings-content { min-width: 0; overflow-y: auto; padding: 26px 30px 34px; }
+.settings-content-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line-strong); padding-bottom: 21px; }
+.settings-content-header h3 { margin: 4px 0 5px; color: var(--ink); font-size: 21px; letter-spacing: -.035em; }
+.settings-content-header p:not(.eyebrow) { max-width: 58ch; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.settings-location { flex: 0 0 auto; color: var(--muted); font: 9px var(--font-mono); letter-spacing: .045em; text-transform: uppercase; }
 .settings-content .settings-grid { gap: 26px 32px; }
 .settings-panel .setting-card { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 22px 0 0; }
 .settings-panel .setting-card::before { display: none; }
@@ -1971,10 +1992,17 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   .settings-panel { width: 100%; max-height: 100dvh; border-radius: 0; }
   .settings-panel .panel-title { padding: 18px 18px 15px; }
   .settings-layout { display: block; height: calc(100dvh - 73px); }
-  .settings-tabs { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 10px; }
-  .settings-panel .settings-tabs button { flex: 0 0 auto; border-left: 0; border-bottom: 3px solid transparent; padding: 12px 9px 10px; white-space: nowrap; }
+  .settings-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+  .settings-search-field { margin: 12px 14px 10px; }
+  .settings-nav-label, .settings-sidebar-note { display: none; }
+  .settings-tabs { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 0 10px; }
+  .settings-panel .settings-tabs button { width: auto; min-width: max-content; flex: 0 0 auto; align-items: center; border-left: 0; border-bottom: 3px solid transparent; padding: 11px 9px 10px; white-space: nowrap; }
+  .settings-panel .settings-tabs button span { display: block; }
+  .settings-panel .settings-tabs button small { display: none; }
   .settings-panel .settings-tabs button.active { border-bottom-color: var(--accent); }
-  .settings-content { height: calc(100dvh - 126px); padding: 20px 18px 32px; }
+  .settings-content { height: calc(100dvh - 181px); padding: 20px 18px 32px; }
+  .settings-content-header { display: block; padding-bottom: 17px; }
+  .settings-location { display: block; margin-top: 12px; }
   .settings-content .settings-grid { grid-template-columns: 1fr; gap: 22px; }
   .settings-panel .setting-card { padding-top: 18px; }
   .compose-card { border-radius: 6px 6px 0 0; }

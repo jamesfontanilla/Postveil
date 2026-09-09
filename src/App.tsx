@@ -2685,7 +2685,21 @@ function SettingsPanel({
   const [retentionDays, setRetentionDays] = useState("365");
   const [ruleLab, setRuleLab] = useState<{ rule: Rule; result: RuleLabResult } | null>(null);
   const [ruleLabBusy, setRuleLabBusy] = useState(false);
+  const [settingsQuery, setSettingsQuery] = useState("");
   const ruleImportRef = useRef<HTMLInputElement>(null);
+  const settingsSections = [
+    { key: "appearance", label: "General", group: "Personal", description: "Appearance and reading preferences", icon: SlidersHorizontal },
+    { key: "security", label: "Security & access", group: "Personal", description: "Sign-in, MFA, and recovery", icon: ShieldCheck },
+    { key: "organize", label: "Folders & labels", group: "Mail", description: "Shape how messages are filed", icon: FolderPlus },
+    { key: "contacts", label: "Contacts", group: "Mail", description: "People and sender details", icon: Users },
+    { key: "spam", label: "Spam & trust", group: "Mail", description: "Screening and sender decisions", icon: ShieldAlert },
+    { key: "automation", label: "Rules & signatures", group: "Mail", description: "Automations for incoming mail", icon: SlidersHorizontal },
+    { key: "mailboxes", label: "Mailboxes", group: "Workspace", description: "Addresses and sending identities", icon: Mail },
+    { key: "administration", label: "Administration", group: "Workspace", description: "Organization controls", icon: Building2 },
+    { key: "integrations", label: "Integrations", group: "Workspace", description: "Connected services and providers", icon: Globe2 },
+  ] as const;
+  const activeSettingsSection = settingsSections.find((section) => section.key === tab) || settingsSections[0];
+  const filteredSettingsSections = settingsSections.filter((section) => `${section.label} ${section.description} ${section.group}`.toLowerCase().includes(settingsQuery.trim().toLowerCase()));
   async function updateSettings(patch: JsonSettings) {
     await apiFetch("/api/settings", {
       method: "PATCH",
@@ -3398,30 +3412,31 @@ function SettingsPanel({
           </button>
         </div>
         <div className="settings-layout">
-        <nav className="settings-tabs" aria-label="Settings sections">
-          {(
-            [
-              ["appearance", "Appearance"],
-              ["security", "Security & access"],
-              ["organize", "Folders & labels"],
-              ["contacts", "Contacts"],
-              ["spam", "Spam & trust"],
-              ["automation", "Rules & signatures"],
-              ["mailboxes", "Mailboxes"],
-              ["administration", "Administration"],
-              ["integrations", "Integrations"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              className={tab === key ? "active" : ""}
-              onClick={() => setTab(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+        <aside className="settings-sidebar">
+          <label className="settings-search-field">
+            <Search size={15} aria-hidden="true" />
+            <input value={settingsQuery} onChange={(event) => setSettingsQuery(event.target.value)} placeholder="Search settings" aria-label="Search settings" />
+            {settingsQuery && <button type="button" aria-label="Clear settings search" onClick={() => setSettingsQuery("")}><X size={13} /></button>}
+          </label>
+          <p className="settings-nav-label">Settings</p>
+          <nav className="settings-tabs" aria-label="Settings sections">
+            {filteredSettingsSections.length > 0 ? filteredSettingsSections.map((section) => {
+              const SectionIcon = section.icon;
+              return (
+                <button key={section.key} className={tab === section.key ? "active" : ""} onClick={() => setTab(section.key)}>
+                  <SectionIcon size={16} aria-hidden="true" />
+                  <span><strong>{section.label}</strong><small>{section.description}</small></span>
+                </button>
+              );
+            }) : <span className="settings-search-empty">No settings match “{settingsQuery}”.</span>}
+          </nav>
+          <div className="settings-sidebar-note"><ShieldCheck size={14} aria-hidden="true" /><span>Private by default<small>Changes apply to this Postveil workspace.</small></span></div>
+        </aside>
         <div className="settings-content">
+        <header className="settings-content-header">
+          <div><p className="eyebrow">{activeSettingsSection.group.toUpperCase()}</p><h3>{activeSettingsSection.label}</h3><p>{activeSettingsSection.description}. Keep the important controls close and the rest out of the way.</p></div>
+          <span className="settings-location">Settings / {activeSettingsSection.label}</span>
+        </header>
         {tab === "security" && securityError && <div className="settings-alert settings-error" role="alert">{securityError}</div>}
         {tab === "security" && (
           <div className="settings-grid security-settings-grid">
