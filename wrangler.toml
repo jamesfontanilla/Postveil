@@ -42,9 +42,10 @@ TURNSTILE_SITE_KEY = "0x4AAAAAAEqXXuhzdUlMoSuz"
 PROVIDER_FAILOVER_ENABLED = "false"
 GOOGLE_CLIENT_ID = "585169946821-gu9e4aldgf7ro3vfmb7a4djsu57t0vn0.apps.googleusercontent.com"
 CLOUDFLARE_OAUTH_CLIENT_ID = "3944177cefa074b8c330aff1b76f36af"
-# The OAuth client must include these four matching scopes for automatic
+# The OAuth client must include these matching scopes for automatic
 # customer-domain DNS and inbound-route setup.
-CLOUDFLARE_OAUTH_SCOPES = "zone.read dns.read zone_settings.write email_routing_rules.write"
+CLOUDFLARE_OAUTH_SCOPES = "zone.read zone_settings.write email_routing_rules.write"
+CLOUDFLARE_OAUTH_TOKEN_AUTH_METHOD = "client_secret_basic"
 CLOUDFLARE_EMAIL_WORKER_NAME = "postveil"
 
 [[routes]]

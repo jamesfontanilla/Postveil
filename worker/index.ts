@@ -116,6 +116,7 @@ interface Env {
   CLOUDFLARE_OAUTH_CLIENT_ID?: string;
   CLOUDFLARE_OAUTH_CLIENT_SECRET?: string;
   CLOUDFLARE_OAUTH_SCOPES?: string;
+  CLOUDFLARE_OAUTH_TOKEN_AUTH_METHOD?: string;
   CLOUDFLARE_EMAIL_WORKER_NAME?: string;
   MAILGUN_API_KEY?: string;
   MAILGUN_DOMAIN?: string;
@@ -936,14 +937,22 @@ async function cloudflareToken(code: string, env: Env, redirectUri: string): Pro
   if (!env.CLOUDFLARE_OAUTH_CLIENT_ID || !env.CLOUDFLARE_OAUTH_CLIENT_SECRET) return null;
   const body = new URLSearchParams({
     client_id: env.CLOUDFLARE_OAUTH_CLIENT_ID,
-    client_secret: env.CLOUDFLARE_OAUTH_CLIENT_SECRET,
     code,
     grant_type: "authorization_code",
     redirect_uri: redirectUri,
   });
+  const headers = new Headers({ "content-type": "application/x-www-form-urlencoded", accept: "application/json" });
+  const authMethod = String(env.CLOUDFLARE_OAUTH_TOKEN_AUTH_METHOD || "client_secret_basic").trim().toLowerCase();
+  if (authMethod === "client_secret_basic") {
+    headers.set("authorization", `Basic ${btoa(`${env.CLOUDFLARE_OAUTH_CLIENT_ID}:${env.CLOUDFLARE_OAUTH_CLIENT_SECRET}`)}`);
+  } else if (authMethod === "client_secret_post") {
+    body.set("client_secret", env.CLOUDFLARE_OAUTH_CLIENT_SECRET);
+  } else {
+    return null;
+  }
   const response = await fetch("https://dash.cloudflare.com/oauth2/token", {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+    headers,
     body,
   });
   if (!response.ok) return null;

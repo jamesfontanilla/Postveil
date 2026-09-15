@@ -590,6 +590,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const session = (await requireSupabase().auth.getSession()).data.session;
   const response = await fetch(path, {
     ...init,
+    credentials: "same-origin",
     headers: {
       "content-type": "application/json",
       ...(session?.access_token
@@ -1257,6 +1258,7 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
   useEffect(() => {
     const currentUrl = new URL(window.location.href);
     const result = currentUrl.searchParams.get("cloudflare");
+    const callbackCode = currentUrl.searchParams.get("code") || "";
     const callbackDomain = canonicalDomain(currentUrl.searchParams.get("domain") || "");
     if (!result) return;
     currentUrl.searchParams.delete("cloudflare");
@@ -1264,7 +1266,8 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
     currentUrl.searchParams.delete("domain");
     window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
     if (result !== "connected" || !callbackDomain) {
-      setError("Cloudflare verification was not completed. You can try again or choose another DNS provider.");
+      const reason = callbackCode ? ` (${callbackCode.replace(/_/g, " ")})` : "";
+      setError(`Cloudflare setup did not complete${reason}. Confirm the OAuth client includes Zone Settings Write and Email Routing Rules Write, then try again.`);
       return;
     }
     setDomain(callbackDomain);
