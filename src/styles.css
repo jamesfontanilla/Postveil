@@ -1534,10 +1534,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 
 /* First-run domain desk: a quiet, operational setup surface rather than a marketing page. */
 .onboarding-shell {
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 32px;
+  overflow: hidden;
   background: #e9edeb;
   color: #172522;
 }
@@ -1545,7 +1547,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   display: grid;
   grid-template-columns: minmax(280px, .78fr) minmax(0, 1.22fr);
   width: min(1120px, 100%);
-  min-height: min(720px, calc(100vh - 64px));
+  height: min(720px, calc(100dvh - 64px));
+  min-height: 0;
+  max-height: calc(100dvh - 64px);
   overflow: hidden;
   border: 1px solid #d0d9d4;
   border-radius: 18px;
@@ -1596,7 +1600,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .onboarding-rail-copy p:not(.eyebrow) { max-width: 310px; margin: 0; color: #b2c2b9; font-size: 13px; line-height: 1.7; }
 .onboarding-rail-foot { display: flex; align-items: center; gap: 9px; color: #a9c3b6; font-size: 11px; }
 .onboarding-rail-foot svg { color: #d9f19a; }
-.onboarding-content { display: flex; min-width: 0; flex-direction: column; background: #fff; }
+.onboarding-content { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: #fff; }
 .onboarding-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 30px 48px 21px; border-bottom: 1px solid #e5ebe7; }
 .onboarding-header > div { display: grid; grid-template-columns: auto auto; gap: 3px 12px; align-items: center; }
 .onboarding-header strong { color: #1b302a; font-size: 13px; }
@@ -1606,7 +1610,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .onboarding-progress { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 0 48px; }
 .onboarding-progress span { height: 3px; margin-top: -2px; border-radius: 4px; background: #e2e9e5; }
 .onboarding-progress span.complete { background: #2b6755; }
-.onboarding-body { width: min(100%, 630px); margin: auto; padding: 54px 48px 42px; }
+.onboarding-body { width: min(100%, 630px); flex: 1 1 auto; min-height: 0; margin: 0 auto; overflow-y: auto; overscroll-behavior: contain; padding: 54px 48px 42px; }
 .onboarding-body h2 { margin: 13px 0 12px; color: #192d27; font-size: clamp(29px, 4vw, 43px); line-height: 1.03; letter-spacing: -.06em; }
 .onboarding-lede { max-width: 520px; margin: 0 0 32px; color: #71837a; font-size: 14px; line-height: 1.65; }
 .onboarding-choice-grid { display: grid; gap: 10px; }
@@ -1688,8 +1692,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 
 @media (max-width: 780px) {
   .onboarding-shell { display: block; padding: 0; background: #fff; }
-  .onboarding-frame { display: block; min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
-  .onboarding-rail { min-height: 250px; padding: 24px 24px 30px; }
+  .onboarding-frame { display: flex; height: 100dvh; max-height: 100dvh; flex-direction: column; border: 0; border-radius: 0; box-shadow: none; }
+  .onboarding-rail { flex: 0 0 auto; min-height: 250px; padding: 24px 24px 30px; }
   .onboarding-rail-copy { margin-top: 48px; padding: 0; }
   .onboarding-rail-copy h1 { margin: 12px 0 10px; font-size: 35px; }
   .onboarding-rail-copy p:not(.eyebrow) { max-width: 440px; font-size: 12px; }
@@ -1697,6 +1701,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .onboarding-rail::after { right: -70px; bottom: -150px; }
   .onboarding-header { padding: 21px 24px 17px; }
   .onboarding-progress { padding: 0 24px; }
+  .onboarding-content { flex: 1 1 auto; }
   .onboarding-body { padding: 37px 24px 34px; }
   .dns-record-row { grid-template-columns: 34px minmax(0, 1fr); }
   .dns-record-row code:last-child { grid-column: 2; overflow-wrap: anywhere; white-space: normal; }
