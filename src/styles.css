@@ -1634,6 +1634,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .onboarding-actions .secondary-button { background: #fff; }
 .onboarding-provider-row { display: grid; gap: 10px; margin-top: 24px; }
 .onboarding-label { color: #60766b; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.onboarding-provider-row select { width: 100%; min-height: 48px; appearance: none; border: 1px solid #cbdcd1; border-radius: 10px; background: #f8fbf8 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%232b6755' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 15px center; color: #1f3b2f; padding: 0 42px 0 14px; font: 600 13px var(--font-sans); cursor: pointer; }
+.onboarding-provider-row select:hover { border-color: #8db3a0; background-color: #f2f8f3; }
+.onboarding-provider-row select:focus-visible { border-color: #2b6755; outline: 3px solid rgba(43, 103, 85, .18); outline-offset: 2px; }
 .provider-pills { display: flex; flex-wrap: wrap; gap: 7px; }
 .provider-pills button { border: 1px solid #d8e4dc; border-radius: 99px; background: #fff; color: #61776b; padding: 8px 11px; font-size: 11px; }
 .provider-pills button:hover, .provider-pills button.selected { border-color: #2b6755; background: #eff7ef; color: #2b6755; }
