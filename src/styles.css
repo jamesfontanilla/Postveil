@@ -1648,6 +1648,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .cloudflare-connect-copy strong { color: #254136; font-size: 12px; }
 .cloudflare-connect-copy small { max-width: 410px; margin-top: 4px; color: #7b8e83; font-size: 10px; line-height: 1.45; }
 .cloudflare-connect-card .secondary-button { flex: 0 0 auto; min-height: 36px; padding: 8px 12px; }
+.registrar-guide { margin-top: 18px; border: 1px solid #d8e5dc; border-radius: 9px; background: #f8fbf8; padding: 16px; }
+.registrar-guide-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.registrar-guide-head h3 { margin: 4px 0 0; color: #243b31; font-size: 18px; letter-spacing: -.02em; }
+.registrar-guide-head svg { color: #648974; }
+.registrar-guide p { margin: 11px 0 0; color: #52695d; font-size: 11px; line-height: 1.55; }
+.registrar-guide p strong { color: #2b5142; }
+.registrar-guide > small { display: block; margin-top: 11px; color: #7b8e83; font-size: 10px; line-height: 1.45; }
 .dns-row { display: grid; grid-template-columns: auto 1fr auto; gap: 11px; align-items: center; padding: 14px 16px; border-bottom: 1px solid #edf1ee; }
 .dns-row:last-child { border-bottom: 0; }
 .dns-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: #eff6ef; color: #477b63; }
