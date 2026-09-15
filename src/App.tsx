@@ -27,6 +27,7 @@ import {
   Briefcase,
   CalendarDays,
   Check,
+  Copy,
   ChevronDown,
   Clock3,
   Download,
@@ -1239,6 +1240,7 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
   const [busy, setBusy] = useState(false);
   const [dnsRefreshBusy, setDnsRefreshBusy] = useState(false);
   const [domainStatusData, setDomainStatusData] = useState<DomainStatusResponse | null>(null);
+  const [copiedRecord, setCopiedRecord] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -1355,6 +1357,13 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
     }
   }
 
+  async function copyRecord(record: DomainRecord) {
+    const value = [record.type || "DNS", record.name || "@", record.content || "", record.priority ? `priority ${record.priority}` : ""].filter(Boolean).join("\t");
+    await navigator.clipboard.writeText(value);
+    setCopiedRecord(value);
+    window.setTimeout(() => setCopiedRecord((current) => current === value ? null : current), 1800);
+  }
+
   async function finish() {
     setBusy(true);
     setError("");
@@ -1400,10 +1409,10 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
             </>}
             {step === 2 && <>
               <p className="eyebrow">ONE SMALL DNS HANDOFF</p><h2>Connect {cleanDomain || "your domain"}.</h2><p className="onboarding-lede">Your messages stay in Postveil after this. DNS only tells the internet where mail for your name belongs.</p>
-              <div className="onboarding-provider-row"><span className="onboarding-label">Where do you manage DNS?</span><div className="provider-pills">{DNS_PROVIDERS.map((provider) => <button type="button" key={provider} className={dnsProvider === provider ? "selected" : ""} onClick={() => { setDnsProvider(provider); setDomainStatusData(null); setDomainStatus("pending"); }}>{provider}</button>)}</div></div>
+              <div className="onboarding-provider-row"><span className="onboarding-label" id="dns-provider-label">Where do you manage DNS?</span><div className="provider-pills" role="radiogroup" aria-labelledby="dns-provider-label">{DNS_PROVIDERS.map((provider) => <button type="button" role="radio" aria-checked={dnsProvider === provider} key={provider} className={dnsProvider === provider ? "selected" : ""} onClick={() => { setDnsProvider(provider); setDomainStatusData(null); setDomainStatus("pending"); }}>{provider}</button>)}</div></div>
               <div className="registrar-guide"><div className="registrar-guide-head"><div><span className="eyebrow">YOUR REGISTRAR GUIDE</span><h3>{dnsProvider}</h3></div><Globe2 size={20} aria-hidden="true" /></div><p><strong>Open:</strong> {registrarGuide.path}</p><p><strong>Then:</strong> {registrarGuide.where}. Add the TXT verification record and the four MX records below.</p><small>{registrarGuide.note}</small></div>
-              <div className="dns-preview"><div className="dns-preview-head"><div><strong>Connection checklist</strong><small>Postveil checks the public DNS state and the inbound Worker route.</small></div><span className={domainStatus === "ready" ? "verified-badge" : "pending-badge"}>{domainStatus === "ready" ? "Ready" : domainStatus === "verified" ? "DNS found" : "Pending"}</span></div><div className="dns-row"><span className="dns-mark"><Mail size={15} /></span><div><strong>Receiving mail</strong><small>{domainStatusData?.dnsReady ? "The exact Postveil MX target is published." : "Add the exact MX target shown below."}</small></div><span>{domainStatusData?.dnsReady ? "Ready" : "Next"}</span></div><div className="dns-row"><span className="dns-mark"><ShieldCheck size={15} /></span><div><strong>Inbound route</strong><small>{domainStatusData?.routeReady ? `Catch-all mail is connected to ${domainStatusData.routeTarget || "Postveil"}.` : dnsProvider === "Cloudflare" ? "Cloudflare must grant write access before Postveil can connect the Worker." : "A registrar-only connection cannot create a Cloudflare Worker route."}</small></div><span>{domainStatusData?.routeReady ? "Ready" : "Next"}</span></div>{(domainStatusData?.records || domainStatusData?.manualRecords || []).slice(0, 8).map((record, index) => <div className="dns-record-row" key={`${record.type}-${record.name}-${record.content}-${index}`}><span>{record.type || "DNS"}</span><code>{record.name || "@"}</code><code>{record.content || ""}{record.priority ? ` · priority ${record.priority}` : ""}</code></div>)}<div className="dns-preview-actions"><button type="button" className="text-button" onClick={() => void refreshDomain()} disabled={dnsRefreshBusy || busy}>{dnsRefreshBusy ? "Checking…" : "Check DNS again"}</button></div></div>
-              <div className="onboarding-hint"><ShieldAlert size={17} /><span>DNS changes can take a little while. Postveil keeps mail disabled until the domain and inbound records are verified.</span></div>
+              <div className="dns-preview"><div className="dns-preview-head"><div><strong>Verify your domain</strong><small>Postveil checks ownership and the exact public MX records.</small></div><span className={domainStatus === "ready" ? "verified-badge" : "pending-badge"}>{domainStatus === "ready" ? "Ready" : domainStatus === "verified" ? "DNS found" : "Pending"}</span></div><div className="dns-row"><span className="dns-mark"><Mail size={15} aria-hidden="true" /></span><div><strong>Mail records</strong><small>{domainStatusData?.dnsReady ? "All required MX records are published." : "Add every MX record shown below."}</small></div><span>{domainStatusData?.dnsReady ? "Found" : "Next"}</span></div><div className="dns-row"><span className="dns-mark"><ShieldCheck size={15} aria-hidden="true" /></span><div><strong>Mail routing</strong><small>{domainStatusData?.routeReady ? `Catch-all mail is connected to ${domainStatusData.routeTarget || "Postveil"}.` : "DNS verification does not create the inbound Worker route. Postveil will tell you if routing still needs attention."}</small></div><span>{domainStatusData?.routeReady ? "Ready" : "Next"}</span></div>{(domainStatusData?.records || domainStatusData?.manualRecords || []).slice(0, 8).map((record, index) => { const recordText = [record.type || "DNS", record.name || "@", record.content || "", record.priority ? `priority ${record.priority}` : ""].filter(Boolean).join("\t"); return <div className="dns-record-row" key={`${record.type}-${record.name}-${record.content}-${index}`}><span>{record.type || "DNS"}</span><code>{record.name || "@"}</code><code>{record.content || ""}{record.priority ? ` · priority ${record.priority}` : ""}</code><button type="button" className="text-button" aria-label={`Copy ${record.type || "DNS"} record`} onClick={() => void copyRecord(record)}>{copiedRecord === recordText ? "Copied" : <><Copy size={14} aria-hidden="true" /> Copy</>}</button></div>; })}<div className="dns-preview-actions"><button type="button" className="text-button" onClick={() => void refreshDomain()} disabled={dnsRefreshBusy || busy}>{dnsRefreshBusy ? "Checking…" : "Check DNS again"}</button></div></div>
+              <div className="onboarding-hint"><ShieldAlert size={17} aria-hidden="true" /><span>DNS changes usually appear within minutes, but can take up to 24–48 hours. Mail stays disabled until verification and routing are ready.</span></div>
               {error && <div className="form-error" role="alert">{error}</div>}
               <div className="onboarding-actions"><button className="secondary-button" type="button" onClick={() => setStep(1)}><ArrowLeft size={16} /> Back</button><button className="primary-button" type="button" onClick={() => void advance(3, { dnsProvider, domainStatus })} disabled={busy || dnsRefreshBusy || domainStatus !== "ready"}>Continue to mailbox <ArrowRight size={16} /></button></div>
             </>}
