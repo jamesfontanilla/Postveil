@@ -1736,6 +1736,37 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .onboarding-choice { transition: none; }
 }
 
+/* Onboarding polish: the setup should feel like a guided handoff, not a DNS form. */
+.onboarding-shell { background: radial-gradient(circle at 15% 10%, #f8fbf7 0, #e9edeb 42%, #dfe7e1 100%); }
+.onboarding-frame { border-color: #c8d6cd; border-radius: 20px; box-shadow: 0 34px 90px rgba(24, 45, 38, .16), 0 3px 10px rgba(24, 45, 38, .06); }
+.onboarding-rail { background: linear-gradient(145deg, #132b25 0%, #1d3e33 58%, #254b3d 100%); }
+.onboarding-rail::before { opacity: .32; background-size: 40px 40px; }
+.onboarding-rail::after { right: -48px; bottom: 105px; width: 275px; height: 275px; border-color: rgba(217, 241, 154, .25); }
+.onboarding-header { padding-top: 27px; }
+.onboarding-save-later { display: inline-flex; align-items: center; gap: 6px; }
+.onboarding-save-later:hover { color: #2b6755; }
+.onboarding-progress { gap: 4px; }
+.onboarding-progress span { height: 4px; border-radius: 0; }
+.onboarding-body { scrollbar-width: thin; scrollbar-color: #c7d8cc transparent; }
+.onboarding-body h2 { max-width: 560px; }
+.onboarding-choice { min-height: 74px; border-radius: 12px; padding: 15px 18px; }
+.onboarding-choice > svg:first-child { color: #4f866d; }
+.onboarding-provider-row { grid-template-columns: 1fr minmax(200px, 260px); align-items: center; }
+.onboarding-provider-row select { min-height: 44px; }
+.registrar-guide { background: linear-gradient(135deg, #f8fbf8, #f1f7f2); }
+.registrar-safety { display: flex; align-items: flex-start; gap: 8px; margin-top: 14px; border-top: 1px solid #dbe8de; padding-top: 12px; color: #4d6e5c; font-size: 10px; line-height: 1.5; }
+.registrar-safety svg { flex: 0 0 auto; color: #2f7657; margin-top: 1px; }
+.dns-preview { box-shadow: 0 9px 24px rgba(40, 80, 58, .05); }
+.dns-preview-head { background: #f7fbf8; }
+.dns-record-row code { background: #f4f8f4; border-radius: 4px; padding: 5px 7px; }
+.onboarding-actions .primary-button { min-width: 150px; }
+.onboarding-success-mark { box-shadow: 0 0 0 9px #eef7e9; }
+@media (max-width: 780px) {
+  .onboarding-shell { background: #fff; }
+  .onboarding-frame { border-radius: 0; }
+  .onboarding-provider-row { grid-template-columns: 1fr; align-items: stretch; }
+}
+
 /* Public 3D home: a CSS-built mailbox keeps the idea tangible without making the landing page depend on a heavy external scene. */
 .public-home {
   min-height: 100vh;
