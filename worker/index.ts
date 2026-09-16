@@ -137,6 +137,7 @@ interface Env {
   POSTMARK_WEBHOOK_SECRET?: string;
   SENDGRID_WEBHOOK_SECRET?: string;
   SES_WEBHOOK_SECRET?: string;
+  SES_INBOUND_LAMBDA_SECRET?: string;
   SES_SNS_TOPIC_ARN?: string;
   SES_CONFIGURATION_SET_NAME?: string;
   SMTP_WEBHOOK_SECRET?: string;
@@ -1242,7 +1243,7 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
   return null;
 }
 
-function storageClient(env: Env): S3Client {
+function storageClient(env: Env): any {
   return new S3Client({
     region: env.B2_REGION,
     endpoint: env.B2_ENDPOINT,
@@ -4216,7 +4217,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (inboundWebhookMatch) {
     if (request.method !== "POST") return error("Method not allowed", 405);
     const provider = inboundWebhookMatch[1] as ProviderName;
-    const expectedSecret = providerWebhookSecret(env, provider);
+    const expectedSecret = provider === "ses" ? (env.SES_INBOUND_LAMBDA_SECRET || providerWebhookSecret(env, provider)) : providerWebhookSecret(env, provider);
     const suppliedSecret = request.headers.get("x-webhook-secret") || request.headers.get("x-webhook-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || "";
     if (!expectedSecret) return error("This inbound webhook is not configured", 503);
     if (!constantTimeEqual(suppliedSecret, expectedSecret)) return error("Unauthorized", 401);
