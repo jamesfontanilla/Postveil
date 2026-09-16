@@ -4366,12 +4366,17 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const now = new Date().toISOString();
     const ownershipReady = verification?.provider === "cloudflare" ? true : await exactDnsTxtReady(domain, integration?.ownership_token || "");
     const ses = await provisionSesDomain(env, domain);
-    const sesRecords = [...manualInboundRecords(env, domain, integration?.ownership_token), ...ses.records];
+    // SES can briefly omit DKIM tokens while an identity is propagating. Keep
+    // the last known records so refresh never makes the DNS checklist vanish.
+    const previousRecords = integration?.records_json ? parseJsonArray(integration.records_json) : [];
+    const previousDkimRecords = previousRecords.filter((record) => String(record?.type || "").toUpperCase() === "CNAME" && String(record?.content || "").endsWith(".dkim.amazonses.com"));
+    const dkimRecords = ses.records.length > 0 ? ses.records : previousDkimRecords;
+    const sesRecords = [...manualInboundRecords(env, domain, integration?.ownership_token), ...dkimRecords];
     const effectiveRouteReady = ses.ready && dnsReady;
     const effectiveStatus = domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady });
     const mailReady = ses.ready && dnsReady;
     await env.DB.prepare("UPDATE pv_domain_verifications SET provider = 'ses', status = ?1, dns_ready = ?2, verified_at = ?3, last_checked_at = ?4, updated_at = ?4 WHERE user_id = ?5 AND domain = ?6").bind(mailReady ? "verified" : effectiveStatus, dnsReady ? 1 : 0, mailReady ? now : null, now, user.id, domain).run();
-    await saveDomainIntegration(env, { userId: user.id, domain, provider: String(body.provider || "manual"), zoneId: null, accountId: null, ownershipStatus: ses.exists ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: null, routeTarget: "Amazon SES", ownershipToken: null, ownershipRecordName: null, records: sesRecords, lastError: ses.error });
+    await saveDomainIntegration(env, { userId: user.id, domain, provider: String(body.provider || "manual"), zoneId: null, accountId: null, ownershipStatus: ses.exists ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: null, routeTarget: "Amazon SES", ownershipToken: integration?.ownership_token || null, ownershipRecordName: integration?.ownership_record_name || null, records: sesRecords, lastError: ses.error });
     await promoteVerifiedMailboxes(env, user.id, domain, mailReady);
     return json({ domain, ownershipVerified: ses.exists, verified: mailReady, dnsReady, routeReady: effectiveRouteReady, automationStatus: domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady }), inboundRouteStatus: effectiveRouteReady ? "ready" : "pending", records: sesRecords, manualRecords: sesRecords, ownershipRecordName: "", expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now, sesVerificationStatus: ses.ready ? "verified" : "pending", sesError: ses.error });
   }
