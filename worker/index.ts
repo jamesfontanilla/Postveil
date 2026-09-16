@@ -4183,8 +4183,12 @@ function protectedHeaders(response: Response, noStore = false): Response {
     );
   }
   if (noStore || headers.get("content-type")?.includes("text/html")) {
-    headers.set("Cache-Control", "no-store");
+    // The app shell contains the current onboarding client. Explicitly prevent
+    // browser and intermediary reuse so a deploy cannot leave users on stale
+    // onboarding logic at the edge.
+    headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
     headers.set("CDN-Cache-Control", "no-store");
+    headers.set("Surrogate-Control", "no-store");
   }
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
