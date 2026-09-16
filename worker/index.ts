@@ -867,7 +867,7 @@ async function provisionSesDomain(env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECR
     const tokens: string[] = Array.isArray(dkim?.Tokens) ? (dkim.Tokens as unknown[]).map((token: unknown) => String(token)).filter(Boolean) : [];
     const records = tokens.map((token) => ({ name: `${token}._domainkey.${domain}`, type: "CNAME", content: `${token}.dkim.amazonses.com`, ttl: 3600, status: "manual" }));
     const verificationStatus = String(identity.VerificationStatus || "").toUpperCase();
-    const verifiedForSending = identity.VerifiedForSendingStatus === true || verificationStatus === "SUCCESS";
+    const verifiedForSending = identity.VerifiedForSendingStatus === true || String(identity.VerifiedForSendingStatus || "").toLowerCase() === "true" || verificationStatus === "SUCCESS";
     const dkimStatus = String(dkim?.Status || "").toUpperCase();
     // SES may omit Tokens after a verified identity has been read back. An
     // explicit successful identity status is still authoritative; require
@@ -4384,7 +4384,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     await env.DB.prepare("UPDATE pv_domain_verifications SET provider = 'ses', status = ?1, dns_ready = ?2, verified_at = ?3, last_checked_at = ?4, updated_at = ?4 WHERE user_id = ?5 AND domain = ?6").bind(mailReady ? "verified" : effectiveStatus, dnsReady ? 1 : 0, mailReady ? now : null, now, user.id, domain).run();
     await saveDomainIntegration(env, { userId: user.id, domain, provider: String(body.provider || "manual"), zoneId: null, accountId: null, ownershipStatus: ses.exists ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: null, routeTarget: "Amazon SES", ownershipToken: integration?.ownership_token || null, ownershipRecordName: integration?.ownership_record_name || null, records: sesRecords, lastError: ses.error });
     await promoteVerifiedMailboxes(env, user.id, domain, mailReady);
-    return json({ domain, ownershipVerified: ses.exists, verified: mailReady, dnsReady, routeReady: effectiveRouteReady, automationStatus: domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady }), inboundRouteStatus: effectiveRouteReady ? "ready" : "pending", records: sesRecords, manualRecords: sesRecords, ownershipRecordName: "", expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now, sesVerificationStatus: ses.ready ? "verified" : "pending", sesError: ses.error });
+    return json({ domain, ownershipVerified: ses.exists, verified: mailReady, dnsReady, mxReady: dnsReady, dkimReady: ses.ready, sesReady: ses.ready, routeReady: effectiveRouteReady, automationStatus: domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady }), inboundRouteStatus: effectiveRouteReady ? "ready" : "pending", records: sesRecords, manualRecords: sesRecords, ownershipRecordName: "", expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now, sesVerificationStatus: ses.ready ? "verified" : "pending", sesError: ses.error });
   }
 
   const mailbox = await ensureProfileAndMailbox(env, user);
