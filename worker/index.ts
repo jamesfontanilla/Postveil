@@ -872,7 +872,8 @@ async function provisionSesDomain(env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECR
     // SES may omit Tokens after a verified identity has been read back. An
     // explicit successful identity status is still authoritative; require
     // DKIM success only when SES includes a DKIM status.
-    const ready = verifiedForSending && (!dkimStatus || dkimStatus === "SUCCESS");
+    const dkimSuccessful = dkimStatus === "SUCCESS";
+    const ready = (verifiedForSending || dkimSuccessful) && (!dkimStatus || dkimSuccessful);
     return { ready, exists: true, records, error: null };
   } catch (error) {
     return { ready: false, exists: false, records: [], error: error instanceof Error ? error.message.slice(0, 500) : "Amazon SES domain provisioning failed" };
