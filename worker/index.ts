@@ -867,11 +867,12 @@ async function provisionSesDomain(env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECR
     const tokens: string[] = Array.isArray(dkim?.Tokens) ? (dkim.Tokens as unknown[]).map((token: unknown) => String(token)).filter(Boolean) : [];
     const records = tokens.map((token) => ({ name: `${token}._domainkey.${domain}`, type: "CNAME", content: `${token}.dkim.amazonses.com`, ttl: 3600, status: "manual" }));
     const verificationStatus = String(identity.VerificationStatus || "").toUpperCase();
+    const verifiedForSending = identity.VerifiedForSendingStatus === true || verificationStatus === "SUCCESS";
     const dkimStatus = String(dkim?.Status || "").toUpperCase();
     // SES may omit Tokens after a verified identity has been read back. An
     // explicit successful identity status is still authoritative; require
     // DKIM success only when SES includes a DKIM status.
-    const ready = verificationStatus === "SUCCESS" && (!dkimStatus || dkimStatus === "SUCCESS");
+    const ready = verifiedForSending && (!dkimStatus || dkimStatus === "SUCCESS");
     return { ready, exists: true, records, error: null };
   } catch (error) {
     return { ready: false, exists: false, records: [], error: error instanceof Error ? error.message.slice(0, 500) : "Amazon SES domain provisioning failed" };
