@@ -3967,9 +3967,11 @@ function bulkBeforeState(message: JsonRecord): JsonRecord {
 }
 
 async function detectDelayedMessages(env: Env): Promise<void> {
-  const threshold = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-  const accepted = await dbRequest<JsonRecord[]>(env, `messages?direction=eq.outbound&delivery_status=eq.accepted&sent_at=lt.${encodeURIComponent(threshold)}&delivered_at=is.null&bounced_at=is.null&complained_at=is.null&limit=100&select=id,delayed_count`).catch(() => []);
-  for (const message of accepted) await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}&delivery_status=eq.accepted`, { method: "PATCH", body: JSON.stringify({ status: "delayed", delivery_status: "delayed", delayed_at: new Date().toISOString(), delayed_count: Number(message.delayed_count || 0) + 1, delivery_error_code: "delivery_confirmation_delayed", delivery_error: "The provider accepted this message, but no delivery confirmation arrived within 15 minutes", updated_at: new Date().toISOString() }) }).catch(() => undefined);
+  // Provider acceptance is a successful send. Lack of a later webhook is not
+  // evidence of deferral, so never relabel accepted mail as delayed.
+  // Repair rows written by the old timeout-based classifier as well.
+  const legacy = await dbRequest<JsonRecord[]>(env, "messages?direction=eq.outbound&delivery_error_code=eq.delivery_confirmation_delayed&limit=100&select=id").catch(() => []);
+  for (const message of legacy) await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(message.id))}&delivery_error_code=eq.delivery_confirmation_delayed`, { method: "PATCH", body: JSON.stringify({ status: "sent", delivery_status: "accepted", delayed_at: null, delivery_error_code: null, delivery_error: null, work_note: "", updated_at: new Date().toISOString() }) }).catch(() => undefined);
 }
 
 function providerWebhookSecret(env: Env, provider: ProviderName): string | undefined {
