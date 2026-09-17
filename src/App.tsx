@@ -1240,6 +1240,7 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
   const [busy, setBusy] = useState(false);
   const [dnsRefreshBusy, setDnsRefreshBusy] = useState(false);
   const [domainStatusData, setDomainStatusData] = useState<DomainStatusResponse | null>(null);
+  const domainStatusRequest = useRef(0);
   const [copiedRecord, setCopiedRecord] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -1257,12 +1258,15 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
       if (saved.dnsProvider) setDnsProvider(saved.dnsProvider);
       if (saved.mailboxAddress) setMailboxAddress(saved.mailboxAddress);
       if (saved.domainStatus) setDomainStatus(saved.domainStatus);
-      if (saved.domain) void apiFetch<DomainStatusResponse>(`/api/domains/dns-records?domain=${encodeURIComponent(saved.domain)}`)
+      if (saved.domain) {
+        const requestId = ++domainStatusRequest.current;
+        void apiFetch<DomainStatusResponse>(`/api/domains/dns-records?domain=${encodeURIComponent(saved.domain)}`)
         .then((status) => {
-          if (!active) return;
+          if (!active || requestId !== domainStatusRequest.current) return;
           setDomainStatusData(status);
           setDomainStatus(status.verified ? "ready" : status.ownershipVerified ? "verified" : "pending");
         }).catch(() => undefined);
+      }
     }).catch(() => undefined);
     return () => { active = false; };
   }, []);
@@ -1270,9 +1274,10 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
   useEffect(() => {
     if (step !== 2 || !domain) return;
     let active = true;
+    const requestId = ++domainStatusRequest.current;
     void apiFetch<DomainStatusResponse>(`/api/domains/dns-records?domain=${encodeURIComponent(canonicalDomain(domain))}`)
       .then((status) => {
-        if (!active) return;
+        if (!active || requestId !== domainStatusRequest.current) return;
         setDomainStatusData(status);
         setDomainStatus(status.verified ? "ready" : status.ownershipVerified ? "verified" : "pending");
       }).catch(() => undefined);
@@ -1345,8 +1350,10 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
     if (!cleanDomain) return;
     setDnsRefreshBusy(true);
     setError("");
+    const requestId = ++domainStatusRequest.current;
     try {
       const status = await apiFetch<DomainStatusResponse>("/api/domains/verification/refresh", { method: "POST", body: JSON.stringify({ domain: cleanDomain, provider: dnsProvider }) });
+      if (requestId !== domainStatusRequest.current) return;
       setDomainStatusData(status);
       setDomainStatus(status.verified ? "ready" : status.ownershipVerified ? "verified" : "pending");
       setNotice(status.verified ? "Domain DNS and inbound routing are ready." : status.inboundRouteStatus === "pending" ? "The DNS is visible, but the inbound route is not connected yet." : "Postveil is still waiting for the required DNS records.");
