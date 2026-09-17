@@ -1197,6 +1197,7 @@ type DomainStatusResponse = {
   manualRecords?: DomainRecord[];
   lastError?: string | null;
   expectedMxTargets?: string[];
+  mailboxes?: Mailbox[];
 };
 
 const ONBOARDING_STEPS = [
@@ -1375,6 +1376,10 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
     setBusy(true);
     setError("");
     try {
+      // Re-run the promotion immediately before leaving onboarding. This
+      // closes the race where verification succeeds while the mailbox list
+      // still contains the pre-verification can_send=false snapshot.
+      if (domain) await refreshDomain();
       await persist({ completed: true, step: 4 });
       onComplete();
     } catch (saveError) {
