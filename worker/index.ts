@@ -840,7 +840,7 @@ async function cloudflareApi<T>(accessToken: string, path: string, init: Request
 }
 
 function manualInboundRecords(env: Pick<Env, "INBOUND_MX_TARGETS">, domain: string, ownershipToken?: string | null): JsonRecord[] {
-  const records = configuredInboundMxTargets(env).map((content, index) => ({
+  const records: JsonRecord[] = configuredInboundMxTargets(env).map((content, index) => ({
     name: domain,
     type: "MX",
     content,
