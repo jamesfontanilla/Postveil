@@ -3224,6 +3224,10 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
       mailbox = { ...mailbox, can_send: true, can_receive: true };
     }
   }
+  // Never allow a missing or stale sender selection to fall through to the
+  // deployment default (postmaster@...). The authenticated mailbox must be
+  // the actual From address sent to the provider.
+  if (ownerId && !mailbox) return error("Select an available sender mailbox before sending", 400);
   if (ownerId && !mailbox?.can_send) return error("This sender address is not enabled for sending", 403);
   if (ownerId && mailboxAdminSettings && mailboxAdminSettings.status !== "active") return error("This mailbox is currently suspended", 403);
   if (ownerId && mailboxAdminSettings && mailboxAdminSettings.sending_limit_daily > 0) {

@@ -1596,6 +1596,11 @@ function LegacyCompose({
     if (sendMode === "send_on_behalf" && selectedMailbox.can_send_on_behalf) return;
     setSendMode(selectedMailbox.can_send_as ? "send_as" : "send_on_behalf");
   }, [selectedMailbox?.id, selectedMailbox?.is_shared, selectedMailbox?.can_send_as, selectedMailbox?.can_send_on_behalf, sendMode]);
+  useEffect(() => {
+    const available = mailboxes.filter((mailbox) => mailbox.can_send);
+    if (!available.length) { setFromAddress(""); return; }
+    if (!available.some((mailbox) => mailbox.address === fromAddress)) setFromAddress(available[0].address);
+  }, [mailboxes, fromAddress]);
   const saveDraft = useCallback(async () => {
     if (!fromAddress || (!to.trim() && !subject.trim() && !text.trim())) return;
     setSaving(true);
@@ -2169,6 +2174,7 @@ function Compose({
   async function send(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
+      if (!selectedMailbox?.can_send) throw new Error("Select an available sender mailbox before sending.");
       if (confidentialMode && passwordProtected && confidentialPassword.length < 10) throw new Error("Use a confidential message password of at least 10 characters.");
       if (recurrence !== "none" && !scheduledAt) throw new Error("Choose a first send time before enabling recurring delivery.");
       const delay = Number(delayMinutes || 0);
