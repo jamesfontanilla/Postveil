@@ -646,6 +646,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .command-ribbon, .message-command-ribbon { display: flex; align-items: stretch; gap: 12px; margin: 0 16px 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-muted); }
 .command-ribbon { min-height: 52px; }
 .message-command-ribbon { display: grid; grid-template-rows: 32px auto; gap: 0; margin: 0 0 20px; background: var(--surface-muted); }
+.mail-workspace.is-reading-message > .mail-ribbon { display: none; }
 .message-ribbon-tabs { display: flex; align-items: flex-end; gap: 18px; border-bottom: 1px solid var(--line); padding: 0 12px; }
 .message-ribbon-tab { position: relative; min-height: 32px; border: 0; background: transparent; color: var(--muted); padding: 8px 1px 7px; font-size: 10px; font-weight: 700; cursor: pointer; }
 .message-ribbon-tab:hover, .message-ribbon-tab:focus-visible { color: var(--ink); }
@@ -730,7 +731,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .command-ribbon-group { padding: 7px 6px; }
   .command-ribbon-group > span { display: none; }
   .command-ribbon-clear { margin-right: 6px; }
-  .message-command-ribbon { display: block; margin-bottom: 18px; }
+.message-command-ribbon { display: block; margin-bottom: 18px; }
   .message-command-ribbon { display: grid; grid-template-rows: 32px auto; }
   .message-ribbon-tabs { overflow-x: auto; scrollbar-width: none; }
   .message-ribbon-tabs::-webkit-scrollbar { display: none; }

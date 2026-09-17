@@ -5610,7 +5610,7 @@ function MailboxApp({ session }: { session: Session }) {
         </div>
       </aside>
       {view === "mail" ? (
-        <div className="mail-workspace">
+        <div className={`mail-workspace ${selected ? "is-reading-message" : ""}`}>
           <div className="mail-ribbon" aria-label="Mail home ribbon">
             <div className="mail-ribbon-tabs" role="tablist" aria-label="Mail ribbon tabs">
               {(["home", "view", "help"] as const).map((tabName) => (
@@ -6061,7 +6061,7 @@ function MailboxApp({ session }: { session: Session }) {
                       {selected.legal_hold && <span className="detail-status-accent">Legal hold</span>}
                     </div>
                   </div>
-                  <div className="head-actions">
+                  {selected.folder === "trash" && <div className="head-actions">
                     <button
                       className="icon-button"
                       title={selected.is_starred ? "Unstar message" : "Star message"}
@@ -6137,7 +6137,7 @@ function MailboxApp({ session }: { session: Session }) {
                         </button>
                       </>
                     )}
-                   </div>
+                   </div>}
                  </div>
                  <div className="message-command-ribbon" aria-label="Message actions">
                    <div className="message-ribbon-tabs" role="tablist" aria-label="Message ribbon tabs">
