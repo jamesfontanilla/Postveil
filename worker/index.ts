@@ -246,11 +246,11 @@ function isConfiguredSenderAddress(env: Pick<Env, "APP_DOMAIN" | "ALLOWED_SENDER
   return isValidEmailAddress(normalized) && configuredSenderDomains(env).includes(domain);
 }
 
-function defaultMailboxAddress(env: Pick<Env, "APP_DOMAIN" | "DEFAULT_FROM_EMAIL" | "ALLOWED_SENDER_DOMAINS">): string {
+function defaultMailboxAddress(env: Pick<Env, "APP_DOMAIN" | "ALLOWED_SENDER_DOMAINS">): string {
   // Keep the bootstrap mailbox neutral and user-facing. postmaster is never
   // a product sender; SES bounce handling belongs in the provider layer.
   const fallback = `hello@${configuredAppDomain(env)}`;
-  const address = cleanAddress(env.DEFAULT_FROM_EMAIL?.trim() || fallback);
+  const address = cleanAddress(fallback);
   if (!isConfiguredSenderAddress(env, address)) throw new Error("DEFAULT_FROM_EMAIL must use an allowed sender domain");
   return address;
 }
