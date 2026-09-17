@@ -247,7 +247,9 @@ function isConfiguredSenderAddress(env: Pick<Env, "APP_DOMAIN" | "ALLOWED_SENDER
 }
 
 function defaultMailboxAddress(env: Pick<Env, "APP_DOMAIN" | "DEFAULT_FROM_EMAIL" | "ALLOWED_SENDER_DOMAINS">): string {
-  const fallback = `postmaster@${configuredAppDomain(env)}`;
+  // Keep the bootstrap mailbox neutral and user-facing. postmaster is never
+  // a product sender; SES bounce handling belongs in the provider layer.
+  const fallback = `hello@${configuredAppDomain(env)}`;
   const address = cleanAddress(env.DEFAULT_FROM_EMAIL?.trim() || fallback);
   if (!isConfiguredSenderAddress(env, address)) throw new Error("DEFAULT_FROM_EMAIL must use an allowed sender domain");
   return address;
@@ -3228,8 +3230,8 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
       mailbox = { ...mailbox, can_send: true, can_receive: true };
     }
   }
-  // Never allow a missing or stale sender selection to fall through to the
-  // deployment default (postmaster@...). The authenticated mailbox must be
+  // Never allow a missing or stale sender selection to fall through to a
+  // deployment default. The authenticated mailbox must be
   // the actual From address sent to the provider.
   if (ownerId && !mailbox) return error("Select an available sender mailbox before sending", 400);
   if (ownerId && !mailbox?.can_send) return error("This sender address is not enabled for sending", 403);
