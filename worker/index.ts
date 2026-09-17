@@ -1431,14 +1431,13 @@ async function permanentlyDeleteMessage(env: Env, ownerId: string, messageId: st
   await Promise.allSettled(objectKeys.map((key) => deleteObject(env, key)));
 }
 
-async function ensureProfileAndMailbox(env: Env, user: User): Promise<Mailbox> {
+async function ensureProfileAndMailbox(env: Env, user: User): Promise<Mailbox | null> {
   await dbRequest(env, "profiles", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ id: user.id, display_name: user.email?.split("@")[0] ?? "Mailbox owner" }) });
   await dbRequest(env, "user_settings", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ owner_id: user.id }) });
   const existing = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&order=is_default.desc,created_at.asc&limit=1`);
   if (existing[0]) return existing[0];
-  const address = defaultMailboxAddress(env);
-  const created = await dbRequest<Mailbox[]>(env, "mailboxes", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, address, display_name: address.split("@")[0], is_default: true }) });
-  return created[0];
+  // New accounts get their first mailbox only after domain onboarding.
+  return null;
 }
 
 function adminAuthClient(env: Env) {
@@ -4428,6 +4427,8 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
 
   const mailbox = await ensureProfileAndMailbox(env, user);
+  const mailboxSetupPath = url.pathname === "/api/settings" || url.pathname === "/api/mailboxes" || url.pathname === "/api/domains/verification/refresh" || url.pathname === "/api/domains/dns-records" || url.pathname === "/api/domains/cloudflare/status";
+  if (!mailbox && !mailboxSetupPath) return error("Connect and verify a domain to create your first mailbox", 409);
   if (request.method === "GET" && url.pathname === "/api/email-image-proxy") {
     try {
       return await fetchProxiedEmailImage(url.searchParams.get("url") || "");
