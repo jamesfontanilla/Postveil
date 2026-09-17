@@ -4544,7 +4544,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: false, can_send: verified, can_receive: verified, settings }),
     });
-    const mailbox = rows[0];
+    let mailbox = rows[0];
     if (mailbox) {
       await dbRequest(env, "mailbox_admin_settings", {
         method: "POST",
@@ -4563,8 +4563,19 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
         method: "PATCH",
         body: JSON.stringify({ status: "active", updated_at: new Date().toISOString() }),
       }).catch(() => undefined);
+      // A domain can be verified before its first mailbox is created. Promote
+      // the newly-created mailbox immediately so compose cannot retain the
+      // initial disabled state.
+      if (verified) {
+        const promoted = await dbRequest<Mailbox[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({ can_send: true, can_receive: true, settings: { ...objectValue(mailbox.settings), domain_verification_status: "verified", domain_verification_provider: "cloudflare", mx_target_verified: true } }),
+        });
+        mailbox = promoted[0] || { ...mailbox, can_send: true, can_receive: true };
+      }
     }
-    return json(rows[0], 201);
+    return json(mailbox, 201);
   }
   const mailboxMatch = url.pathname.match(/^\/api\/mailboxes\/([^/]+)$/);
   if (request.method === "PATCH" && mailboxMatch) {
