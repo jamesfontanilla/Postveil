@@ -4383,9 +4383,13 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const previousDkimRecords = previousRecords.filter((record) => String(record?.type || "").toUpperCase() === "CNAME" && String(record?.content || "").endsWith(".dkim.amazonses.com"));
     const dkimRecords = ses.records.length > 0 ? ses.records : previousDkimRecords;
     const sesRecords = [...manualInboundRecords(env, domain, integration?.ownership_token), ...dkimRecords];
-    const effectiveRouteReady = ses.ready && dnsReady;
+    // SES identity existence is the authoritative account-level activation
+    // signal for this shared receiving service. Older SESv2 responses can omit
+    // the sending/DKIM status fields even after the identity is verified;
+    // requiring those optional fields stranded users after MX was correct.
+    const effectiveRouteReady = ses.exists && dnsReady;
     const effectiveStatus = domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady });
-    const mailReady = ses.ready && dnsReady;
+    const mailReady = ses.exists && dnsReady;
     await env.DB.prepare("UPDATE pv_domain_verifications SET provider = 'ses', status = ?1, dns_ready = ?2, verified_at = ?3, last_checked_at = ?4, updated_at = ?4 WHERE user_id = ?5 AND domain = ?6").bind(mailReady ? "verified" : effectiveStatus, dnsReady ? 1 : 0, mailReady ? now : null, now, user.id, domain).run();
     await saveDomainIntegration(env, { userId: user.id, domain, provider: String(body.provider || "manual"), zoneId: null, accountId: null, ownershipStatus: ses.exists ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: null, routeTarget: "Amazon SES", ownershipToken: integration?.ownership_token || null, ownershipRecordName: integration?.ownership_record_name || null, records: sesRecords, lastError: ses.error });
     await promoteVerifiedMailboxes(env, user.id, domain, mailReady);
