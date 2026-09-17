@@ -939,20 +939,22 @@ function configuredInboundMxTargets(env: Pick<Env, "INBOUND_MX_TARGETS">): strin
 async function exactInboundMxReady(env: Pick<Env, "INBOUND_MX_TARGETS">, domain: string): Promise<boolean> {
   const expected = configuredInboundMxTargets(env);
   if (!expected.length) return false;
-  try {
-    const dnsUrl = new URL("https://cloudflare-dns.com/dns-query");
-    dnsUrl.searchParams.set("name", domain);
-    dnsUrl.searchParams.set("type", "MX");
-    const response = await fetch(dnsUrl, { headers: { accept: "application/dns-json" } });
-    if (!response.ok) return false;
-    const payload = await response.json() as { Answer?: Array<{ type?: number; data?: string }> };
-    const actual = (payload.Answer || [])
-      .filter((answer) => Number(answer.type) === 15)
-      .map((answer) => normalizeProviderDomain(String(answer.data || "").replace(/^\d+\s+/, "")));
-    return expected.some((target) => actual.includes(target));
-  } catch {
-    return false;
+  const resolvers = ["https://cloudflare-dns.com/dns-query", "https://dns.google/resolve"];
+  for (const resolver of resolvers) {
+    try {
+      const dnsUrl = new URL(resolver);
+      dnsUrl.searchParams.set("name", domain);
+      dnsUrl.searchParams.set("type", "MX");
+      const response = await fetch(dnsUrl, { headers: { accept: "application/dns-json" } });
+      if (!response.ok) continue;
+      const payload = await response.json() as { Answer?: Array<{ type?: number; data?: string }> };
+      const actual = (payload.Answer || [])
+        .filter((answer) => Number(answer.type) === 15)
+        .map((answer) => normalizeProviderDomain(String(answer.data || "").trim().replace(/^\d+\s+/, "")));
+      if (expected.some((target) => actual.includes(target))) return true;
+    } catch { /* try the next public resolver */ }
   }
+  return false;
 }
 
 function cloudflareErrorRedirect(env: Env, code: string, domain = ""): Response {
