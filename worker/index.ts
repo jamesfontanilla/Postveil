@@ -4376,7 +4376,13 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
     const now = new Date().toISOString();
     const ownershipReady = verification?.provider === "cloudflare" ? true : await exactDnsTxtReady(domain, integration?.ownership_token || "");
-    const ses = await provisionSesDomain(env, domain);
+    // Do not make the user wait on an external SES control-plane call. MX is
+    // the user-managed activation signal; SES provisioning is best effort and
+    // should not strand onboarding when AWS is slow or temporarily unavailable.
+    const ses = await Promise.race([
+      provisionSesDomain(env, domain),
+      new Promise<SesDomainProvisioning>((resolve) => setTimeout(() => resolve({ ready: false, exists: false, records: [], error: "SES readiness check timed out" }), 8000)),
+    ]);
     // SES can briefly omit DKIM tokens while an identity is propagating. Keep
     // the last known records so refresh never makes the DNS checklist vanish.
     const previousRecords = integration?.records_json ? parseJsonArray(integration.records_json) : [];
@@ -4387,9 +4393,9 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     // signal for this shared receiving service. Older SESv2 responses can omit
     // the sending/DKIM status fields even after the identity is verified;
     // requiring those optional fields stranded users after MX was correct.
-    const effectiveRouteReady = ses.exists && dnsReady;
+    const effectiveRouteReady = dnsReady;
     const effectiveStatus = domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady });
-    const mailReady = ses.exists && dnsReady;
+    const mailReady = dnsReady;
     await env.DB.prepare("UPDATE pv_domain_verifications SET provider = 'ses', status = ?1, dns_ready = ?2, verified_at = ?3, last_checked_at = ?4, updated_at = ?4 WHERE user_id = ?5 AND domain = ?6").bind(mailReady ? "verified" : effectiveStatus, dnsReady ? 1 : 0, mailReady ? now : null, now, user.id, domain).run();
     await saveDomainIntegration(env, { userId: user.id, domain, provider: String(body.provider || "manual"), zoneId: null, accountId: null, ownershipStatus: ses.exists ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: null, routeTarget: "Amazon SES", ownershipToken: integration?.ownership_token || null, ownershipRecordName: integration?.ownership_record_name || null, records: sesRecords, lastError: ses.error });
     await promoteVerifiedMailboxes(env, user.id, domain, mailReady);
