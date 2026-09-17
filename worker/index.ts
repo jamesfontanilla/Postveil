@@ -3195,7 +3195,7 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   const ccInput = splitAddresses(body.cc);
   const bccInput = splitAddresses(body.bcc);
   const access = ownerId ? await delegatedMailboxForSend(env, ownerId, fromAddress) : null;
-  const mailbox = access?.mailbox || null;
+  let mailbox = access?.mailbox || null;
   const sendMode = access?.delegation
     ? body.sendMode === "send_on_behalf" && access.delegation.can_send_on_behalf
       ? "send_on_behalf"
@@ -3212,6 +3212,18 @@ async function handleSend(env: Env, ownerId: string | null, body: JsonRecord, ct
   if (!fromAddress || !to.length) return error("A sender and at least one recipient are required");
   const recipientCount = to.length + cc.length + bcc.length;
   if (recipientCount > maxRecipients(env)) return error(`This message has too many recipients (maximum ${maxRecipients(env)})`, 413);
+  if (ownerId && mailbox && !mailbox.can_send && await isVerifiedMailboxDomain(env, ownerId, domainOf(mailbox.address))) {
+    const promoted = await dbRequest<Mailbox[]>(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(ownerId)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ can_send: true, can_receive: true, settings: { ...objectValue(mailbox.settings), domain_verification_status: "verified", domain_verification_provider: "cloudflare", mx_target_verified: true } }),
+    });
+    if (promoted[0]) {
+      mailbox = promoted[0];
+    } else {
+      mailbox = { ...mailbox, can_send: true, can_receive: true };
+    }
+  }
   if (ownerId && !mailbox?.can_send) return error("This sender address is not enabled for sending", 403);
   if (ownerId && mailboxAdminSettings && mailboxAdminSettings.status !== "active") return error("This mailbox is currently suspended", 403);
   if (ownerId && mailboxAdminSettings && mailboxAdminSettings.sending_limit_daily > 0) {
