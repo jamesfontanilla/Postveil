@@ -645,7 +645,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .bulk-toolbar .primary-button { padding: 7px 10px; font-size: 10px; }
 .command-ribbon, .message-command-ribbon { display: flex; align-items: stretch; gap: 12px; margin: 0 16px 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-muted); }
 .command-ribbon { min-height: 52px; }
-.message-command-ribbon { margin: 0 0 20px; background: var(--surface-muted); }
+.message-command-ribbon { display: grid; grid-template-rows: 32px auto; gap: 0; margin: 0 0 20px; background: var(--surface-muted); }
+.message-ribbon-tabs { display: flex; align-items: flex-end; gap: 18px; border-bottom: 1px solid var(--line); padding: 0 12px; }
+.message-ribbon-tab { position: relative; min-height: 32px; border: 0; background: transparent; color: var(--muted); padding: 8px 1px 7px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.message-ribbon-tab:hover, .message-ribbon-tab:focus-visible { color: var(--ink); }
+.message-ribbon-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.message-ribbon-tab.active { color: var(--ink); }
+.message-ribbon-tab.active::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); }
 .command-ribbon-context, .message-command-context { display: grid; flex: 0 0 145px; align-content: center; gap: 3px; border-right: 1px solid var(--line); padding: 8px 12px; }
 .message-command-context { flex-basis: 132px; }
 .command-ribbon-context .eyebrow, .message-command-context .eyebrow { margin: 0; font-size: 8px; }
@@ -725,6 +731,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .command-ribbon-group > span { display: none; }
   .command-ribbon-clear { margin-right: 6px; }
   .message-command-ribbon { display: block; margin-bottom: 18px; }
+  .message-command-ribbon { display: grid; grid-template-rows: 32px auto; }
+  .message-ribbon-tabs { overflow-x: auto; scrollbar-width: none; }
+  .message-ribbon-tabs::-webkit-scrollbar { display: none; }
   .selection-bar { margin-left: 12px; margin-right: 12px; }
   .inline-notice { margin-left: 12px; margin-right: 12px; }
 }
