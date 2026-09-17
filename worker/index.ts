@@ -848,6 +848,10 @@ function manualInboundRecords(env: Pick<Env, "INBOUND_MX_TARGETS">, domain: stri
     ttl: 3600,
     status: "manual",
   }));
+  // These records are required for inbox providers to authenticate mail as the
+  // user's domain. Keep them in the same provider-agnostic checklist as MX.
+  records.push({ name: domain, type: "TXT", content: "v=spf1 include:amazonses.com ~all", ttl: 3600, status: "manual", purpose: "SPF" });
+  records.push({ name: `_dmarc.${domain}`, type: "TXT", content: "v=DMARC1; p=none; rua=mailto:dmarc@" + domain, ttl: 3600, status: "manual", purpose: "DMARC" });
   if (ownershipToken) records.push({ name: `_postveil-verification.${domain}`, type: "TXT", content: `postveil-domain-verification=${ownershipToken}`, priority: 0, ttl: 3600, status: "manual" });
   return records;
 }
