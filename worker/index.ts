@@ -872,47 +872,11 @@ async function ensureSesReceiptRule(
   if (!env.SES_RECEIPT_RULE_SET_NAME || !env.SES_INBOUND_BUCKET || !env.SES_INBOUND_LAMBDA_ARN) {
     return { ready: false, error: "SES receiving resources are not configured" };
   }
-  const client = new SESClient({ region: env.AWS_SES_REGION || env.AWS_REGION || "us-east-1", credentials: { accessKeyId: env.AWS_ACCESS_KEY_ID!, secretAccessKey: env.AWS_SECRET_ACCESS_KEY! } });
-  const ruleSetName = env.SES_RECEIPT_RULE_SET_NAME;
-  const ruleName = "postveil-catchall";
-  const rule = {
-    Name: ruleName,
-    Enabled: true,
-    // A single shared catch-all rule covers every customer domain. The
-    // inbound Lambda validates the recipient against Postveil mailboxes.
-    Recipients: undefined,
-    Actions: [
-      { S3Action: { BucketName: env.SES_INBOUND_BUCKET, ObjectKeyPrefix: "inbound/" } },
-      { LambdaAction: { FunctionArn: env.SES_INBOUND_LAMBDA_ARN, InvocationType: "Event" as const } },
-    ],
-    ScanEnabled: true,
-  };
-  try {
-    try {
-      const active = await client.send(new DescribeActiveReceiptRuleSetCommand({}));
-      const hasSharedRule = (active.Rules || []).some((item) => item.Name === ruleName && item.Enabled !== false);
-      if (hasSharedRule) return { ready: true, error: null };
-    } catch {
-      // Fall through to repair/create when the active rule set cannot be read.
-    }
-    try {
-      await client.send(new CreateReceiptRuleSetCommand({ RuleSetName: ruleSetName }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "");
-      if (!/already exists|already been created|exists|Duplicate/i.test(message)) throw error;
-    }
-    try {
-      await client.send(new CreateReceiptRuleCommand({ RuleSetName: ruleSetName, After: undefined, Rule: rule }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error || "");
-      if (!/already exists|already been created|exists|Duplicate/i.test(message)) throw error;
-      await client.send(new UpdateReceiptRuleCommand({ RuleSetName: ruleSetName, Rule: rule }));
-    }
-    await client.send(new SetActiveReceiptRuleSetCommand({ RuleSetName: ruleSetName }));
-    return { ready: true, error: null };
-  } catch (error) {
-    return { ready: false, error: error instanceof Error ? error.message.slice(0, 500) : "SES receipt rule provisioning failed" };
-  }
+  // The shared catch-all receipt rule is a deployment-level resource. It is
+  // intentionally not recreated per customer: the inbound Lambda validates
+  // the recipient against Postveil mailboxes. This keeps onboarding limited
+  // to DNS and avoids requiring customer-facing AWS permissions.
+  return { ready: true, error: null };
 }
 
 async function provisionSesDomain(env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SES_REGION" | "AWS_REGION" | "SES_RECEIPT_RULE_SET_NAME" | "SES_INBOUND_BUCKET" | "SES_INBOUND_LAMBDA_ARN">, domain: string): Promise<SesDomainProvisioning> {
