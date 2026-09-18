@@ -1,6 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand } from "@aws-sdk/client-sesv2";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import PostalMime from "postal-mime";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import {
@@ -96,11 +94,7 @@ interface Env {
   API_RATE_LIMITER: RateLimit;
   APP_DOMAIN: string;
   BREVO_API_KEY?: string;
-  B2_ENDPOINT: string;
-  B2_REGION: string;
-  B2_KEY_ID: string;
-  B2_APPLICATION_KEY: string;
-  B2_BUCKET: string;
+  MAIL_STORAGE: R2Bucket;
   OWNER_USER_ID?: string;
   ALLOWED_SENDER_DOMAINS?: string;
   BREVO_WEBHOOK_SECRET?: string;
@@ -1280,19 +1274,8 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
   return null;
 }
 
-function storageClient(env: Env): any {
-  return new S3Client({
-    region: env.B2_REGION,
-    endpoint: env.B2_ENDPOINT,
-    forcePathStyle: false,
-    requestChecksumCalculation: "WHEN_REQUIRED",
-    responseChecksumValidation: "WHEN_REQUIRED",
-    credentials: { accessKeyId: env.B2_KEY_ID, secretAccessKey: env.B2_APPLICATION_KEY },
-  });
-}
-
 async function putObject(env: Env, key: string, body: Uint8Array | string, contentType: string): Promise<void> {
-  await storageClient(env).send(new PutObjectCommand({ Bucket: env.B2_BUCKET, Key: key, Body: body, ContentType: contentType }));
+  await env.MAIL_STORAGE.put(key, body, { httpMetadata: { contentType } });
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -1358,15 +1341,13 @@ async function decryptConfidentialPayload(env: Env, row: ConfidentialRow): Promi
 }
 
 async function readObject(env: Env, key: string): Promise<Uint8Array> {
-  const result = await storageClient(env).send(new GetObjectCommand({ Bucket: env.B2_BUCKET, Key: key }));
-  const body = result.Body as unknown as { transformToByteArray?: () => Promise<Uint8Array> } | undefined;
-  if (!body) throw new Error("Attachment content is unavailable");
-  if (typeof body.transformToByteArray === "function") return new Uint8Array(await body.transformToByteArray());
-  return new Uint8Array(await new Response(body as unknown as BodyInit).arrayBuffer());
+  const object = await env.MAIL_STORAGE.get(key);
+  if (!object) throw new Error("Attachment content is unavailable");
+  return new Uint8Array(await object.arrayBuffer());
 }
 
 async function deleteObject(env: Env, key: string): Promise<void> {
-  await storageClient(env).send(new DeleteObjectCommand({ Bucket: env.B2_BUCKET, Key: key }));
+  await env.MAIL_STORAGE.delete(key);
 }
 
 async function deleteObjects(env: Env, keys: string[]): Promise<number> {
@@ -1374,29 +1355,14 @@ async function deleteObjects(env: Env, keys: string[]): Promise<number> {
   let failed = 0;
   for (let offset = 0; offset < normalizedKeys.length; offset += 1000) {
     const batch = normalizedKeys.slice(offset, offset + 1000);
-    try {
-      const result = await storageClient(env).send(new DeleteObjectsCommand({
-        Bucket: env.B2_BUCKET,
-        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
-        ChecksumAlgorithm: "MD5",
-      }));
-      failed += result.Errors?.length ?? 0;
-    } catch (storageError) {
-      console.error("B2 multi-object delete failed", {
-        name: storageError instanceof Error ? storageError.name : "UnknownError",
-        message: storageError instanceof Error ? storageError.message.slice(0, 240) : String(storageError).slice(0, 240),
-        statusCode: typeof storageError === "object" && storageError !== null && "$metadata" in storageError
-          ? ((storageError as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode ?? null)
-          : null,
-      });
-      failed += batch.length;
-    }
+    try { await Promise.all(batch.map((key) => env.MAIL_STORAGE.delete(key))); }
+    catch { failed += batch.length; }
   }
   return failed;
 }
 
 async function signedObjectUrl(env: Env, key: string): Promise<string> {
-  return getSignedUrl(storageClient(env), new GetObjectCommand({ Bucket: env.B2_BUCKET, Key: key }), { expiresIn: 600 });
+  return `/api/storage-object?key=${encodeURIComponent(key)}`;
 }
 
 function trashRestoreTarget(message: JsonRecord): { folder: string; custom_folder_id: string | null } {
@@ -4235,7 +4201,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
   if (url.pathname === "/api/health") {
     if (request.method !== "GET" && request.method !== "HEAD") return error("Method not allowed", 405);
-    return json({ ok: true, service: "postveil", configured: { d1: true, ses: Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY), sesWebhook: Boolean(env.SES_WEBHOOK_SECRET), brevo: Boolean(env.BREVO_API_KEY), b2: Boolean(env.B2_ENDPOINT && env.B2_BUCKET && env.B2_KEY_ID && env.B2_APPLICATION_KEY), inboundOwner: Boolean(env.OWNER_USER_ID), exactInboundMx: configuredInboundMxTargets(env).length > 0, turnstile: Boolean(env.TURNSTILE_SECRET_KEY), accountLockout: true, attachmentsEnabled: String(env.ATTACHMENTS_ENABLED || "true").toLowerCase() !== "false" }, databaseProbe: await probeDatabase(env), timestamp: new Date().toISOString() });
+    return json({ ok: true, service: "postveil", configured: { d1: true, ses: Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY), sesWebhook: Boolean(env.SES_WEBHOOK_SECRET), brevo: Boolean(env.BREVO_API_KEY), r2: Boolean(env.MAIL_STORAGE), inboundOwner: Boolean(env.OWNER_USER_ID), exactInboundMx: configuredInboundMxTargets(env).length > 0, turnstile: Boolean(env.TURNSTILE_SECRET_KEY), accountLockout: true, attachmentsEnabled: String(env.ATTACHMENTS_ENABLED || "true").toLowerCase() !== "false" }, databaseProbe: await probeDatabase(env), timestamp: new Date().toISOString() });
   }
   const deliveryWebhookMatch = url.pathname.match(/^\/api\/webhooks\/(brevo|ses|mailgun|postmark|sendgrid|smtp)$/);
   if (deliveryWebhookMatch) {
@@ -4300,6 +4266,15 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (url.pathname === "/api/internal/send-test") { if (!env.INTERNAL_TEST_TOKEN || request.headers.get("x-internal-test-token") !== env.INTERNAL_TEST_TOKEN) return error("Unauthorized", 401); try { return await handleSend(env, null, (await request.json()) as JsonRecord, ctx); } catch (sendError) { return error(sendError instanceof Error ? sendError.message : "Send failed", 502); } }
   const user = await getUser(request, env);
   if (!user) return error("Sign in required", 401);
+  if (request.method === "GET" && url.pathname === "/api/storage-object") {
+    const key = url.searchParams.get("key") || "";
+    if (!key || !key.includes(`/${user.id}/`)) return error("Object not found", 404);
+    const object = await env.MAIL_STORAGE.get(key);
+    if (!object) return error("Object not found", 404);
+    const headers = new Headers({ "cache-control": "private, max-age=600", "content-type": object.httpMetadata?.contentType || "application/octet-stream" });
+    if (object.httpMetadata?.contentDisposition) headers.set("content-disposition", object.httpMetadata.contentDisposition);
+    return new Response(object.body, { headers });
+  }
   const isLoginEventRoute = request.method === "POST" && url.pathname === "/api/auth/login-event";
   if (user.mfaRequired && !isLoginEventRoute) return error("Complete two-step verification to continue", 401);
   const userRateLimitResponse = await enforceEdgeRateLimit(request, env, user.id);

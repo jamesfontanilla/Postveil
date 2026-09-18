@@ -16,6 +16,10 @@ database_name = "postveil-prod"
 database_id = "7fc56fec-1358-45df-b5f3-29e3fbe888aa"
 migrations_dir = "migrations"
 
+[[r2_buckets]]
+binding = "MAIL_STORAGE"
+bucket_name = "postveil-prod-mail"
+
 [[ratelimits]]
 name = "API_RATE_LIMITER"
 namespace_id = "1001"
@@ -32,9 +36,6 @@ ALLOWED_SENDER_DOMAINS = "jamesfontanilla.com,postveil.jamesfontanilla.com"
 DEFAULT_FROM_EMAIL = "postmaster@jamesfontanilla.com"
 SYSTEM_FROM_EMAIL = "noreply@postveil.jamesfontanilla.com"
 INBOUND_MX_TARGETS = "inbound-smtp.ap-southeast-1.amazonaws.com"
-B2_ENDPOINT = "https://s3.us-east-005.backblazeb2.com"
-B2_REGION = "us-east-005"
-B2_BUCKET = "postveil-prod-private"
 ATTACHMENTS_ENABLED = "false"
 AWS_SES_REGION = "ap-southeast-1"
 SES_CONFIGURATION_SET_NAME = "postveil-events"
