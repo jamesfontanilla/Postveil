@@ -2831,6 +2831,55 @@ h1, h2, h3, h4,
   .landing-home .landing-capabilities { padding: 66px 0 72px; }
 }
 
+/* Quiet hero pass: remove the lime artwork and center the message on the page. */
+.landing-home .landing-hero {
+  display: grid;
+  place-items: center;
+  padding: 24px 0 76px;
+}
+.landing-poster {
+  width: min(100%, 760px);
+  min-height: 620px;
+  aspect-ratio: auto;
+  margin: 0 auto;
+  border: 0;
+  border-radius: 0;
+  padding: clamp(58px, 8vw, 100px) clamp(20px, 7vw, 74px) 36px;
+  background: #0c1110;
+  box-shadow: none;
+}
+.landing-poster::before,
+.landing-poster::after { display: none; }
+.landing-poster .landing-hero-copy { max-width: 650px; }
+.landing-poster .landing-eyebrow { color: #9ac775; }
+.landing-poster .landing-eyebrow svg { color: #c7f27e; }
+.landing-poster .landing-hero h1 { color: #f1f6e9; }
+.landing-poster .landing-wordmark { color: #c7f27e; }
+.landing-poster .landing-hero-title { max-width: 560px; }
+.landing-poster .landing-hero h1 em { color: #c7f27e; }
+.landing-poster .landing-lede { max-width: 440px; color: #aabda9; }
+.landing-poster .landing-microcopy { color: #829b86; }
+.landing-poster .landing-microcopy svg { color: #c7f27e; }
+.landing-poster .landing-primary { background: #c7f27e; color: #0c2d1c; box-shadow: 0 8px 22px rgba(199, 242, 126, .12); }
+.landing-poster .landing-primary:hover { background: #d7fb91; }
+.landing-poster .landing-secondary { border-color: #526955; color: #d5e6d0; }
+.landing-poster .landing-secondary:hover { border-color: #c7f27e; background: rgba(199, 242, 126, .08); }
+.landing-poster-caption {
+  position: static;
+  width: 100%;
+  margin-top: 70px;
+  color: #66806a;
+}
+.landing-product-proof .landing-product-shot {
+  background: #111a15;
+  box-shadow: 0 24px 55px rgba(0, 0, 0, .18);
+}
+@media (max-width: 700px) {
+  .landing-home .landing-hero { padding: 10px 0 58px; }
+  .landing-poster { width: 100%; min-height: 600px; padding: 46px 19px 30px; }
+  .landing-poster-caption { margin-top: 55px; }
+}
+
 /* Ribbon interactions: tabs are real controls, while the toolbar keeps its
    familiar command-strip rhythm at narrow widths. */
 .mail-ribbon-tab {
