@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
-  Code2,
-  Copy,
-  Eye,
   EyeOff,
   ExternalLink,
   FileDown,
@@ -44,8 +41,6 @@ type RichEmailBodyProps = {
   loadExternalImage?: (source: string) => Promise<string>;
   inspectLink?: (source: string) => Promise<LinkInspection>;
 };
-
-type ReaderMode = "visual" | "text" | "source";
 
 function splitQuotedBody(value: string) {
   const lines = value.split(/\r?\n/);
@@ -92,6 +87,29 @@ function readableStatus(inspection?: LinkInspection | null) {
     : "Destination inspected";
 }
 
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character] || character);
+}
+
+function plainTextToHtml(value: string) {
+  const { body, quote } = splitQuotedBody(value);
+  const renderParagraphs = (text: string) => text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\r?\n/g, "<br />")}</p>`)
+    .join("");
+  const bodyHtml = renderParagraphs(body);
+  const quoteHtml = quote ? `<blockquote>${renderParagraphs(quote)}</blockquote>` : "";
+  return bodyHtml || quoteHtml || "<p>No message body.</p>";
+}
+
 export default function RichEmailBody({
   htmlBody,
   textBody,
@@ -107,7 +125,6 @@ export default function RichEmailBody({
   const trackerCount = useMemo(() => trackingPixelCount(html), [html]);
   const textParts = useMemo(() => splitQuotedBody(plainText), [plainText]);
   const signatureParts = useMemo(() => splitSignature(textParts.body), [textParts.body]);
-  const [mode, setMode] = useState<ReaderMode>(html ? "visual" : "text");
   const [showRemoteImages, setShowRemoteImages] = useState(loadRemoteImages);
   const [externalImageUrls, setExternalImageUrls] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState(false);
@@ -115,7 +132,6 @@ export default function RichEmailBody({
   const [darkEmail, setDarkEmail] = useState(false);
   const [responsive, setResponsive] = useState(true);
   const [showQuotes, setShowQuotes] = useState(false);
-  const [showSignature, setShowSignature] = useState(false);
   const [translationOpen, setTranslationOpen] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState("browser");
   const [findOpen, setFindOpen] = useState(false);
@@ -128,13 +144,11 @@ export default function RichEmailBody({
   const objectUrls = useRef<string[]>([]);
 
   useEffect(() => {
-    setMode(html ? "visual" : "text");
     setShowRemoteImages(loadRemoteImages);
     setExternalImageUrls({});
     setZoom(100);
     setDarkEmail(false);
     setShowQuotes(false);
-    setShowSignature(false);
     setLinkTarget(null);
     setLinkInspection(null);
     setFindOpen(false);
@@ -147,9 +161,10 @@ export default function RichEmailBody({
     if (typeof window !== "undefined") window.speechSynthesis?.cancel();
   }, []);
 
+  const visualSource = useMemo(() => html || plainTextToHtml(plainText), [html, plainText]);
   const sourceHtml = useMemo(
-    () => sanitizeEmailHtml(html, { inlineImageUrls, loadExternalImages: false }),
-    [html, inlineImageUrls],
+    () => sanitizeEmailHtml(visualSource, { inlineImageUrls, loadExternalImages: false }),
+    [inlineImageUrls, visualSource],
   );
 
   useEffect(() => {
@@ -183,11 +198,10 @@ export default function RichEmailBody({
   }, []);
 
   const sanitizedHtml = useMemo(
-    () => sanitizeEmailHtml(html, { inlineImageUrls, loadExternalImages: showRemoteImages, externalImageUrls }),
-    [html, inlineImageUrls, externalImageUrls, showRemoteImages],
+    () => sanitizeEmailHtml(visualSource, { inlineImageUrls, loadExternalImages: showRemoteImages, externalImageUrls }),
+    [externalImageUrls, inlineImageUrls, showRemoteImages, visualSource],
   );
   const externalImageCount = stats.externalImageCount;
-  const showVisual = Boolean(html) && mode === "visual";
   const findMatchCount = findQuery.trim()
     ? (plainText.toLowerCase().match(new RegExp(findQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length
     : 0;
@@ -248,27 +262,12 @@ export default function RichEmailBody({
     }
   }
 
-  async function copySource() {
-    try {
-      await navigator.clipboard.writeText(mode === "source" ? html : plainText);
-    } catch {
-      // Clipboard permissions are optional; the source remains selectable.
-    }
-  }
-
   return (
     <section className="rich-email-reader" aria-label="Message content">
       <div className="rich-email-toolbar">
-        <div className="rich-email-toolbar-primary" role="group" aria-label="Message view">
-          {html && <button className={mode === "visual" ? "is-active" : ""} onClick={() => setMode("visual")} aria-pressed={mode === "visual"}><Eye size={13} /> Visual</button>}
-          <button className={!html || mode === "text" ? "is-active" : ""} onClick={() => setMode("text")} aria-pressed={!html || mode === "text"}><Code2 size={13} /> Plain text</button>
-        </div>
         <details className="rich-email-toolbar-menu">
           <summary><SlidersHorizontal size={13} /> View</summary>
           <div className="rich-email-toolbar-popover">
-            <div className="rich-email-toolbar-group" role="group" aria-label="Message formats">
-              {html && <button className={mode === "source" ? "is-active" : ""} onClick={() => setMode("source")} aria-pressed={mode === "source"}><Code2 size={13} /> Raw HTML</button>}
-            </div>
             <div className="rich-email-toolbar-group rich-email-reader-tools" role="group" aria-label="Reading tools">
               <button onClick={() => setZoom((value) => Math.max(75, value - 10))} aria-label="Zoom out" title="Zoom out"><Minus size={13} /></button>
               <span className="rich-email-zoom" aria-live="polite">{zoom}%</span>
@@ -293,7 +292,7 @@ export default function RichEmailBody({
         {stats.linkCount > 0 && <span><Link2 size={13} /> {stats.linkCount} link{stats.linkCount === 1 ? "" : "s"} require inspection</span>}
       </div>
 
-      {showVisual && externalImageCount > 0 && (
+      {externalImageCount > 0 && (
         <div className="rich-email-content-warning" role="status">
           <div><EyeOff size={15} /><span><strong>{showRemoteImages ? "External images use a privacy proxy" : "External images are blocked"}</strong><small>{showRemoteImages ? "The sender receives a request from Postveil, not your device." : "Inline images remain available. Remote images and invisible beacons stay off until you choose otherwise."}</small></span></div>
           {!showRemoteImages && loadExternalImage && <button onClick={() => setShowRemoteImages(true)}><ImageIcon size={13} /> Load privately</button>}
@@ -302,22 +301,9 @@ export default function RichEmailBody({
 
       {trackerCount > 0 && <div className="rich-email-tracker-note"><ShieldAlert size={14} /><span>Postveil removed likely tracking pixels. Images with meaningful dimensions are still available as inline graphics.</span></div>}
 
-      {mode === "source" ? (
-        <div className="rich-email-source-view">
-          <div className="rich-email-source-head"><span>Original HTML body</span><button onClick={() => void copySource()}><Copy size={13} /> Copy source</button></div>
-          <pre aria-label="Raw HTML source">{html || "No HTML body was stored."}</pre>
-        </div>
-      ) : mode === "text" ? (
-        <div className="rich-email-text-view" style={{ fontSize: `${zoom}%` }}>
-          <div className="rich-email-plain-body">{signatureParts.body || "No message body."}</div>
-          {signatureParts.signature && <details open={showSignature} className="rich-email-collapse"><summary onClick={(event) => { event.preventDefault(); setShowSignature((value) => !value); }}><Quote size={13} /> {showSignature ? "Hide signature" : "Show signature"}</summary>{showSignature && <pre>{signatureParts.signature}</pre>}</details>}
-          {textParts.quote && <details open={showQuotes} className="rich-email-collapse"><summary onClick={(event) => { event.preventDefault(); setShowQuotes((value) => !value); }}><Quote size={13} /> {showQuotes ? "Hide quoted replies" : "Show quoted replies"}</summary>{showQuotes && <pre>{textParts.quote}</pre>}</details>}
-        </div>
-      ) : (
-        <div className={`rich-email-surface ${darkEmail ? "rich-email-dark" : ""} ${responsive ? "rich-email-responsive" : "rich-email-original-width"}`} style={{ fontSize: `${zoom}%` }} onClick={(event) => void handleContentClick(event)} role="document" aria-label="Sanitized HTML email">
-          <div className={showQuotes ? "rich-email-html" : "rich-email-html rich-email-quoted-collapsed"} dangerouslySetInnerHTML={{ __html: sanitizedHtml || "<p>No message body.</p>" }} />
-        </div>
-      )}
+      <div className={`rich-email-surface ${darkEmail ? "rich-email-dark" : ""} ${responsive ? "rich-email-responsive" : "rich-email-original-width"}`} style={{ fontSize: `${zoom}%` }} onClick={(event) => void handleContentClick(event)} role="document" aria-label="Sanitized HTML email">
+        <div className={showQuotes ? "rich-email-html" : "rich-email-html rich-email-quoted-collapsed"} dangerouslySetInnerHTML={{ __html: sanitizedHtml || "<p>No message body.</p>" }} />
+      </div>
 
       <div className="rich-email-footer-tools">
         <button onClick={() => setShowQuotes((value) => !value)} aria-pressed={showQuotes}><Quote size={13} /> {showQuotes ? "Hide quoted replies" : "Show quoted replies"}</button>

@@ -185,9 +185,6 @@ input:focus, textarea:focus, select:focus { border-color: #1f6b57; background: #
 .score-badge { flex: 0 0 auto; border-radius: 999px; background: #fff0ef; color: #b5524b; padding: 3px 6px; font: 10px var(--font-mono); }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
 .detail-meta span { border-radius: 999px; background: #f0f3f8; color: #7c899d; padding: 4px 7px; font: 10px var(--font-mono); }
-.signal-box { display: flex; gap: 10px; margin-top: 20px; border: 1px solid #f0d6cf; border-radius: 11px; background: #fff8f5; color: #a95245; padding: 11px 13px; }
-.signal-box strong, .signal-box span { display: block; font-size: 11px; line-height: 1.5; }
-.signal-box span { margin-top: 2px; color: #9b716a; }
 .attachments a, .attachments .attachment-link { justify-content: space-between; min-width: 220px; }
 .attachments a small, .attachments .attachment-link small { margin-left: 10px; color: #9aa5b5; font: 10px var(--font-mono); }
 .thread-stack { display: grid; gap: 7px; margin-top: 30px; }
@@ -374,7 +371,6 @@ button, input, textarea, select { font-family: inherit; }
 .body-copy { margin-top: 28px; color: var(--ink-soft); font-size: 14px; line-height: 1.78; }
 .attachments { margin-top: 26px; }
 .attachments a, .attachments .attachment-link { min-width: 220px; border-radius: 6px; background: var(--surface); color: var(--accent); padding: 8px 10px; }
-.signal-box { margin-top: 18px; border-color: #ebc9c4; border-radius: 6px; background: #fff8f6; color: var(--danger); }
 .thread-stack { margin-top: 27px; }
 .thread-stack button { border-color: var(--line); border-radius: 6px; background: var(--surface); }
 .thread-stack button.active { border-color: #b8c5ff; background: var(--accent-soft); }
@@ -427,7 +423,6 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .theme-dark .thread-stack button.active { background: var(--accent-soft); }
 .theme-dark .detail-meta span { background: #29322d; color: var(--muted); }
 .theme-dark .attachments a, .theme-dark .attachments .attachment-link, .theme-dark .secondary-button { background: var(--surface); color: var(--ink-soft); }
-.theme-dark .signal-box { background: #302322; border-color: #67433e; }
 .theme-dark .modal-backdrop, .theme-dark .compose-overlay { background: rgba(0,0,0,.55); }
 .theme-dark .mobile-topbar { background: rgba(25,32,29,.96); border-color: var(--line); }
 
@@ -498,9 +493,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .rich-email-reader { position: relative; display: grid; gap: 11px; width: 100%; min-width: 0; color: var(--ink); }
 .rich-email-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-muted); padding: 6px; }
 .rich-email-toolbar-group { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
-.rich-email-toolbar-group button, .rich-email-footer-tools button, .rich-email-source-head button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); padding: 5px 7px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.rich-email-toolbar-group button, .rich-email-footer-tools button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); padding: 5px 7px; font-size: 10px; font-weight: 700; cursor: pointer; }
 .rich-email-toolbar-group button:hover, .rich-email-toolbar-group button:focus-visible, .rich-email-toolbar-group button.is-active, .rich-email-footer-tools button:hover, .rich-email-footer-tools button:focus-visible { border-color: var(--line-strong); background: var(--surface); color: var(--accent); }
-.rich-email-toolbar-group button:focus-visible, .rich-email-footer-tools button:focus-visible, .rich-email-source-head button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rich-email-toolbar-group button:focus-visible, .rich-email-footer-tools button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .rich-email-reader-tools { justify-content: flex-end; }
 .rich-email-zoom { min-width: 35px; color: var(--ink-soft); font: 10px var(--font-mono); text-align: center; }
 .rich-email-responsive-icon { font-size: 14px; line-height: 1; }
@@ -537,16 +532,6 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .rich-email-html blockquote { border-left: 3px solid var(--line-strong); padding-left: 13px; color: var(--muted); }
 .rich-email-quoted-collapsed blockquote { display: none; }
 .rich-email-quoted-collapsed blockquote + * { margin-top: 0; }
-.rich-email-text-view { max-width: 78ch; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); padding: clamp(15px, 3vw, 27px); line-height: 1.7; }
-.rich-email-plain-body { white-space: pre-wrap; overflow-wrap: anywhere; }
-.rich-email-collapse { margin-top: 17px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-muted); }
-.rich-email-collapse summary { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ink-soft); padding: 9px 11px; font-size: 11px; font-weight: 700; list-style: none; }
-.rich-email-collapse summary::-webkit-details-marker { display: none; }
-.rich-email-collapse pre { margin: 0; border-top: 1px solid var(--line); padding: 11px; color: var(--muted); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
-.rich-email-source-view { overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: #17221f; color: #dbe7df; }
-.rich-email-source-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-bottom: 1px solid #405148; padding: 8px 11px; color: #b7c8bd; font: 10px var(--font-mono); }
-.rich-email-source-head button { border-color: #405148; color: #dbe7df; }
-.rich-email-source-view pre { max-height: 560px; margin: 0; overflow: auto; padding: 15px; font: 11px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .rich-email-footer-tools { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 9px; }
 .rich-email-footer-note { margin-left: auto; color: var(--muted); font-size: 10px; }
 .rich-email-translation-panel, .rich-email-link-panel { position: relative; display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-muted); padding: 12px; color: var(--ink-soft); }
@@ -602,7 +587,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   .conversation-head { align-items: flex-start; }
   .conversation-head-controls { align-items: flex-end; flex-direction: column; gap: 5px; }
 }
-.theme-dark .rich-email-toolbar, .theme-dark .rich-email-text-view, .theme-dark .rich-email-translation-panel, .theme-dark .rich-email-link-panel { background: var(--surface); }
+.theme-dark .rich-email-toolbar, .theme-dark .rich-email-translation-panel, .theme-dark .rich-email-link-panel { background: var(--surface); }
 @media (max-width: 720px) {
   .rich-email-toolbar { align-items: stretch; flex-direction: column; }
   .rich-email-toolbar-group, .rich-email-reader-tools { justify-content: flex-start; }
@@ -617,7 +602,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   body.printing-email .rich-email-reader, body.printing-email .rich-email-reader * { visibility: visible !important; }
   body.printing-email .rich-email-reader { position: absolute; inset: 0; width: 100%; padding: 22px; background: white; }
   body.printing-email .rich-email-toolbar, body.printing-email .rich-email-security-strip, body.printing-email .rich-email-content-warning, body.printing-email .rich-email-tracker-note, body.printing-email .rich-email-footer-tools, body.printing-email .rich-email-translation-panel, body.printing-email .rich-email-link-panel { display: none !important; }
-  body.printing-email .rich-email-surface, body.printing-email .rich-email-text-view { border: 0; padding: 0; overflow: visible; }
+  body.printing-email .rich-email-surface { border: 0; padding: 0; overflow: visible; }
   body.printing-email .rich-email-print-only { display: block; margin-top: 28px; color: #66736d; font: 10px var(--font-mono); }
 }
 .quoted-block { max-width: 68ch; margin-top: 22px; border-left: 3px solid var(--line-strong); background: var(--surface-muted); color: var(--muted); }
@@ -2068,7 +2053,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sender-line small { color: var(--ink-soft); }
 .sender-line span { color: var(--muted); }
 .body-copy { max-width: 76ch; margin-top: 28px; color: var(--ink-soft); font-size: 15px; line-height: 1.75; overflow-wrap: anywhere; }
-.signal-box, .trash-notice, .work-state-callout { border-radius: 3px; }
+.trash-notice, .work-state-callout { border-radius: 3px; }
 .trust-lens { border-radius: 4px; background: var(--surface-muted); }
 .trust-lens-item, .trust-host { border-radius: 4px; }
 .attachments { max-width: 760px; margin-top: 26px; }
@@ -2600,17 +2585,6 @@ h1, h2, h3, h4,
 .mail-workspace.is-reading-message .sender-line span { font-size: 10px; }
 .mail-workspace.is-reading-message .sender-profile-card { margin-top: 12px; border-radius: 4px; }
 .mail-workspace.is-reading-message .sender-profile-card summary { padding: 8px 10px; font-size: 10px; }
-.mail-workspace.is-reading-message .signal-box {
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  max-width: 100%;
-  margin-top: 12px;
-  border-radius: 4px;
-  padding: 8px 10px;
-}
-.mail-workspace.is-reading-message .signal-box strong,
-.mail-workspace.is-reading-message .signal-box span { font-size: 10px; }
 .mail-workspace.is-reading-message .body-copy { margin-top: 20px; }
 
 .rich-email-toolbar {
@@ -2621,9 +2595,7 @@ h1, h2, h3, h4,
   background: var(--surface);
   padding: 5px 6px;
 }
-.rich-email-toolbar-primary,
 .rich-email-toolbar-group { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
-.rich-email-toolbar-primary button,
 .rich-email-toolbar-menu > summary {
   display: inline-flex;
   align-items: center;
@@ -2637,9 +2609,6 @@ h1, h2, h3, h4,
   font: 700 10px/1.1 var(--font-ui);
   cursor: pointer;
 }
-.rich-email-toolbar-primary button:hover,
-.rich-email-toolbar-primary button:focus-visible,
-.rich-email-toolbar-primary button.is-active,
 .rich-email-toolbar-menu > summary:hover,
 .rich-email-toolbar-menu > summary:focus-visible {
   border-color: var(--line-strong);

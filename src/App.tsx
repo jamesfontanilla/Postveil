@@ -6240,15 +6240,6 @@ function MailboxApp({ session }: { session: Session }) {
                     <div><span className="eyebrow">HISTORY</span><strong>{messages.filter((item) => item.from_address.toLowerCase() === detailIdentity?.email.toLowerCase()).length} visible messages</strong><small>{selectedContact ? "Saved contact" : "Not saved as a contact"}</small></div>
                   </div>
                 </details>
-                {selected.spam_reasons && selected.spam_reasons.length > 0 && (
-                  <div className="signal-box">
-                    <ShieldAlert size={15} />
-                    <div>
-                      <strong>Why this was flagged</strong>
-                      <span>{selected.spam_reasons.join(" · ")}</span>
-                    </div>
-                  </div>
-                )}
                 {trustLensOpen && <div className="trust-lens">
                   <button className="trust-lens-toggle" onClick={() => void toggleTrustLens()} aria-expanded={trustLensOpen}>
                     <span className="trust-lens-title"><ShieldAlert size={15} /><span><strong>Trust Lens</strong><small> Authentication and sender evidence</small></span></span>
