@@ -5,6 +5,7 @@ import {
   CreateReceiptRuleCommand,
   UpdateReceiptRuleCommand,
   SetActiveReceiptRuleSetCommand,
+  DescribeActiveReceiptRuleSetCommand,
 } from "@aws-sdk/client-ses";
 import PostalMime from "postal-mime";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
@@ -864,32 +865,36 @@ function manualInboundRecords(env: Pick<Env, "INBOUND_MX_TARGETS">, domain: stri
 
 type SesDomainProvisioning = { ready: boolean; exists: boolean; records: JsonRecord[]; error: string | null; receiptRuleReady: boolean };
 
-function sesReceiptRuleName(domain: string): string {
-  const safe = domain.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
-  return `postveil-${safe}`.slice(0, 64);
-}
-
 async function ensureSesReceiptRule(
   env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SES_REGION" | "AWS_REGION" | "SES_RECEIPT_RULE_SET_NAME" | "SES_INBOUND_BUCKET" | "SES_INBOUND_LAMBDA_ARN">,
-  domain: string,
+  _domain: string,
 ): Promise<{ ready: boolean; error: string | null }> {
   if (!env.SES_RECEIPT_RULE_SET_NAME || !env.SES_INBOUND_BUCKET || !env.SES_INBOUND_LAMBDA_ARN) {
     return { ready: false, error: "SES receiving resources are not configured" };
   }
   const client = new SESClient({ region: env.AWS_SES_REGION || env.AWS_REGION || "us-east-1", credentials: { accessKeyId: env.AWS_ACCESS_KEY_ID!, secretAccessKey: env.AWS_SECRET_ACCESS_KEY! } });
   const ruleSetName = env.SES_RECEIPT_RULE_SET_NAME;
-  const ruleName = sesReceiptRuleName(domain);
+  const ruleName = "postveil-catchall";
   const rule = {
     Name: ruleName,
     Enabled: true,
-    Recipients: [domain],
+    // A single shared catch-all rule covers every customer domain. The
+    // inbound Lambda validates the recipient against Postveil mailboxes.
+    Recipients: undefined,
     Actions: [
-      { S3Action: { BucketName: env.SES_INBOUND_BUCKET, ObjectKeyPrefix: `inbound/${domain}/` } },
+      { S3Action: { BucketName: env.SES_INBOUND_BUCKET, ObjectKeyPrefix: "inbound/" } },
       { LambdaAction: { FunctionArn: env.SES_INBOUND_LAMBDA_ARN, InvocationType: "Event" as const } },
     ],
     ScanEnabled: true,
   };
   try {
+    try {
+      const active = await client.send(new DescribeActiveReceiptRuleSetCommand({}));
+      const hasSharedRule = (active.Rules || []).some((item) => item.Name === ruleName && item.Enabled !== false);
+      if (hasSharedRule) return { ready: true, error: null };
+    } catch {
+      // Fall through to repair/create when the active rule set cannot be read.
+    }
     try {
       await client.send(new CreateReceiptRuleSetCommand({ RuleSetName: ruleSetName }));
     } catch (error) {
