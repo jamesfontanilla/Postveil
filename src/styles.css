@@ -1,6 +1,8 @@
+@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400..700&display=swap");
+
 :root {
   --font-ui: "Inter", "Helvetica Neue", Arial, sans-serif;
-  --font-display: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Source Serif Pro", "Source Serif 4", Georgia, serif;
   --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
   font-family: var(--font-ui);
   color: #172522;
@@ -2395,6 +2397,253 @@ h1, h2, h3, h4,
   .landing-capability-row svg { grid-column: 2; grid-row: 1 / span 2; }
   .landing-final-cta { align-items: flex-start; flex-direction: column; padding: 55px 0 60px; }
   .landing-final-cta .landing-primary { width: 100%; }
+}
+
+/* Homepage art direction: a grainy green editorial cover around the mailbox. */
+.landing-home {
+  --poster-ink: #f1f6e9;
+  --poster-muted: #b4c8b2;
+  --poster-line: rgba(205, 244, 142, .2);
+  --poster-green: #bdf46b;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #0c1110;
+  color: var(--poster-ink);
+}
+.landing-home .landing-nav {
+  position: relative;
+  z-index: 3;
+  width: min(100% - 80px, 1320px);
+  padding: 24px 0 18px;
+}
+.landing-home .home-brand,
+.landing-home .home-brand strong,
+.landing-home .home-nav-links a,
+.landing-home .home-signin { color: var(--poster-ink); }
+.landing-home .home-brand small { color: #8ea991; }
+.landing-home .home-brand-mark { filter: saturate(.85) brightness(1.2); }
+.landing-home .home-nav-links a:hover,
+.landing-home .home-signin:hover { color: var(--poster-green); }
+.landing-home .landing-nav-cta {
+  border: 1px solid rgba(218, 249, 153, .38);
+  border-radius: 999px;
+  background: rgba(185, 239, 105, .13);
+  color: var(--poster-ink);
+}
+.landing-home .landing-nav-cta:hover { border-color: var(--poster-green); background: rgba(185, 239, 105, .24); }
+.landing-home .landing-hero {
+  position: relative;
+  isolation: isolate;
+  width: min(100% - 80px, 1320px);
+  min-height: min(745px, calc(100svh - 86px));
+  margin: 0 auto;
+  padding: clamp(48px, 7vw, 95px) 0 clamp(58px, 8vw, 105px);
+}
+.landing-home .landing-hero::before {
+  position: absolute;
+  z-index: -2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 61%;
+  border: 1px solid rgba(199, 246, 127, .23);
+  border-radius: 2px;
+  background:
+    radial-gradient(circle at 68% 19%, rgba(227, 255, 133, .96) 0, rgba(209, 248, 103, .65) 14%, transparent 38%),
+    radial-gradient(circle at 18% 83%, rgba(7, 111, 65, .96) 0, transparent 34%),
+    radial-gradient(circle at 84% 78%, rgba(85, 190, 82, .76) 0, transparent 29%),
+    linear-gradient(135deg, #0a4a30 0%, #3ab660 46%, #d3f66d 100%);
+  box-shadow: 0 0 0 1px rgba(6, 38, 25, .5), 0 28px 90px rgba(0, 0, 0, .28);
+  content: "";
+}
+.landing-home .landing-hero::after {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 61%;
+  background-image: radial-gradient(rgba(255, 255, 255, .45) .6px, transparent .7px);
+  background-size: 4px 4px;
+  content: "";
+  mix-blend-mode: soft-light;
+  opacity: .23;
+  pointer-events: none;
+}
+.landing-home .landing-hero-copy {
+  position: relative;
+  z-index: 1;
+  align-self: center;
+  max-width: 550px;
+  padding: 18px 0 22px;
+}
+.landing-home .landing-eyebrow { color: #a8dd86; }
+.landing-home .landing-eyebrow svg { color: var(--poster-green); }
+.landing-home .landing-hero h1 {
+  max-width: 560px;
+  color: var(--poster-ink);
+  font-size: clamp(58px, 7vw, 98px);
+  font-weight: 500;
+  letter-spacing: -.055em;
+  line-height: .86;
+}
+.landing-wordmark {
+  display: block;
+  color: var(--poster-green);
+  font-size: 1.07em;
+  font-weight: 600;
+  letter-spacing: -.08em;
+}
+.landing-hero-title {
+  display: block;
+  max-width: 500px;
+  margin-top: 21px;
+  font-size: .57em;
+  letter-spacing: -.045em;
+  line-height: .99;
+}
+.landing-home .landing-hero h1 em { color: #d9fb86; font-weight: 500; }
+.landing-home .landing-lede { max-width: 410px; margin-top: 29px; color: var(--poster-muted); font-size: 15px; line-height: 1.65; }
+.landing-home .landing-actions { margin-top: 31px; }
+.landing-home .landing-primary {
+  border-radius: 999px;
+  background: var(--poster-green);
+  color: #0c2a1b;
+  box-shadow: 0 10px 26px rgba(188, 244, 107, .19);
+  font-weight: 800;
+}
+.landing-home .landing-primary:hover { background: #d7fa89; box-shadow: 0 14px 32px rgba(188, 244, 107, .25); }
+.landing-home .landing-secondary {
+  border-color: rgba(214, 246, 176, .35);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--poster-ink);
+}
+.landing-home .landing-secondary:hover { border-color: var(--poster-green); background: rgba(215, 250, 137, .1); }
+.landing-home .landing-microcopy { color: #89a58d; }
+.landing-home .landing-microcopy svg { color: var(--poster-green); }
+.landing-home .landing-product-shot {
+  position: relative;
+  z-index: 1;
+  align-self: stretch;
+  min-height: 585px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 1px;
+  background: transparent;
+  box-shadow: none;
+}
+.landing-home .landing-product-shot::before {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, .55) .6px, transparent .7px);
+  background-size: 4px 4px;
+  content: "";
+  mix-blend-mode: soft-light;
+  opacity: .24;
+  pointer-events: none;
+}
+.landing-home .mock-window-bar {
+  position: relative;
+  z-index: 1;
+  min-height: 53px;
+  border-bottom-color: rgba(8, 53, 34, .18);
+  padding: 0 22px;
+  color: #0a4a30;
+}
+.landing-home .mock-window-brand { color: #073c29; }
+.landing-home .mock-window-status { color: #286c42; }
+.landing-home .mock-window-status span { background: #176d3e; box-shadow: 0 0 0 3px rgba(255, 255, 255, .32); }
+.landing-home .mock-mail-app {
+  position: relative;
+  z-index: 1;
+  min-height: 455px;
+  margin: 18px 19px 21px;
+  border: 1px solid rgba(8, 53, 34, .21);
+  border-radius: 2px;
+  background: #f7fbf3;
+  box-shadow: 0 22px 42px rgba(7, 54, 32, .23);
+  transform: rotate(.5deg);
+}
+.landing-home .mock-sidebar { background: #eff6e9; }
+.landing-home .mock-inbox { background: #fbfdf8; }
+.landing-home .landing-trust {
+  border-color: var(--poster-line);
+  color: #9bb59e;
+}
+.landing-home .landing-trust svg { color: var(--poster-green); }
+.landing-home .landing-features,
+.landing-home .landing-process,
+.landing-home .landing-capabilities,
+.landing-home .landing-privacy,
+.landing-home .landing-final-cta { color: var(--poster-ink); }
+.landing-home .landing-features,
+.landing-home .landing-process,
+.landing-home .landing-privacy,
+.landing-home .landing-final-cta { border-color: var(--poster-line); }
+.landing-home .landing-section-heading h2,
+.landing-home .landing-privacy h2,
+.landing-home .landing-capabilities-intro h2,
+.landing-home .landing-final-cta h2 { color: var(--poster-ink); font-weight: 500; letter-spacing: -.045em; }
+.landing-home .landing-section-heading > p:last-child,
+.landing-home .landing-privacy > p,
+.landing-home .landing-capabilities-intro > p:last-child { color: #9bb39d; }
+.landing-home .landing-feature-grid { border-color: var(--poster-line); }
+.landing-home .landing-feature-grid article + article { border-color: var(--poster-line); }
+.landing-home .landing-feature-number,
+.landing-home .landing-process-grid article > span { color: #91bf82; }
+.landing-home .landing-feature-grid h3,
+.landing-home .landing-process-grid h3,
+.landing-home .landing-capability-row strong { color: #cfe8bf; font-weight: 500; }
+.landing-home .landing-feature-grid p,
+.landing-home .landing-process-grid p,
+.landing-home .landing-capability-row span { color: #8fa995; }
+.landing-home .landing-feature-grid a { color: var(--poster-green); }
+.landing-home .landing-feature-grid a:hover { color: #e1ff9c; }
+.landing-home .landing-process-grid article { border-color: #8bc36f; }
+.landing-home .landing-process-grid article + article { border-color: rgba(139, 195, 111, .38); }
+.landing-home .landing-capability-panel { border-color: var(--poster-line); }
+.landing-home .landing-capability-row { border-color: rgba(205, 244, 142, .12); }
+.landing-home .landing-capability-row svg { color: var(--poster-green); }
+.landing-home .landing-home .home-footer,
+.landing-home .home-footer { border-color: var(--poster-line); color: #78957f; }
+.landing-home .home-footer button { color: #bde982; }
+.landing-home .home-footer button:hover { color: #e0ff9a; }
+
+@media (max-width: 1050px) {
+  .landing-home .landing-hero { grid-template-columns: 1fr; gap: 38px; min-height: auto; padding-top: 58px; }
+  .landing-home .landing-hero::before,
+  .landing-home .landing-hero::after { width: 100%; }
+  .landing-home .landing-hero-copy { max-width: 680px; }
+  .landing-home .landing-product-shot { width: min(100%, 760px); min-height: 560px; }
+}
+@media (max-width: 700px) {
+  .landing-home .landing-nav,
+  .landing-home .landing-hero,
+  .landing-home .landing-trust,
+  .landing-home .landing-features,
+  .landing-home .landing-privacy,
+  .landing-home .landing-home .home-footer,
+  .landing-home .home-footer { width: min(100% - 38px, 560px); }
+  .landing-home .landing-nav { padding-top: 18px; }
+  .landing-home .landing-hero { gap: 25px; padding: 45px 0 58px; }
+  .landing-home .landing-hero::before,
+  .landing-home .landing-hero::after { inset: 0 -1px; width: auto; }
+  .landing-home .landing-hero-copy { padding: 12px 0 0; }
+  .landing-home .landing-hero h1 { font-size: clamp(56px, 16vw, 82px); }
+  .landing-home .landing-hero-title { margin-top: 17px; font-size: .56em; }
+  .landing-home .landing-lede { margin-top: 23px; font-size: 14px; }
+  .landing-home .landing-product-shot { min-height: 450px; }
+  .landing-home .mock-mail-app { min-height: auto; margin: 14px 13px 16px; transform: none; }
+  .landing-home .landing-trust { gap: 13px; }
+  .landing-home .landing-section-heading h2,
+  .landing-home .landing-privacy h2,
+  .landing-home .landing-capabilities-intro h2 { font-size: clamp(35px, 11vw, 55px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-home .landing-primary:hover,
+  .landing-home .landing-nav-cta:hover { transform: none; }
 }
 
 /* Ribbon interactions: tabs are real controls, while the toolbar keeps its

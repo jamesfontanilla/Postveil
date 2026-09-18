@@ -1088,8 +1088,8 @@ function PublicHome({ onSignIn, onSignUp }: { onSignIn: () => void; onSignUp: ()
       <section className="landing-hero" id="top">
         <div className="landing-hero-copy">
           <p className="landing-eyebrow"><ShieldCheck size={15} aria-hidden="true" /> Private email for the domain you own</p>
-          <h1>A calmer inbox for your <em>own domain.</em></h1>
-          <p className="landing-lede">Postveil turns a domain you already have into a clear, capable mailbox—without sending you through a maze of provider consoles.</p>
+          <h1><span className="landing-wordmark">Postveil</span><span className="landing-hero-title">A calmer inbox for your <em>own domain.</em></span></h1>
+          <p className="landing-lede">A private, capable mailbox for the name you already own—without sending you through a maze of provider consoles.</p>
           <div className="landing-actions"><button type="button" className="landing-primary" onClick={onSignUp}>Get started free <ArrowRight size={17} /></button><button type="button" className="landing-secondary" onClick={onSignIn}>Sign in</button></div>
           <p className="landing-microcopy"><Check size={14} /> Guided domain setup · privacy-first defaults · built for desktop and mobile</p>
         </div>
