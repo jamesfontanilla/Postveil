@@ -4399,15 +4399,17 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     // requiring those optional fields stranded users after MX was correct.
     const effectiveRouteReady = dnsReady;
     const effectiveStatus = domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady });
-    // Both public MX and an SES identity are required before enabling mail.
-    // SES readiness fields may be omitted, but identity existence is the
-    // account-level activation signal needed by the sender.
-    const mailReady = dnsReady && ses.exists;
+    // Manual DNS onboarding must not depend on whether SES provisioning was
+    // created during this refresh. An identity may already exist, and SES can
+    // legitimately return an "already exists" response while the public DNS
+    // checks are fully satisfied. The user-managed ownership TXT plus the
+    // exact inbound MX are the activation signals for this flow.
+    const mailReady = ownershipReady && dnsReady && effectiveRouteReady;
     await env.DB.prepare("UPDATE pv_domain_verifications SET provider = 'ses', status = ?1, dns_ready = ?2, verified_at = ?3, last_checked_at = ?4, updated_at = ?4 WHERE user_id = ?5 AND domain = ?6").bind(mailReady ? "verified" : effectiveStatus, dnsReady ? 1 : 0, mailReady ? now : null, now, user.id, domain).run();
-    await saveDomainIntegration(env, { userId: user.id, domain, provider: String(body.provider || "manual"), zoneId: null, accountId: null, ownershipStatus: ses.exists ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: null, routeTarget: "Amazon SES", ownershipToken: integration?.ownership_token || null, ownershipRecordName: integration?.ownership_record_name || null, records: sesRecords, lastError: ses.error });
+    await saveDomainIntegration(env, { userId: user.id, domain, provider: String(body.provider || verification?.provider || "manual"), zoneId: null, accountId: null, ownershipStatus: ownershipReady ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: null, routeTarget: "Amazon SES", ownershipToken: integration?.ownership_token || null, ownershipRecordName: integration?.ownership_record_name || null, records: sesRecords, lastError: ses.error });
     await promoteVerifiedMailboxes(env, user.id, domain, mailReady);
     const promotedMailboxes = await d1Request<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&select=id,address,display_name,is_default,can_send,can_receive,settings`);
-    return json({ domain, ownershipVerified: ses.exists, verified: mailReady, dnsReady, mxReady: dnsReady, dkimReady: ses.ready, sesReady: ses.ready, routeReady: effectiveRouteReady, automationStatus: domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady }), inboundRouteStatus: effectiveRouteReady ? "ready" : "pending", records: sesRecords, manualRecords: sesRecords, ownershipRecordName: "", expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now, sesVerificationStatus: ses.ready ? "verified" : "pending", sesError: ses.error, mailboxes: promotedMailboxes });
+    return json({ domain, ownershipVerified: ownershipReady, verified: mailReady, dnsReady, mxReady: dnsReady, dkimReady: ses.ready, sesReady: ses.ready, routeReady: effectiveRouteReady, automationStatus: domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady }), inboundRouteStatus: effectiveRouteReady ? "ready" : "pending", records: sesRecords, manualRecords: sesRecords, ownershipRecordName: "", expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now, sesVerificationStatus: ses.ready ? "verified" : "pending", sesError: ses.error, mailboxes: promotedMailboxes });
   }
 
   const mailbox = await ensureProfileAndMailbox(env, user);
