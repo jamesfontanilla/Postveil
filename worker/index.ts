@@ -3983,7 +3983,7 @@ function webhookEventId(provider: ProviderName, event: JsonRecord): string {
   const mail = objectValue(event.mail);
   const eventData = objectValue(event["event-data"] || event.eventData);
   const headers = objectValue(objectValue(eventData.message).headers || objectValue(event.message).headers);
-  return String(event.eventId || event.event_id || event.sg_event_id || event.id || event.MessageID || event.messageId || event["message-id"] || mail.messageId || mail["message-id"] || headers["message-id"] || `${provider}:${event.eventType || event.event || event.Type || event.RecordType || event.notificationType || "event"}:${event.timestamp || event.occurredAt || event.recipient || event.email || ""}`);
+  return String(event.eventId || event.event_id || event.sg_event_id || event.id || event.MessageID || event.messageId || event.message_id || event["message-id"] || mail.messageId || mail["message-id"] || headers["message-id"] || `${provider}:${event.eventType || event.event || event.Type || event.RecordType || event.notificationType || "event"}:${event.timestamp || event.occurredAt || event.recipient || event.email || ""}`);
 }
 
 type SnsEnvelope = {
