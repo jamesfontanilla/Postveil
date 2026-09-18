@@ -2834,10 +2834,17 @@ h1, h2, h3, h4,
 /* Quiet hero pass: remove the lime artwork and center the message on the page. */
 .landing-home .landing-hero {
   display: grid;
+  grid-template-columns: 1fr;
   place-items: center;
+  width: min(100% - 80px, 1320px);
+  min-height: 0;
   padding: 24px 0 76px;
 }
+.landing-home .landing-hero::before,
+.landing-home .landing-hero::after { display: none; }
 .landing-poster {
+  display: grid;
+  justify-items: center;
   width: min(100%, 760px);
   min-height: 620px;
   aspect-ratio: auto;
@@ -2845,12 +2852,19 @@ h1, h2, h3, h4,
   border: 0;
   border-radius: 0;
   padding: clamp(58px, 8vw, 100px) clamp(20px, 7vw, 74px) 36px;
-  background: #0c1110;
+  background: transparent;
   box-shadow: none;
 }
 .landing-poster::before,
 .landing-poster::after { display: none; }
-.landing-poster .landing-hero-copy { max-width: 650px; }
+.landing-poster .landing-hero-copy {
+  display: flex;
+  width: min(100%, 650px);
+  max-width: 650px;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
 .landing-poster .landing-eyebrow { color: #9ac775; }
 .landing-poster .landing-eyebrow svg { color: #c7f27e; }
 .landing-poster .landing-hero h1 { color: #f1f6e9; }
@@ -2866,9 +2880,10 @@ h1, h2, h3, h4,
 .landing-poster .landing-secondary:hover { border-color: #c7f27e; background: rgba(199, 242, 126, .08); }
 .landing-poster-caption {
   position: static;
-  width: 100%;
+  width: min(100%, 650px);
   margin-top: 70px;
   color: #66806a;
+  text-align: center;
 }
 .landing-product-proof .landing-product-shot {
   background: #111a15;
