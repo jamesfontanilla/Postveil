@@ -2646,6 +2646,121 @@ h1, h2, h3, h4,
   .landing-home .landing-nav-cta:hover { transform: none; }
 }
 
+/* Poster composition: one focal artwork, with the inbox kept as a quiet inset. */
+.landing-home .landing-hero {
+  display: block;
+  min-height: auto;
+  padding: 18px 0 70px;
+}
+.landing-home .landing-hero::before,
+.landing-home .landing-hero::after { display: none; }
+.landing-poster {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-height: min(800px, calc(100svh - 110px));
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(208, 249, 132, .3);
+  border-radius: 1px;
+  padding: clamp(52px, 7vw, 88px) clamp(22px, 6vw, 76px) 60px;
+  background:
+    radial-gradient(circle at 50% 33%, rgba(222, 255, 128, .98) 0, rgba(219, 252, 117, .72) 18%, transparent 41%),
+    radial-gradient(circle at 10% 92%, rgba(3, 89, 48, .96) 0, transparent 33%),
+    radial-gradient(circle at 93% 70%, rgba(66, 177, 73, .85) 0, transparent 33%),
+    linear-gradient(145deg, #075332 0%, #40bd67 42%, #c8f36d 100%);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .28);
+}
+.landing-poster::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, .56) .65px, transparent .75px);
+  background-size: 4px 4px;
+  content: "";
+  mix-blend-mode: soft-light;
+  opacity: .34;
+  pointer-events: none;
+}
+.landing-poster::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .08), transparent 34%, rgba(2, 46, 28, .12));
+  content: "";
+  pointer-events: none;
+}
+.landing-poster .landing-hero-copy {
+  z-index: 1;
+  display: flex;
+  max-width: 740px;
+  flex-direction: column;
+  align-items: center;
+  padding: 0;
+  text-align: center;
+}
+.landing-poster .landing-eyebrow { color: #0c5d37; }
+.landing-poster .landing-eyebrow svg { color: #07502f; }
+.landing-poster .landing-hero h1 { max-width: 680px; color: #0a432b; }
+.landing-poster .landing-wordmark { color: #075b35; font-size: 1.02em; }
+.landing-poster .landing-hero-title { max-width: 620px; margin-top: 20px; font-size: .56em; }
+.landing-poster .landing-hero h1 em { color: #0d743f; }
+.landing-poster .landing-lede { max-width: 505px; margin-top: 25px; color: #0b5735; }
+.landing-poster .landing-actions { justify-content: center; margin-top: 27px; }
+.landing-poster .landing-primary { background: #073f29; color: #e0ff91; box-shadow: 0 10px 28px rgba(4, 56, 32, .24); }
+.landing-poster .landing-primary:hover { background: #0a5536; }
+.landing-poster .landing-secondary { border-color: rgba(7, 63, 40, .42); color: #073f29; }
+.landing-poster .landing-secondary:hover { border-color: #073f29; background: rgba(255, 255, 255, .15); }
+.landing-poster .landing-microcopy { margin-top: 15px; color: #0c5d37; }
+.landing-poster .landing-microcopy svg { color: #07502f; }
+.landing-poster .landing-product-shot {
+  z-index: 1;
+  width: min(860px, 100%);
+  min-height: 0;
+  margin-top: clamp(35px, 5vw, 58px);
+  border: 0;
+  background: transparent;
+}
+.landing-poster .mock-window-bar {
+  min-height: 43px;
+  padding: 0 14px;
+  border-bottom-color: rgba(8, 65, 39, .2);
+}
+.landing-poster .mock-mail-app {
+  min-height: 310px;
+  margin: 12px auto 0;
+  transform: rotate(-.45deg);
+  box-shadow: 0 24px 48px rgba(4, 61, 34, .3);
+}
+.landing-poster-caption {
+  position: absolute;
+  right: clamp(22px, 4vw, 58px);
+  bottom: 17px;
+  left: clamp(22px, 4vw, 58px);
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0;
+  color: #0b5c36;
+  font: 9px/1.3 var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.landing-poster-caption span:last-child { text-align: right; }
+@media (max-width: 700px) {
+  .landing-home .landing-hero { padding: 10px 0 54px; }
+  .landing-poster { min-height: 730px; padding: 42px 18px 48px; }
+  .landing-poster .landing-hero h1 { font-size: clamp(54px, 16vw, 80px); }
+  .landing-poster .landing-hero-title { margin-top: 15px; font-size: .55em; }
+  .landing-poster .landing-lede { max-width: 330px; font-size: 13px; }
+  .landing-poster .landing-product-shot { margin-top: 29px; }
+  .landing-poster .mock-mail-app { min-height: 245px; margin-top: 9px; transform: none; }
+  .landing-poster-caption { flex-direction: column; gap: 4px; }
+  .landing-poster-caption span:last-child { text-align: left; }
+}
+
 /* Ribbon interactions: tabs are real controls, while the toolbar keeps its
    familiar command-strip rhythm at narrow widths. */
 .mail-ribbon-tab {
