@@ -6165,14 +6165,12 @@ function MailboxApp({ session }: { session: Session }) {
                    </div>}
                  </div>
                  <div className="message-command-ribbon outlook-message-toolbar" aria-label="Message actions">
-                   <div className="message-toolbar-group" aria-label="Message responses">
-                     <span className="message-toolbar-label">Respond</span>
+                   <div className="message-toolbar-group" aria-label="Reply actions">
                      <button className="message-toolbar-button primary" onClick={() => openCompose(selectedReplySeed)} title="Reply to this message"><Reply size={14} /> Reply</button>
                      <button className="message-toolbar-button" onClick={() => openCompose(selectedReplyAllSeed)} title="Reply to everyone"><Users size={14} /> Reply all</button>
                      <button className="message-toolbar-button" onClick={() => openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined)} title="Forward this message"><Forward size={14} /> Forward</button>
                    </div>
-                   <div className="message-toolbar-group" aria-label="Message organization">
-                     <span className="message-toolbar-label">Organize</span>
+                   <div className="message-toolbar-group" aria-label="Message actions">
                      {selected.folder === "trash" ? <button className="message-toolbar-button" onClick={() => void restoreSelected()} disabled={trashBusy} title="Restore this message"><Undo2 size={14} /> Restore</button> : <><button className="message-toolbar-button" onClick={() => void mutateMessage({ folder: "archive" })} title="Archive this message"><Archive size={14} /> Archive</button><button className="message-toolbar-button danger" onClick={() => void (async () => { if (await confirm({ title: "Move message to Trash?", message: "You can restore this message later.", confirmLabel: "Move to Trash", danger: true })) void mutateMessage({ folder: "trash" }); })()} title="Move this message to Trash"><Trash2 size={14} /> Delete</button></>}
                    </div>
                    <details className="message-toolbar-more">

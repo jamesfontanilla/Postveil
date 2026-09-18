@@ -2482,6 +2482,33 @@ h1, h2, h3, h4,
   padding: 3px 7px;
   font-size: 9px;
 }
+.mobile-detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 0 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 6px 10px;
+  font: 600 11px/1 var(--font-ui);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(23, 37, 34, .04);
+  transition: border-color .16s ease, background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+.mobile-detail-back:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: none;
+}
+.mobile-detail-back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.mobile-detail-back svg { flex: 0 0 auto; }
 .outlook-message-toolbar {
   display: flex;
   align-items: center;
@@ -2500,16 +2527,6 @@ h1, h2, h3, h4,
   min-width: 0;
   border-right: 1px solid var(--line);
   padding: 0 10px 0 4px;
-}
-.message-toolbar-label {
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-  margin-right: 5px;
-  color: var(--muted);
-  font: 9px var(--font-mono);
-  letter-spacing: .08em;
-  text-transform: uppercase;
 }
 .message-toolbar-button,
 .message-toolbar-more > summary {
@@ -2780,7 +2797,6 @@ h1, h2, h3, h4,
   font-size: 10px;
 }
 .message-toolbar-button.primary { min-width: 78px; }
-.message-toolbar-label { align-self: flex-end; margin-bottom: 3px; font-size: 8px; }
 
 @media (max-width: 720px) {
   .mail-ribbon { grid-template-rows: 36px 70px; }
