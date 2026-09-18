@@ -2761,6 +2761,76 @@ h1, h2, h3, h4,
   .landing-poster-caption span:last-child { text-align: left; }
 }
 
+/* Final composition pass: make the artwork portrait and give the product its own readable stage. */
+.landing-home .landing-hero { padding: 24px 0 76px; }
+.landing-poster {
+  width: min(100%, 600px);
+  min-height: 0;
+  aspect-ratio: 4 / 5;
+  padding: clamp(46px, 7vw, 72px) clamp(25px, 6vw, 58px) 58px;
+}
+.landing-poster::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+  background-size: 160px 160px;
+  opacity: .2;
+}
+.landing-poster .landing-hero-copy { max-width: 100%; }
+.landing-poster .landing-eyebrow { margin-bottom: 17px; font-size: 9px; }
+.landing-poster .landing-hero h1 { font-size: clamp(60px, 7vw, 91px); }
+.landing-poster .landing-hero-title { max-width: 450px; font-size: .5em; }
+.landing-poster .landing-lede { max-width: 365px; font-size: 13px; }
+.landing-poster .landing-actions { margin-top: 24px; }
+.landing-poster .landing-microcopy { max-width: 320px; justify-content: center; text-align: center; }
+.landing-poster-caption { font-size: 8px; }
+.landing-product-proof {
+  display: grid;
+  grid-template-columns: minmax(220px, .72fr) minmax(0, 1.28fr);
+  gap: clamp(42px, 8vw, 106px);
+  align-items: center;
+  width: min(100% - 80px, 1120px);
+  margin: 0 auto;
+  border-top: 1px solid var(--poster-line);
+  padding: 78px 0 88px;
+}
+.landing-product-proof-copy { max-width: 370px; }
+.landing-product-proof-copy h2 { margin: 0; color: var(--poster-ink); font: 500 clamp(32px, 4vw, 52px)/.98 var(--font-display); letter-spacing: -.045em; }
+.landing-product-proof-copy > p:last-child { margin: 19px 0 0; color: #9bb39d; font-size: 13px; line-height: 1.7; }
+.landing-product-proof .landing-product-shot {
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(205, 244, 142, .22);
+  border-radius: 5px;
+  background: linear-gradient(135deg, rgba(16, 79, 49, .9), rgba(92, 174, 81, .5));
+  padding: 10px;
+  box-shadow: 0 24px 55px rgba(0, 0, 0, .22);
+}
+.landing-product-proof .landing-product-shot::before { display: none; }
+.landing-product-proof .mock-window-bar { min-height: 38px; border-bottom-color: rgba(205, 244, 142, .18); padding: 0 8px; }
+.landing-product-proof .mock-window-brand { color: #dcefcf; }
+.landing-product-proof .mock-window-status { color: #acd294; }
+.landing-product-proof .mock-mail-app { min-height: 350px; margin: 9px 0 0; transform: none; box-shadow: 0 18px 34px rgba(3, 45, 27, .26); }
+.landing-home .landing-trust { width: min(100% - 80px, 1120px); }
+.landing-home .landing-features { padding: 82px 0 88px; }
+.landing-home .landing-process { padding: 82px 0 88px; }
+.landing-home .landing-capabilities { padding: 82px 0 88px; }
+.landing-home .landing-privacy { padding: 56px 0 66px; }
+.landing-home .landing-final-cta { padding: 58px 0 66px; }
+.landing-home .home-footer a { color: #9fcf86; }
+.landing-home .home-footer a:hover { color: #dcff95; }
+@media (max-width: 700px) {
+  .landing-home .landing-hero { padding: 10px 0 58px; }
+  .landing-poster { width: 100%; min-height: 680px; aspect-ratio: auto; padding: 43px 19px 58px; }
+  .landing-poster .landing-hero h1 { font-size: clamp(57px, 16vw, 82px); }
+  .landing-poster .landing-hero-title { font-size: .5em; }
+  .landing-product-proof { grid-template-columns: 1fr; gap: 31px; width: min(100% - 38px, 560px); padding: 59px 0 68px; }
+  .landing-product-proof-copy { max-width: 470px; }
+  .landing-product-proof .mock-mail-app { min-height: 260px; }
+  .landing-home .landing-trust { width: min(100% - 38px, 560px); }
+  .landing-home .landing-features { padding: 66px 0 72px; }
+  .landing-home .landing-process { padding: 66px 0 72px; }
+  .landing-home .landing-capabilities { padding: 66px 0 72px; }
+}
+
 /* Ribbon interactions: tabs are real controls, while the toolbar keeps its
    familiar command-strip rhythm at narrow widths. */
 .mail-ribbon-tab {
