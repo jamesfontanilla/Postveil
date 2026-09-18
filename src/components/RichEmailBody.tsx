@@ -7,17 +7,21 @@ import {
   ExternalLink,
   FileDown,
   Image as ImageIcon,
+  BookOpen,
   Languages,
   Link2,
   Minus,
   Moon,
   Plus,
   Printer,
+  Search,
   SlidersHorizontal,
   Quote,
   ShieldAlert,
   ShieldCheck,
   Sun,
+  Volume2,
+  Square,
   X,
 } from "lucide-react";
 import { inspectEmailHtml } from "../lib/email-renderer";
@@ -114,6 +118,10 @@ export default function RichEmailBody({
   const [showSignature, setShowSignature] = useState(false);
   const [translationOpen, setTranslationOpen] = useState(false);
   const [translationLanguage, setTranslationLanguage] = useState("browser");
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [immersiveOpen, setImmersiveOpen] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [linkTarget, setLinkTarget] = useState<string | null>(null);
   const [linkInspection, setLinkInspection] = useState<LinkInspection | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
@@ -129,7 +137,15 @@ export default function RichEmailBody({
     setShowSignature(false);
     setLinkTarget(null);
     setLinkInspection(null);
+    setFindOpen(false);
+    setFindQuery("");
+    setImmersiveOpen(false);
+    setSpeaking(false);
   }, [html, plainText, loadRemoteImages]);
+
+  useEffect(() => () => {
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
+  }, []);
 
   const sourceHtml = useMemo(
     () => sanitizeEmailHtml(html, { inlineImageUrls, loadExternalImages: false }),
@@ -172,6 +188,9 @@ export default function RichEmailBody({
   );
   const externalImageCount = stats.externalImageCount;
   const showVisual = Boolean(html) && mode === "visual";
+  const findMatchCount = findQuery.trim()
+    ? (plainText.toLowerCase().match(new RegExp(findQuery.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length
+    : 0;
 
   function printEmail() {
     document.body.classList.add("printing-email");
@@ -186,6 +205,27 @@ export default function RichEmailBody({
     if (!popup) return;
     popup.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email · Postveil</title><style>body{margin:0;background:#f4f6f2;color:#17221f;font:16px/1.6 system-ui,sans-serif}.email{box-sizing:border-box;width:min(860px,100%);margin:0 auto;padding:40px 28px;background:#fff;min-height:100vh;overflow-wrap:anywhere}.email img{max-width:100%;height:auto}.email table{max-width:100%}a{color:#3156d8}</style></head><body><main class="email" aria-label="Email message">${sanitizedHtml || `<pre>${plainText.replace(/[&<>]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[character] || character)}</pre>`}</main></body></html>`);
     popup.document.close();
+  }
+
+  function findNextMatch() {
+    if (!findQuery.trim()) return;
+    const finder = (window as Window & { find?: (...args: unknown[]) => boolean }).find;
+    finder?.(findQuery.trim(), false, false, true, false, false, false);
+  }
+
+  function toggleReadAloud() {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(signatureParts.body || plainText || "No message body.");
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setSpeaking(true);
   }
 
   async function handleContentClick(event: ReactMouseEvent<HTMLDivElement>) {
@@ -237,10 +277,14 @@ export default function RichEmailBody({
               <button onClick={() => setDarkEmail((value) => !value)} aria-pressed={darkEmail} title="Toggle email dark mode">{darkEmail ? <Sun size={13} /> : <Moon size={13} />}<span className="rich-email-tool-label">Email theme</span></button>
               <button onClick={printEmail} title="Print or save as PDF"><FileDown size={13} /><span className="rich-email-tool-label">PDF / Print</span></button>
               <button onClick={openInNewWindow} title="Open message in a new window"><ExternalLink size={13} /><span className="rich-email-tool-label">New window</span></button>
+              <button className={findOpen ? "is-active" : ""} onClick={() => setFindOpen((value) => !value)} aria-expanded={findOpen} title="Find in message"><Search size={13} /><span className="rich-email-tool-label">Find</span></button>
+              <button onClick={() => setImmersiveOpen(true)} title="Open Immersive Reader"><BookOpen size={13} /><span className="rich-email-tool-label">Immersive</span></button>
             </div>
           </div>
         </details>
       </div>
+
+      {findOpen && <div className="rich-email-find" role="search" aria-label="Find in message"><Search size={14} /><input autoFocus value={findQuery} onChange={(event) => setFindQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); findNextMatch(); } }} placeholder="Find in this message" aria-label="Find in this message" /><span>{findQuery ? `${findMatchCount} match${findMatchCount === 1 ? "" : "es"}` : "Type to search"}</span><button onClick={findNextMatch} disabled={!findQuery.trim()}>Next</button><button onClick={() => { setFindOpen(false); setFindQuery(""); }} aria-label="Close message search"><X size={14} /></button></div>}
 
       <div className="rich-email-security-strip" role="status" aria-live="polite">
         <span><ShieldCheck size={13} /> Safe renderer</span>
@@ -282,6 +326,8 @@ export default function RichEmailBody({
       </div>
 
       {translationOpen && <div className="rich-email-translation-panel"><Languages size={15} /><div><strong>Message translation</strong><p>Translation stays opt-in so private messages are not sent to a third-party service automatically.</p><label htmlFor="translation-language">Language<select id="translation-language" value={translationLanguage} onChange={(event) => setTranslationLanguage(event.target.value)}><option value="browser">Use browser translation</option><option value="en">English</option><option value="fil">Filipino</option><option value="es">Spanish</option><option value="fr">French</option></select></label><small>{translationLanguage === "browser" ? "Use your browser’s Translate command to keep the message in this page." : "A translation provider must be configured by the deployment owner before translated text can be generated."}</small></div><button onClick={() => setTranslationOpen(false)} aria-label="Close translation panel"><X size={14} /></button></div>}
+
+      {immersiveOpen && <div className="immersive-reader-backdrop" role="presentation"><section className="immersive-reader" role="dialog" aria-modal="true" aria-labelledby="immersive-reader-title"><header><div><p className="eyebrow">READING MODE</p><h2 id="immersive-reader-title">Immersive Reader</h2><span>Focused reading with no message chrome.</span></div><button className="icon-button" onClick={() => { setImmersiveOpen(false); if (speaking) toggleReadAloud(); }} aria-label="Close Immersive Reader"><X size={18} /></button></header><article className="immersive-reader-body">{signatureParts.body || plainText || "No message body."}</article><footer><button className="secondary-button" onClick={toggleReadAloud}>{speaking ? <Square size={14} /> : <Volume2 size={14} />}{speaking ? "Stop reading" : "Read aloud"}</button><small>Read aloud uses your browser’s local speech service.</small></footer></section></div>}
 
       {linkTarget && <div className="rich-email-link-panel" role="dialog" aria-label="Link destination inspection"><div className="rich-email-link-head"><span><Link2 size={14} /> Link destination</span><button onClick={() => { setLinkTarget(null); setLinkInspection(null); }} aria-label="Close link inspection"><X size={14} /></button></div><strong>{sourceLabel(linkTarget)}</strong><code>{linkTarget}</code><p className={linkInspection?.warning || !linkInspection?.ok ? "is-warning" : "is-safe"}>{linkBusy ? "Inspecting destination…" : readableStatus(linkInspection)}</p>{linkInspection?.chain && linkInspection.chain.length > 1 && <div className="rich-email-redirect-chain"><span>Redirect chain</span>{linkInspection.chain.map((hop, index) => <code key={`${hop.url}-${index}`}>{hop.status} · {sourceLabel(hop.url)}</code>)}</div>}<div><button className="secondary-button" onClick={() => { window.open(linkTarget, "_blank", "noopener,noreferrer"); setLinkTarget(null); }} disabled={linkBusy}><ExternalLink size={13} /> Open link</button></div></div>}
 

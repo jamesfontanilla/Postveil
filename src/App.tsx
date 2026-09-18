@@ -4496,6 +4496,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [error, setError] = useState("");
   const [liveState, setLiveState] = useState<"connecting" | "live" | "reconnecting" | "offline">("connecting");
   const [showAllThreadMessages, setShowAllThreadMessages] = useState(false);
+  const [threadOrder, setThreadOrder] = useState<"newest" | "oldest">("newest");
   const [showMessageDetails, setShowMessageDetails] = useState(false);
   const [trustLensOpen, setTrustLensOpen] = useState(false);
   const [trustLensBusy, setTrustLensBusy] = useState(false);
@@ -5373,6 +5374,14 @@ function MailboxApp({ session }: { session: Session }) {
     ? detailIdentityForMessage(selected, contacts, mailboxes)
     : null;
   const selectedContact = detailIdentity ? contactFor(detailIdentity.email, contacts) : undefined;
+  const orderedThreadMessages = useMemo(() => [...threadMessages].sort((left, right) => {
+    const leftTime = Date.parse(left.received_at || left.sent_at || left.created_at || "") || 0;
+    const rightTime = Date.parse(right.received_at || right.sent_at || right.created_at || "") || 0;
+    return threadOrder === "newest" ? rightTime - leftTime : leftTime - rightTime;
+  }), [threadMessages, threadOrder]);
+  const suggestedReplies = selected?.direction === "inbound"
+    ? ["Thanks — received.", "I’ll review this and get back to you.", "Could we discuss this further?"]
+    : [];
   const hasMailSelection = selectedIds.size > 0 || selectAllResults;
   const customFolderDepth = (folderId: string): number => {
     let depth = 0;
@@ -6300,6 +6309,14 @@ function MailboxApp({ session }: { session: Session }) {
                     inspectLink={inspectEmailLink}
                   />
                 </div>
+                {suggestedReplies.length > 0 && selectedReplySeed && (
+                  <div className="suggested-replies" aria-label="Suggested replies">
+                    <div><span className="eyebrow">SUGGESTED REPLIES</span><small>Shortcuts you can edit before sending.</small></div>
+                    <div className="suggested-replies-list">
+                      {suggestedReplies.map((reply) => <button key={reply} className="suggested-reply" onClick={() => openCompose({ ...selectedReplySeed, text: `${reply}\n\n${selectedReplySeed.text || ""}` })}><Reply size={13} /> {reply}</button>)}
+                    </div>
+                  </div>
+                )}
                 {selected.attachments && selected.attachments.length > 0 && (
                   <div className="attachments">
                     <div className="attachments-head">
@@ -6325,7 +6342,7 @@ function MailboxApp({ session }: { session: Session }) {
                   <div className="conversation-section">
                     <div className="conversation-head">
                       <p className="eyebrow">CONVERSATION</p>
-                      <span>{threadMessages.length} messages</span>
+                      <div className="conversation-head-controls"><span>{threadMessages.length} messages</span><label>Order<select value={threadOrder} onChange={(event) => setThreadOrder(event.target.value as "newest" | "oldest")} aria-label="Conversation order"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label></div>
                     </div>
                     {!showAllThreadMessages && (
                       <button
@@ -6336,7 +6353,7 @@ function MailboxApp({ session }: { session: Session }) {
                       </button>
                     )}
                     <div className="thread-stack">
-                      {(showAllThreadMessages ? threadMessages : [selected]).map((threadMessage) => (
+                      {(showAllThreadMessages ? orderedThreadMessages : [selected]).map((threadMessage) => (
                         <button
                           key={threadMessage.id}
                           className={threadMessage.id === selected.id ? "active" : ""}
