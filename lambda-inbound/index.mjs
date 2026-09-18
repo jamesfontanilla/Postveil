@@ -12,19 +12,27 @@ const s3 = new S3Client({});
 export const handler = async (event) => {
   const record = event?.Records?.[0];
   const ses = record?.ses;
-  const action = ses?.receipt?.action;
-  const bucket = action?.bucketName;
-  const key = action?.objectKey;
-  if (!bucket || !key || !ses?.mail) throw new Error("SES event did not include an S3 message location");
+  // SES's Lambda receipt action does not include the object written by a
+  // preceding S3 receipt action. The durable trigger is therefore the S3
+  // ObjectCreated event; keep the SES shape as a backward-compatible
+  // fallback for any older rule that still invokes this function directly.
+  const sesAction = ses?.receipt?.action;
+  const s3Record = record?.eventSource === "aws:s3" ? record.s3 : undefined;
+  const bucket = sesAction?.bucketName || s3Record?.bucket?.name;
+  const key = sesAction?.objectKey || (s3Record?.object?.key ? decodeURIComponent(s3Record.object.key.replace(/\+/g, " ")) : undefined);
+  if (!bucket || !key) {
+    console.error("Inbound event did not contain an S3 object location", JSON.stringify({ eventSource: record?.eventSource, hasSes: Boolean(ses), recordKeys: Object.keys(record || {}) }));
+    throw new Error("Inbound event did not include an S3 message location");
+  }
   const stored = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   if (!stored.Body) throw new Error("SES S3 object had no body");
   const raw = await stored.Body.transformToString();
-  const recipient = ses.receipt?.recipients?.[0] || ses.mail.destination?.[0];
+  const recipient = ses?.receipt?.recipients?.[0] || ses?.mail?.destination?.[0];
   try {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", "x-webhook-secret": process.env.POSTVEIL_INBOUND_SECRET },
-      body: JSON.stringify({ raw, from: ses.mail.source, to: recipient, message_id: ses.mail.messageId }),
+      body: JSON.stringify({ raw, from: ses?.mail?.source, to: recipient, message_id: ses?.mail?.messageId }),
     });
     if (!response.ok) throw new Error(`Postveil returned ${response.status}: ${await response.text()}`);
     await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
