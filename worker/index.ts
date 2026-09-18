@@ -885,7 +885,7 @@ async function provisionSesDomain(env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECR
   try {
     try { await client.send(new CreateEmailIdentityCommand({ EmailIdentity: domain })); } catch (createError) {
       const message = createError instanceof Error ? createError.message : String(createError || "");
-      if (!/already exists|already been created|Conflict|Exists/i.test(message)) throw createError;
+      if (!/already exist|already been created|Conflict|Exists/i.test(message)) throw createError;
     }
     const identity = await client.send(new GetEmailIdentityCommand({ EmailIdentity: domain }));
     const dkim = identity.DkimAttributes;
