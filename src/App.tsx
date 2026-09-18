@@ -6620,12 +6620,20 @@ function AppContent() {
     }
     let active = true;
     setOnboardingChecked(false);
-    void apiFetch<JsonRecord>("/api/settings").then((settings) => {
+    void Promise.all([
+      apiFetch<JsonRecord>("/api/settings"),
+      apiFetch<Mailbox[]>("/api/mailboxes"),
+    ]).then(([settings, mailboxes]) => {
       if (!active) return;
       const state = settings.onboarding_state && typeof settings.onboarding_state === "object" ? settings.onboarding_state as OnboardingState : null;
-      setOnboardingRequired(state?.completed !== true);
+      // A completed flag alone is not enough: an account without a mailbox
+      // must always return to the domain onboarding wizard. This also repairs
+      // sessions created before the first mailbox is provisioned.
+      setOnboardingRequired(state?.completed !== true || mailboxes.length === 0);
     }).catch(() => {
-      if (active) setOnboardingRequired(false);
+      // Fail closed for a signed-in account: if readiness cannot be checked,
+      // keep the user in onboarding instead of exposing an unusable mailbox.
+      if (active) setOnboardingRequired(true);
     }).finally(() => {
       if (active) setOnboardingChecked(true);
     });
