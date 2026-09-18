@@ -1,6 +1,12 @@
-import { S3Client, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { createRequire } from "node:module";
 
-const endpoint = "https://postveil.jamesfontanilla.com/api/webhooks/inbound/ses";
+const require = createRequire(import.meta.url);
+const { S3Client, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+
+// Use the Worker URL directly so AWS-to-Worker traffic does not pass through
+// the public custom-domain security/challenge layer. Keep it configurable for
+// future deployments while retaining the current Worker fallback.
+const endpoint = process.env.POSTVEIL_INBOUND_ENDPOINT || "https://postveil.jamesfontanilla-dev.workers.dev/api/webhooks/inbound/ses";
 const s3 = new S3Client({});
 
 export const handler = async (event) => {
