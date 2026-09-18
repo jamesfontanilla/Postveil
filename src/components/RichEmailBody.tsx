@@ -13,6 +13,7 @@ import {
   Moon,
   Plus,
   Printer,
+  SlidersHorizontal,
   Quote,
   ShieldAlert,
   ShieldCheck,
@@ -218,20 +219,27 @@ export default function RichEmailBody({
   return (
     <section className="rich-email-reader" aria-label="Message content">
       <div className="rich-email-toolbar">
-        <div className="rich-email-toolbar-group" role="group" aria-label="Message view">
+        <div className="rich-email-toolbar-primary" role="group" aria-label="Message view">
           {html && <button className={mode === "visual" ? "is-active" : ""} onClick={() => setMode("visual")} aria-pressed={mode === "visual"}><Eye size={13} /> Visual</button>}
           <button className={!html || mode === "text" ? "is-active" : ""} onClick={() => setMode("text")} aria-pressed={!html || mode === "text"}><Code2 size={13} /> Plain text</button>
-          {html && <button className={mode === "source" ? "is-active" : ""} onClick={() => setMode("source")} aria-pressed={mode === "source"}><Code2 size={13} /> Raw HTML</button>}
         </div>
-        <div className="rich-email-toolbar-group rich-email-reader-tools" role="group" aria-label="Reading tools">
-          <button onClick={() => setZoom((value) => Math.max(75, value - 10))} aria-label="Zoom out" title="Zoom out"><Minus size={13} /></button>
-          <span className="rich-email-zoom" aria-live="polite">{zoom}%</span>
-          <button onClick={() => setZoom((value) => Math.min(180, value + 10))} aria-label="Zoom in" title="Zoom in"><Plus size={13} /></button>
-          <button className={responsive ? "is-active" : ""} onClick={() => setResponsive((value) => !value)} aria-pressed={responsive} title="Toggle responsive preview"><span className="rich-email-responsive-icon">↔</span><span className="rich-email-tool-label">Responsive</span></button>
-          <button onClick={() => setDarkEmail((value) => !value)} aria-pressed={darkEmail} title="Toggle email dark mode">{darkEmail ? <Sun size={13} /> : <Moon size={13} />}<span className="rich-email-tool-label">Email theme</span></button>
-          <button onClick={printEmail} title="Print or save as PDF"><FileDown size={13} /><span className="rich-email-tool-label">PDF / Print</span></button>
-          <button onClick={openInNewWindow} title="Open message in a new window"><ExternalLink size={13} /><span className="rich-email-tool-label">New window</span></button>
-        </div>
+        <details className="rich-email-toolbar-menu">
+          <summary><SlidersHorizontal size={13} /> View</summary>
+          <div className="rich-email-toolbar-popover">
+            <div className="rich-email-toolbar-group" role="group" aria-label="Message formats">
+              {html && <button className={mode === "source" ? "is-active" : ""} onClick={() => setMode("source")} aria-pressed={mode === "source"}><Code2 size={13} /> Raw HTML</button>}
+            </div>
+            <div className="rich-email-toolbar-group rich-email-reader-tools" role="group" aria-label="Reading tools">
+              <button onClick={() => setZoom((value) => Math.max(75, value - 10))} aria-label="Zoom out" title="Zoom out"><Minus size={13} /></button>
+              <span className="rich-email-zoom" aria-live="polite">{zoom}%</span>
+              <button onClick={() => setZoom((value) => Math.min(180, value + 10))} aria-label="Zoom in" title="Zoom in"><Plus size={13} /></button>
+              <button className={responsive ? "is-active" : ""} onClick={() => setResponsive((value) => !value)} aria-pressed={responsive} title="Toggle responsive preview"><span className="rich-email-responsive-icon">↔</span><span className="rich-email-tool-label">Responsive</span></button>
+              <button onClick={() => setDarkEmail((value) => !value)} aria-pressed={darkEmail} title="Toggle email dark mode">{darkEmail ? <Sun size={13} /> : <Moon size={13} />}<span className="rich-email-tool-label">Email theme</span></button>
+              <button onClick={printEmail} title="Print or save as PDF"><FileDown size={13} /><span className="rich-email-tool-label">PDF / Print</span></button>
+              <button onClick={openInNewWindow} title="Open message in a new window"><ExternalLink size={13} /><span className="rich-email-tool-label">New window</span></button>
+            </div>
+          </div>
+        </details>
       </div>
 
       <div className="rich-email-security-strip" role="status" aria-live="polite">

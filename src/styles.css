@@ -2413,3 +2413,222 @@ h1, h2, h3, h4,
   .mail-ribbon-group select { min-width: 105px; }
   .mail-ribbon-refresh { flex-basis: 38px; height: 38px; min-width: 38px; }
 }
+
+/* Outlook-like reading hierarchy. The global ribbon remains available while
+   message-specific actions stay compact and secondary controls are tucked
+   behind explicit menus. */
+.mail-workspace.is-reading-message > .mail-ribbon {
+  display: grid;
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  box-shadow: 0 1px 0 rgba(24, 47, 38, .04);
+}
+.mail-workspace.is-reading-message .message-detail {
+  width: min(100%, 980px);
+  padding-top: 24px;
+}
+.mail-workspace.is-reading-message .detail-head {
+  padding-bottom: 14px;
+}
+.mail-workspace.is-reading-message .detail-head h2 {
+  max-width: 70ch;
+  margin-top: 4px;
+  font-size: clamp(21px, 2.3vw, 29px);
+  letter-spacing: -.035em;
+}
+.mail-workspace.is-reading-message .detail-meta {
+  gap: 5px;
+  margin-top: 9px;
+}
+.mail-workspace.is-reading-message .detail-meta span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 3px 7px;
+  font-size: 9px;
+}
+.outlook-message-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow: visible;
+  margin: 0 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  padding: 4px 6px;
+}
+.message-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  border-right: 1px solid var(--line);
+  padding: 0 10px 0 4px;
+}
+.message-toolbar-label {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 5px;
+  color: var(--muted);
+  font: 9px var(--font-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.message-toolbar-button,
+.message-toolbar-more > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 5px 8px;
+  font: 600 10px/1.1 var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.message-toolbar-button:hover,
+.message-toolbar-button:focus-visible,
+.message-toolbar-more > summary:hover,
+.message-toolbar-more > summary:focus-visible,
+.message-toolbar-button.is-active {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  color: var(--accent);
+}
+.message-toolbar-button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.message-toolbar-button.primary:hover,
+.message-toolbar-button.primary:focus-visible { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 88%, #000); color: #fff; }
+.message-toolbar-button.danger { color: var(--danger); }
+.message-toolbar-button:disabled { cursor: not-allowed; opacity: .55; }
+.message-toolbar-more {
+  position: relative;
+  margin-left: auto;
+}
+.message-toolbar-more > summary { list-style: none; color: var(--muted); }
+.message-toolbar-more > summary::-webkit-details-marker { display: none; }
+.message-toolbar-more[open] > summary { border-color: var(--line-strong); background: var(--surface-muted); color: var(--ink); }
+.message-toolbar-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 10;
+  display: grid;
+  min-width: 174px;
+  gap: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  padding: 5px;
+  box-shadow: 0 12px 30px rgba(20, 38, 30, .14);
+}
+.message-toolbar-menu .message-toolbar-button { justify-content: flex-start; width: 100%; }
+.mail-workspace.is-reading-message .sender-line {
+  align-items: center;
+  gap: 10px;
+  margin-top: 11px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0 13px;
+}
+.mail-workspace.is-reading-message .large-avatar { width: 34px; height: 34px; }
+.mail-workspace.is-reading-message .sender-line strong { font-size: 12px; }
+.mail-workspace.is-reading-message .sender-line small,
+.mail-workspace.is-reading-message .sender-line span { font-size: 10px; }
+.mail-workspace.is-reading-message .sender-profile-card { margin-top: 12px; border-radius: 4px; }
+.mail-workspace.is-reading-message .sender-profile-card summary { padding: 8px 10px; font-size: 10px; }
+.mail-workspace.is-reading-message .signal-box {
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 12px;
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.mail-workspace.is-reading-message .signal-box strong,
+.mail-workspace.is-reading-message .signal-box span { font-size: 10px; }
+.mail-workspace.is-reading-message .body-copy { margin-top: 20px; }
+
+.rich-email-toolbar {
+  align-items: center;
+  justify-content: space-between;
+  overflow: visible;
+  border-radius: 5px;
+  background: var(--surface);
+  padding: 5px 6px;
+}
+.rich-email-toolbar-primary,
+.rich-email-toolbar-group { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.rich-email-toolbar-primary button,
+.rich-email-toolbar-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 8px;
+  font: 700 10px/1.1 var(--font-ui);
+  cursor: pointer;
+}
+.rich-email-toolbar-primary button:hover,
+.rich-email-toolbar-primary button:focus-visible,
+.rich-email-toolbar-primary button.is-active,
+.rich-email-toolbar-menu > summary:hover,
+.rich-email-toolbar-menu > summary:focus-visible {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+  color: var(--accent);
+}
+.rich-email-toolbar-menu { position: relative; margin-left: auto; }
+.rich-email-toolbar-menu > summary { list-style: none; }
+.rich-email-toolbar-menu > summary::-webkit-details-marker { display: none; }
+.rich-email-toolbar-menu[open] > summary { border-color: var(--line-strong); background: var(--surface-muted); color: var(--ink); }
+.rich-email-toolbar-popover {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 9;
+  display: grid;
+  min-width: min(360px, calc(100vw - 36px));
+  gap: 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  padding: 7px;
+  box-shadow: 0 12px 30px rgba(20, 38, 30, .14);
+}
+.rich-email-toolbar-popover .rich-email-toolbar-group { padding: 2px; }
+.rich-email-toolbar-popover .rich-email-toolbar-group + .rich-email-toolbar-group { border-top: 1px solid var(--line); padding-top: 7px; }
+.rich-email-toolbar-popover .rich-email-toolbar-group button { min-height: 28px; }
+.rich-email-security-strip { padding-bottom: 7px; font-size: 9px; }
+
+.theme-dark .outlook-message-toolbar,
+.theme-dark .rich-email-toolbar-popover,
+.theme-dark .message-toolbar-menu { box-shadow: 0 12px 30px rgba(0, 0, 0, .28); }
+
+@media (max-width: 720px) {
+  .mail-workspace.is-reading-message > .mail-ribbon { position: relative; }
+  .outlook-message-toolbar { align-items: stretch; overflow-x: auto; scrollbar-width: none; }
+  .outlook-message-toolbar::-webkit-scrollbar { display: none; }
+  .message-toolbar-group { flex: 0 0 auto; }
+  .message-toolbar-more { flex: 0 0 auto; }
+  .rich-email-toolbar { align-items: stretch; }
+  .rich-email-toolbar-menu { align-self: flex-end; }
+  .rich-email-toolbar-popover { right: 0; }
+}
