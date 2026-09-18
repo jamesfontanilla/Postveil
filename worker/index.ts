@@ -1,4 +1,11 @@
 import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand } from "@aws-sdk/client-sesv2";
+import {
+  SESClient,
+  CreateReceiptRuleSetCommand,
+  CreateReceiptRuleCommand,
+  UpdateReceiptRuleCommand,
+  SetActiveReceiptRuleSetCommand,
+} from "@aws-sdk/client-ses";
 import PostalMime from "postal-mime";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import {
@@ -135,6 +142,9 @@ interface Env {
   SES_INBOUND_LAMBDA_SECRET?: string;
   SES_SNS_TOPIC_ARN?: string;
   SES_CONFIGURATION_SET_NAME?: string;
+  SES_RECEIPT_RULE_SET_NAME?: string;
+  SES_INBOUND_BUCKET?: string;
+  SES_INBOUND_LAMBDA_ARN?: string;
   SMTP_WEBHOOK_SECRET?: string;
   INBOUND_MX_TARGETS?: string;
   TURNSTILE_SECRET_KEY?: string;
@@ -852,10 +862,56 @@ function manualInboundRecords(env: Pick<Env, "INBOUND_MX_TARGETS">, domain: stri
   return records;
 }
 
-type SesDomainProvisioning = { ready: boolean; exists: boolean; records: JsonRecord[]; error: string | null };
+type SesDomainProvisioning = { ready: boolean; exists: boolean; records: JsonRecord[]; error: string | null; receiptRuleReady: boolean };
 
-async function provisionSesDomain(env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SES_REGION" | "AWS_REGION">, domain: string): Promise<SesDomainProvisioning> {
-  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) return { ready: false, exists: false, records: [], error: "Amazon SES credentials are not configured" };
+function sesReceiptRuleName(domain: string): string {
+  const safe = domain.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  return `postveil-${safe}`.slice(0, 64);
+}
+
+async function ensureSesReceiptRule(
+  env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SES_REGION" | "AWS_REGION" | "SES_RECEIPT_RULE_SET_NAME" | "SES_INBOUND_BUCKET" | "SES_INBOUND_LAMBDA_ARN">,
+  domain: string,
+): Promise<{ ready: boolean; error: string | null }> {
+  if (!env.SES_RECEIPT_RULE_SET_NAME || !env.SES_INBOUND_BUCKET || !env.SES_INBOUND_LAMBDA_ARN) {
+    return { ready: false, error: "SES receiving resources are not configured" };
+  }
+  const client = new SESClient({ region: env.AWS_SES_REGION || env.AWS_REGION || "us-east-1", credentials: { accessKeyId: env.AWS_ACCESS_KEY_ID!, secretAccessKey: env.AWS_SECRET_ACCESS_KEY! } });
+  const ruleSetName = env.SES_RECEIPT_RULE_SET_NAME;
+  const ruleName = sesReceiptRuleName(domain);
+  const rule = {
+    Name: ruleName,
+    Enabled: true,
+    Recipients: [domain],
+    Actions: [
+      { S3Action: { BucketName: env.SES_INBOUND_BUCKET, ObjectKeyPrefix: `inbound/${domain}/` } },
+      { LambdaAction: { FunctionArn: env.SES_INBOUND_LAMBDA_ARN, InvocationType: "Event" as const } },
+    ],
+    ScanEnabled: true,
+  };
+  try {
+    try {
+      await client.send(new CreateReceiptRuleSetCommand({ RuleSetName: ruleSetName }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (!/already exists|already been created|exists|Duplicate/i.test(message)) throw error;
+    }
+    try {
+      await client.send(new CreateReceiptRuleCommand({ RuleSetName: ruleSetName, After: undefined, Rule: rule }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "");
+      if (!/already exists|already been created|exists|Duplicate/i.test(message)) throw error;
+      await client.send(new UpdateReceiptRuleCommand({ RuleSetName: ruleSetName, Rule: rule }));
+    }
+    await client.send(new SetActiveReceiptRuleSetCommand({ RuleSetName: ruleSetName }));
+    return { ready: true, error: null };
+  } catch (error) {
+    return { ready: false, error: error instanceof Error ? error.message.slice(0, 500) : "SES receipt rule provisioning failed" };
+  }
+}
+
+async function provisionSesDomain(env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SES_REGION" | "AWS_REGION" | "SES_RECEIPT_RULE_SET_NAME" | "SES_INBOUND_BUCKET" | "SES_INBOUND_LAMBDA_ARN">, domain: string): Promise<SesDomainProvisioning> {
+  if (!env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) return { ready: false, exists: false, records: [], error: "Amazon SES credentials are not configured", receiptRuleReady: false };
   const client = new SESv2Client({ region: env.AWS_SES_REGION || env.AWS_REGION || "us-east-1", credentials: { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY } });
   try {
     try { await client.send(new CreateEmailIdentityCommand({ EmailIdentity: domain })); } catch (createError) {
@@ -874,9 +930,10 @@ async function provisionSesDomain(env: Pick<Env, "AWS_ACCESS_KEY_ID" | "AWS_SECR
     // DKIM success only when SES includes a DKIM status.
     const dkimSuccessful = dkimStatus === "SUCCESS";
     const ready = (verifiedForSending || dkimSuccessful) && (!dkimStatus || dkimSuccessful);
-    return { ready, exists: true, records, error: null };
+    const receiptRule = await ensureSesReceiptRule(env, domain);
+    return { ready, exists: true, records, error: receiptRule.error, receiptRuleReady: receiptRule.ready };
   } catch (error) {
-    return { ready: false, exists: false, records: [], error: error instanceof Error ? error.message.slice(0, 500) : "Amazon SES domain provisioning failed" };
+    return { ready: false, exists: false, records: [], error: error instanceof Error ? error.message.slice(0, 500) : "Amazon SES domain provisioning failed", receiptRuleReady: false };
   }
 }
 
@@ -4385,7 +4442,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     // should not strand onboarding when AWS is slow or temporarily unavailable.
     const ses = await Promise.race([
       provisionSesDomain(env, domain),
-      new Promise<SesDomainProvisioning>((resolve) => setTimeout(() => resolve({ ready: false, exists: false, records: [], error: "SES readiness check timed out" }), 8000)),
+      new Promise<SesDomainProvisioning>((resolve) => setTimeout(() => resolve({ ready: false, exists: false, records: [], error: "SES readiness check timed out", receiptRuleReady: false }), 8000)),
     ]);
     // SES can briefly omit DKIM tokens while an identity is propagating. Keep
     // the last known records so refresh never makes the DNS checklist vanish.
@@ -4397,7 +4454,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     // signal for this shared receiving service. Older SESv2 responses can omit
     // the sending/DKIM status fields even after the identity is verified;
     // requiring those optional fields stranded users after MX was correct.
-    const effectiveRouteReady = dnsReady;
+    const effectiveRouteReady = dnsReady && ses.receiptRuleReady;
     const effectiveStatus = domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady });
     // Manual DNS onboarding must not depend on whether SES provisioning was
     // created during this refresh. An identity may already exist, and SES can
@@ -4409,7 +4466,7 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     await saveDomainIntegration(env, { userId: user.id, domain, provider: String(body.provider || verification?.provider || "manual"), zoneId: null, accountId: null, ownershipStatus: ownershipReady ? "verified" : "pending", dnsStatus: dnsReady ? "ready" : "pending", routeStatus: effectiveRouteReady ? "ready" : "pending", routeId: null, routeTarget: "Amazon SES", ownershipToken: integration?.ownership_token || null, ownershipRecordName: integration?.ownership_record_name || null, records: sesRecords, lastError: ses.error });
     await promoteVerifiedMailboxes(env, user.id, domain, mailReady);
     const promotedMailboxes = await d1Request<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&select=id,address,display_name,is_default,can_send,can_receive,settings`);
-    return json({ domain, ownershipVerified: ownershipReady, verified: mailReady, dnsReady, mxReady: dnsReady, dkimReady: ses.ready, sesReady: ses.ready, routeReady: effectiveRouteReady, automationStatus: domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady }), inboundRouteStatus: effectiveRouteReady ? "ready" : "pending", records: sesRecords, manualRecords: sesRecords, ownershipRecordName: "", expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now, sesVerificationStatus: ses.ready ? "verified" : "pending", sesError: ses.error, mailboxes: promotedMailboxes });
+    return json({ domain, ownershipVerified: ownershipReady, verified: mailReady, dnsReady, mxReady: dnsReady, dkimReady: ses.ready, sesReady: ses.ready, receiptRuleReady: ses.receiptRuleReady, routeReady: effectiveRouteReady, automationStatus: domainAutomationStatus({ dnsReady, routeReady: effectiveRouteReady }), inboundRouteStatus: effectiveRouteReady ? "ready" : "pending", records: sesRecords, manualRecords: sesRecords, ownershipRecordName: "", expectedMxTargets: configuredInboundMxTargets(env), lastCheckedAt: now, sesVerificationStatus: ses.ready ? "verified" : "pending", sesError: ses.error, mailboxes: promotedMailboxes });
   }
 
   const mailbox = await ensureProfileAndMailbox(env, user);
