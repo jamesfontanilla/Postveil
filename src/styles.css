@@ -2666,3 +2666,134 @@ h1, h2, h3, h4,
   .rich-email-toolbar-menu { align-self: flex-end; }
   .rich-email-toolbar-popover { right: 0; }
 }
+
+/* Ribbon hierarchy: one shared scale for tabs, groups, commands, and overflow.
+   Primary actions get width and contrast; ordinary commands stay quiet; rare
+   actions stay in the same-size overflow control instead of competing with Home. */
+.mail-ribbon {
+  --ribbon-command-height: 44px;
+  --ribbon-command-width: 72px;
+  --ribbon-primary-width: 96px;
+  --ribbon-icon-size: 16px;
+  grid-template-rows: 36px 78px;
+}
+.mail-ribbon-tabs {
+  gap: 20px;
+  padding: 0 18px;
+}
+.mail-ribbon-tab {
+  min-height: 36px;
+  padding: 0 2px 9px;
+  font-size: 11px;
+  letter-spacing: .01em;
+}
+.mail-ribbon-toolbar {
+  align-items: stretch;
+  gap: 10px;
+  min-height: 78px;
+  padding: 7px 14px 5px;
+}
+.mail-ribbon-group {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  padding: 0 12px 12px 2px;
+}
+.mail-ribbon-group-label {
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 2px;
+  margin: 0;
+  color: var(--muted);
+  font: 8px/1 var(--font-mono);
+  letter-spacing: .08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.mail-ribbon-command {
+  width: var(--ribbon-command-width);
+  min-width: var(--ribbon-command-width);
+  min-height: var(--ribbon-command-height);
+  align-content: center;
+  gap: 4px;
+  padding: 5px 7px;
+  font-size: 10px;
+}
+.mail-ribbon-command svg { width: var(--ribbon-icon-size); height: var(--ribbon-icon-size); }
+.mail-ribbon-command.primary {
+  width: var(--ribbon-primary-width);
+  min-width: var(--ribbon-primary-width);
+  min-height: 52px;
+}
+.mail-ribbon-command.primary small { display: block; font-size: 8px; }
+.mail-ribbon-more-group {
+  align-items: center;
+  gap: 5px;
+  padding-right: 8px;
+}
+.mail-ribbon-more-group .mail-ribbon-group-label { right: 8px; }
+.mail-ribbon-group select {
+  height: 30px;
+  min-width: 116px;
+  max-width: 144px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+.mail-ribbon-more-group .mail-ribbon-command.apply {
+  width: 62px;
+  min-width: 62px;
+  min-height: 30px;
+  align-self: center;
+}
+.mail-ribbon-panel-intro {
+  min-width: 210px;
+  padding-right: 8px;
+}
+.mail-ribbon-panel-intro span { font-size: 11px; }
+.mail-ribbon-panel-intro small { font-size: 9px; }
+.mail-ribbon-info-group { min-width: 205px; }
+.mail-ribbon-info-copy {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-width: 150px;
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+.mail-ribbon-info-copy small { color: var(--muted); font-size: 9px; line-height: 1.3; }
+.mail-workspace .message-column > .command-ribbon { display: none; }
+.outlook-message-toolbar {
+  min-height: 58px;
+  padding: 5px 7px 4px;
+}
+.message-toolbar-group {
+  min-height: 48px;
+  align-items: center;
+}
+.message-toolbar-button,
+.message-toolbar-more > summary {
+  min-height: 32px;
+  min-width: 72px;
+  padding: 6px 9px;
+  font-size: 10px;
+}
+.message-toolbar-button.primary { min-width: 78px; }
+.message-toolbar-label { align-self: flex-end; margin-bottom: 3px; font-size: 8px; }
+
+@media (max-width: 720px) {
+  .mail-ribbon { grid-template-rows: 36px 70px; }
+  .mail-ribbon-toolbar { min-height: 70px; gap: 7px; padding: 6px 9px 4px; }
+  .mail-ribbon-tabs { gap: 17px; padding: 0 13px; }
+  .mail-ribbon-group { padding-right: 7px; }
+  .mail-ribbon-command { width: 60px; min-width: 60px; min-height: 40px; padding: 5px 5px; }
+  .mail-ribbon-command.primary { width: 76px; min-width: 76px; min-height: 48px; }
+  .mail-ribbon-command.primary small { display: none; }
+  .mail-ribbon-group-label { display: none; }
+  .mail-ribbon-panel-intro { min-width: 188px; max-width: 205px; }
+  .mail-ribbon-info-group { min-width: 180px; }
+  .mail-ribbon-group select { min-width: 104px; }
+  .outlook-message-toolbar { min-height: 54px; }
+  .message-toolbar-button, .message-toolbar-more > summary { min-width: 66px; }
+}

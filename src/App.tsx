@@ -4524,7 +4524,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([]);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
   const [searchHelpOpen, setSearchHelpOpen] = useState(false);
-  const [ribbonTab, setRibbonTab] = useState<"home" | "view" | "help">("home");
+  const [ribbonTab, setRibbonTab] = useState<"home" | "view" | "file" | "help">("home");
   const [normalizedQuery, setNormalizedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -5404,8 +5404,8 @@ function MailboxApp({ session }: { session: Session }) {
       },
     };
   }
-  function handleRibbonTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, current: "home" | "view" | "help") {
-    const tabs = ["home", "view", "help"] as const;
+  function handleRibbonTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, current: "home" | "view" | "file" | "help") {
+    const tabs = ["home", "view", "file", "help"] as const;
     const index = tabs.indexOf(current);
     const nextIndex = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
     if (nextIndex < 0) return;
@@ -5619,9 +5619,9 @@ function MailboxApp({ session }: { session: Session }) {
       </aside>
       {view === "mail" ? (
         <div className={`mail-workspace ${selected ? "is-reading-message" : ""}`}>
-          <div className="mail-ribbon" aria-label="Mail home ribbon">
+          <div className="mail-ribbon" aria-label="Mail ribbon">
             <div className="mail-ribbon-tabs" role="tablist" aria-label="Mail ribbon tabs">
-              {(["home", "view", "help"] as const).map((tabName) => (
+              {(["home", "view", "file", "help"] as const).map((tabName) => (
                 <button
                   key={tabName}
                   id={`mail-ribbon-tab-${tabName}`}
@@ -5634,18 +5634,23 @@ function MailboxApp({ session }: { session: Session }) {
                   onClick={() => setRibbonTab(tabName)}
                   onKeyDown={(event) => handleRibbonTabKeyDown(event, tabName)}
                 >
-                  {tabName === "home" ? "Home" : tabName === "view" ? "View" : "Help"}
+                  {tabName === "home" ? "Home" : tabName === "view" ? "View" : tabName === "file" ? "File" : "Help"}
                 </button>
               ))}
               {hasMailSelection && <span className="mail-ribbon-context-label">Selection tools · {selectAllResults ? `${resultTotal ?? "all"} matching` : `${selectedIds.size} selected`}</span>}
             </div>
             {ribbonTab === "home" && <div className="mail-ribbon-toolbar" id="mail-ribbon-panel-home" role="tabpanel" aria-labelledby="mail-ribbon-tab-home">
-              <div className="mail-ribbon-group" aria-label="Move and delete">
+              <div className="mail-ribbon-group mail-ribbon-group-new" aria-label="New">
+                <span className="mail-ribbon-group-label">New</span>
                 <button className="mail-ribbon-command primary" onClick={() => openCompose()} title="Create a new email message"><PenLine size={16} /><span>New mail</span><small>Create a new message</small></button>
+              </div>
+              <div className="mail-ribbon-group" aria-label="Organize">
+                <span className="mail-ribbon-group-label">Organize</span>
                 <button className="mail-ribbon-command" onClick={() => void runBulkAction("archive")} disabled={!hasMailSelection || bulkBusy} title="Archive selected messages"><Archive size={15} /><span>Archive</span></button>
                 <button className="mail-ribbon-command danger" onClick={() => void runBulkAction("trash")} disabled={!hasMailSelection || bulkBusy} title="Move selected messages to Trash"><Trash2 size={15} /><span>Delete</span></button>
               </div>
               <div className="mail-ribbon-group" aria-label="Tags and timing">
+                <span className="mail-ribbon-group-label">Tags & timing</span>
                 <button className="mail-ribbon-command" onClick={() => void runBulkAction("flag")} disabled={!hasMailSelection || bulkBusy} title="Flag selected messages"><Flag size={15} /><span>Flag</span></button>
                 <button className="mail-ribbon-command" onClick={() => void runBulkAction("snooze")} disabled={!hasMailSelection || bulkBusy} title="Snooze selected messages"><Clock3 size={15} /><span>Snooze</span></button>
                 <button className="mail-ribbon-command" onClick={() => void runBulkAction("spam")} disabled={!hasMailSelection || bulkBusy} title="Move selected messages to Spam"><ShieldAlert size={15} /><span>Junk</span></button>
@@ -5697,6 +5702,18 @@ function MailboxApp({ session }: { session: Session }) {
                 {[{ value: "all", label: "All mail" }, { value: "unread", label: "Unread" }, { value: "starred", label: "Starred" }, { value: "attachments", label: "Attachments" }].map((item) => (
                   <button key={item.value} type="button" className={`mail-ribbon-command mail-ribbon-filter ${filter === item.value ? "is-active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }} aria-pressed={filter === item.value}>{item.label}</button>
                 ))}
+              </div>
+            </div>}
+            {ribbonTab === "file" && <div className="mail-ribbon-toolbar mail-ribbon-file-panel" id="mail-ribbon-panel-file" role="tabpanel" aria-labelledby="mail-ribbon-tab-file">
+              <div className="mail-ribbon-panel-intro"><Mail size={16} /><span>Postveil account</span><small>Workspace controls and account actions.</small></div>
+              <div className="mail-ribbon-group" aria-label="Account settings">
+                <span className="mail-ribbon-group-label">Account</span>
+                <button type="button" className="mail-ribbon-command" onClick={() => setSettingsOpen(true)} title="Open settings"><Settings2 size={15} /><span>Settings</span></button>
+                <button type="button" className="mail-ribbon-command" onClick={() => void requireSupabase().auth.signOut()} title="Sign out"><LogOut size={15} /><span>Sign out</span></button>
+              </div>
+              <div className="mail-ribbon-group mail-ribbon-info-group" aria-label="About Postveil">
+                <span className="mail-ribbon-group-label">About</span>
+                <span className="mail-ribbon-info-copy"><strong>Private mail</strong><small>Delivery and safety tools stay in the workspace.</small></span>
               </div>
             </div>}
             {ribbonTab === "help" && <div className="mail-ribbon-toolbar mail-ribbon-help-panel" id="mail-ribbon-panel-help" role="tabpanel" aria-labelledby="mail-ribbon-tab-help">
