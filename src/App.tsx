@@ -5393,9 +5393,6 @@ function MailboxApp({ session }: { session: Session }) {
     const rightTime = Date.parse(right.received_at || right.sent_at || right.created_at || "") || 0;
     return threadOrder === "newest" ? rightTime - leftTime : leftTime - rightTime;
   }), [threadMessages, threadOrder]);
-  const suggestedReplies = selected?.direction === "inbound"
-    ? ["Thanks — received.", "I’ll review this and get back to you.", "Could we discuss this further?"]
-    : [];
   const hasMailSelection = selectedIds.size > 0 || selectAllResults;
   const customFolderDepth = (folderId: string): number => {
     let depth = 0;
@@ -6178,28 +6175,7 @@ function MailboxApp({ session }: { session: Session }) {
                     )}
                    </div>}
                  </div>
-                  <div className="message-command-ribbon outlook-message-toolbar" aria-label="Message actions">
-                    <div className="message-toolbar-group reply-toolbar-group" aria-label="Reply actions">
-                     <button className="message-toolbar-button primary" onClick={() => openCompose(selectedReplySeed)} title="Reply to this message"><Reply size={14} /> Reply</button>
-                     <button className="message-toolbar-button" onClick={() => openCompose(selectedReplyAllSeed)} title="Reply to everyone"><Users size={14} /> Reply all</button>
-                     <button className="message-toolbar-button" onClick={() => openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined)} title="Forward this message"><Forward size={14} /> Forward</button>
-                   </div>
-                   <div className="message-toolbar-group" aria-label="Message actions">
-                     {selected.folder === "trash" ? <button className="message-toolbar-button" onClick={() => void restoreSelected()} disabled={trashBusy} title="Restore this message"><Undo2 size={14} /> Restore</button> : <><button className="message-toolbar-button" onClick={() => void mutateMessage({ folder: "archive" })} title="Archive this message"><Archive size={14} /> Archive</button><button className="message-toolbar-button danger" onClick={() => void (async () => { if (await confirm({ title: "Move message to Trash?", message: "You can restore this message later.", confirmLabel: "Move to Trash", danger: true })) void mutateMessage({ folder: "trash" }); })()} title="Move this message to Trash"><Trash2 size={14} /> Delete</button></>}
-                   </div>
-                   <details className="message-toolbar-more">
-                     <summary><MoreHorizontal size={15} /> More</summary>
-                     <div className="message-toolbar-menu">
-                       <button className={`message-toolbar-button ${selected.is_starred ? "is-active" : ""}`} onClick={() => void mutateMessage({ isStarred: !selected.is_starred })} title={selected.is_starred ? "Unstar message" : "Star message"}><Star size={14} fill={selected.is_starred ? "currentColor" : "none"} /> {selected.is_starred ? "Unstar" : "Star"}</button>
-                       <button className={`message-toolbar-button ${selected.is_important ? "is-active" : ""}`} onClick={() => void mutateMessage({ isImportant: !selected.is_important })} title={selected.is_important ? "Remove importance" : "Mark important"}><Flag size={14} fill={selected.is_important ? "currentColor" : "none"} /> {selected.is_important ? "Not important" : "Important"}</button>
-                       <button className="message-toolbar-button" onClick={() => void toggleTrustLens()} title="Inspect sender trust signals"><ShieldAlert size={14} /> Trust</button>
-                       <button className="message-toolbar-button" onClick={() => void toggleDeliveryInspection()} title="Inspect delivery details"><History size={14} /> Timeline</button>
-                       <button className="message-toolbar-button" onClick={() => void openRawSource()} title="Open the raw message source"><Download size={14} /> Source</button>
-                       <button className="message-toolbar-button" onClick={() => setShowMessageDetails((current) => !current)} aria-pressed={showMessageDetails} title="Show message details"><HelpCircle size={14} /> {showMessageDetails ? "Hide details" : "Details"}</button>
-                     </div>
-                   </details>
-                 </div>
-                 {detailLoading && (
+                  {detailLoading && (
                   <div className="detail-loading" role="status" aria-live="polite">
                     <span className="detail-loading-dot" /> Updating message…
                   </div>
@@ -6338,14 +6314,6 @@ function MailboxApp({ session }: { session: Session }) {
                     inspectLink={inspectEmailLink}
                   />
                 </div>
-                {suggestedReplies.length > 0 && selectedReplySeed && (
-                  <div className="suggested-replies" aria-label="Suggested replies">
-                    <div><span className="eyebrow">SUGGESTED REPLIES</span><small>Shortcuts you can edit before sending.</small></div>
-                    <div className="suggested-replies-list">
-                      {suggestedReplies.map((reply) => <button key={reply} className="suggested-reply" onClick={() => openCompose({ ...selectedReplySeed, text: `${reply}\n\n${selectedReplySeed.text || ""}` })}><Reply size={13} /> {reply}</button>)}
-                    </div>
-                  </div>
-                )}
                 {selected.attachments && selected.attachments.length > 0 && (
                   <div className="attachments">
                     <div className="attachments-head">
@@ -6448,6 +6416,14 @@ function MailboxApp({ session }: { session: Session }) {
                             <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
                               <Forward size={15} /> Forward
                             </button>
+                            {selected.folder !== "trash" && <>
+                              <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ folder: "archive" }); }}>
+                                <Archive size={15} /> Archive
+                              </button>
+                              <button role="menuitem" onClick={() => { setShowMoreActions(false); void (async () => { if (await confirm({ title: "Move message to Trash?", message: "You can restore this message later.", confirmLabel: "Move to Trash", danger: true })) void mutateMessage({ folder: "trash" }); })(); }}>
+                                <Trash2 size={15} /> Delete
+                              </button>
+                            </>}
                              <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleTrustLens(); }}>
                                <ShieldAlert size={15} /> {trustLensOpen ? "Hide trust details" : "Inspect trust details"}
                              </button>

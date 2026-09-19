@@ -264,33 +264,7 @@ export default function RichEmailBody({
 
   return (
     <section className="rich-email-reader" aria-label="Message content">
-      <div className="rich-email-toolbar">
-        <details className="rich-email-toolbar-menu">
-          <summary><SlidersHorizontal size={13} /> View</summary>
-          <div className="rich-email-toolbar-popover">
-            <div className="rich-email-toolbar-group rich-email-reader-tools" role="group" aria-label="Reading tools">
-              <button onClick={() => setZoom((value) => Math.max(75, value - 10))} aria-label="Zoom out" title="Zoom out"><Minus size={13} /></button>
-              <span className="rich-email-zoom" aria-live="polite">{zoom}%</span>
-              <button onClick={() => setZoom((value) => Math.min(180, value + 10))} aria-label="Zoom in" title="Zoom in"><Plus size={13} /></button>
-              <button className={responsive ? "is-active" : ""} onClick={() => setResponsive((value) => !value)} aria-pressed={responsive} title="Toggle responsive preview"><span className="rich-email-responsive-icon">↔</span><span className="rich-email-tool-label">Responsive</span></button>
-              <button onClick={() => setDarkEmail((value) => !value)} aria-pressed={darkEmail} title="Toggle email dark mode">{darkEmail ? <Sun size={13} /> : <Moon size={13} />}<span className="rich-email-tool-label">Email theme</span></button>
-              <button onClick={printEmail} title="Print or save as PDF"><FileDown size={13} /><span className="rich-email-tool-label">PDF / Print</span></button>
-              <button onClick={openInNewWindow} title="Open message in a new window"><ExternalLink size={13} /><span className="rich-email-tool-label">New window</span></button>
-              <button className={findOpen ? "is-active" : ""} onClick={() => setFindOpen((value) => !value)} aria-expanded={findOpen} title="Find in message"><Search size={13} /><span className="rich-email-tool-label">Find</span></button>
-              <button onClick={() => setImmersiveOpen(true)} title="Open Immersive Reader"><BookOpen size={13} /><span className="rich-email-tool-label">Immersive</span></button>
-            </div>
-          </div>
-        </details>
-      </div>
-
       {findOpen && <div className="rich-email-find" role="search" aria-label="Find in message"><Search size={14} /><input autoFocus value={findQuery} onChange={(event) => setFindQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); findNextMatch(); } }} placeholder="Find in this message" aria-label="Find in this message" /><span>{findQuery ? `${findMatchCount} match${findMatchCount === 1 ? "" : "es"}` : "Type to search"}</span><button onClick={findNextMatch} disabled={!findQuery.trim()}>Next</button><button onClick={() => { setFindOpen(false); setFindQuery(""); }} aria-label="Close message search"><X size={14} /></button></div>}
-
-      <div className="rich-email-security-strip" role="status" aria-live="polite">
-        <span><ShieldCheck size={13} /> Safe renderer</span>
-        {trackerCount > 0 && <span className="rich-email-warning"><ShieldAlert size={13} /> {trackerCount} tracking pixel{trackerCount === 1 ? "" : "s"} blocked</span>}
-        {externalImageCount > 0 && <span><ImageIcon size={13} /> {showRemoteImages ? (loadingImages ? "Loading images privately…" : "Images loaded privately") : `${externalImageCount} external image${externalImageCount === 1 ? "" : "s"} blocked`}</span>}
-        {stats.linkCount > 0 && <span><Link2 size={13} /> {stats.linkCount} link{stats.linkCount === 1 ? "" : "s"} require inspection</span>}
-      </div>
 
       {externalImageCount > 0 && (
         <div className="rich-email-content-warning" role="status">

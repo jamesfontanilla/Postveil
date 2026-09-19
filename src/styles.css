@@ -3866,3 +3866,10 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   .mail-workspace.is-reading-message .sender-time { margin-left: auto; }
   .message-header-actions { margin-left: auto; }
 }
+
+@media (min-width: 721px) {
+  .mobile-detail-back { display: none !important; }
+}
+@media (max-width: 720px) {
+  .mobile-detail-back { display: inline-flex; }
+}
