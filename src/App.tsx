@@ -6178,8 +6178,8 @@ function MailboxApp({ session }: { session: Session }) {
                     )}
                    </div>}
                  </div>
-                 <div className="message-command-ribbon outlook-message-toolbar" aria-label="Message actions">
-                   <div className="message-toolbar-group" aria-label="Reply actions">
+                  <div className="message-command-ribbon outlook-message-toolbar" aria-label="Message actions">
+                    <div className="message-toolbar-group reply-toolbar-group" aria-label="Reply actions">
                      <button className="message-toolbar-button primary" onClick={() => openCompose(selectedReplySeed)} title="Reply to this message"><Reply size={14} /> Reply</button>
                      <button className="message-toolbar-button" onClick={() => openCompose(selectedReplyAllSeed)} title="Reply to everyone"><Users size={14} /> Reply all</button>
                      <button className="message-toolbar-button" onClick={() => openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined)} title="Forward this message"><Forward size={14} /> Forward</button>
@@ -6217,12 +6217,12 @@ function MailboxApp({ session }: { session: Session }) {
                     <button className="text-button" onClick={() => void mutateMessage({ workState: "none" })}>Clear</button>
                   </div>
                 )}
-                <div className="sender-line">
-                  {detailIdentity && <SenderAvatar name={detailIdentity.name} email={detailIdentity.email} avatarUrl={detailIdentity.avatarUrl} large />}
-                  <div className="sender-copy">
-                    <strong>{detailIdentity?.name}</strong>
-                    <small>{detailIdentity?.email}</small>
-                    <span>to {selected.to_addresses?.join(", ") || "your mailbox"}</span>
+                  <div className="sender-line">
+                   {detailIdentity && <SenderAvatar name={detailIdentity.name} email={detailIdentity.email} avatarUrl={detailIdentity.avatarUrl} large />}
+                   <div className="sender-copy">
+                     <strong>{detailIdentity?.name}</strong>
+                     <small>{detailIdentity?.email}</small>
+                     <span>to {selected.to_addresses?.join(", ") || "your mailbox"}</span>
                     {selected.unsubscribe_url && /^(https?:\/\/|mailto:)/i.test(selected.unsubscribe_url) && (
                       <a className="unsubscribe-link" href={selected.unsubscribe_url} target="_blank" rel="noreferrer noopener">Unsubscribe</a>
                     )}
@@ -6235,18 +6235,27 @@ function MailboxApp({ session }: { session: Session }) {
                         {selected.reply_to && <div><dt>Reply-To</dt><dd>{selected.reply_to}</dd></div>}
                         <div><dt>Date</dt><dd>{new Date(selected.received_at || selected.sent_at || selected.created_at).toLocaleString()}</dd></div>
                         <div><dt>Message ID</dt><dd>{selected.message_id_header || "Not available"}</dd></div>
-                      </dl>
-                    )}
-                  </div>
-                  <button
-                    className="details-toggle"
-                    aria-expanded={showMessageDetails}
-                    onClick={() => setShowMessageDetails((current) => !current)}
-                  >
-                    {showMessageDetails ? "Hide details" : "Details"}
-                    <ChevronDown size={14} className={showMessageDetails ? "rotated" : ""} />
-                  </button>
-                </div>
+                       </dl>
+                     )}
+                   </div>
+                   <time className="sender-time" dateTime={selected.received_at || selected.sent_at || selected.created_at}>
+                     {formatDate(selected.received_at || selected.sent_at || selected.created_at)}
+                   </time>
+                   <div className="message-header-actions" aria-label="Quick message actions">
+                     <button className="message-header-action" onClick={() => openCompose(selectedReplySeed)} aria-label="Reply" title="Reply">
+                       <Reply size={16} />
+                     </button>
+                     <button className="message-header-action" onClick={() => openCompose(selectedReplyAllSeed)} aria-label="Reply all" title="Reply all">
+                       <Users size={16} />
+                     </button>
+                     <button className="message-header-action" onClick={() => openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined)} aria-label="Forward" title="Forward">
+                       <Forward size={16} />
+                     </button>
+                     <button className="message-header-action" onClick={() => setShowMessageDetails((current) => !current)} aria-expanded={showMessageDetails} aria-label={showMessageDetails ? "Hide message details" : "Show message details"} title={showMessageDetails ? "Hide details" : "Show details"}>
+                       <MoreHorizontal size={17} />
+                     </button>
+                   </div>
+                 </div>
                 <details className="sender-profile-card">
                   <summary><Users size={14} /> Sender profile and contact history</summary>
                   <div className="sender-profile-grid">
