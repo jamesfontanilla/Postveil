@@ -1,8 +1,8 @@
-@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400..700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400..600&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
 :root {
-  --font-ui: "Inter", "Helvetica Neue", Arial, sans-serif;
-  --font-display: "Source Serif Pro", "Source Serif 4", Georgia, serif;
+  --font-ui: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
   --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
   font-family: var(--font-ui);
   color: #172522;
@@ -3538,4 +3538,230 @@ h1, h2, h3, h4,
 .landing-home .landing-poster .landing-hero-title em {
   color: var(--public-deep) !important;
   -webkit-text-fill-color: var(--public-deep) !important;
+}
+
+/* Postveil brand system: paper, ink, evergreen, and disciplined type. The
+   rules below are intentionally last so older experiments cannot reintroduce
+   gradients, glows, or the retired lime poster treatment. */
+:root {
+  --font-ui: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --ink: #172522;
+  --ink-soft: #40534b;
+  --muted: #61736b;
+  --faint: #8a9a92;
+  --canvas: #f4f7f4;
+  --surface: #ffffff;
+  --surface-muted: #f4f7f4;
+  --line: rgba(23, 37, 34, .12);
+  --line-strong: rgba(23, 37, 34, .24);
+  --accent: #1f6b58;
+  --accent-soft: #dce8e1;
+  --teal: #2aafa5;
+  --signal: #d98b5f;
+  --danger: #b24a3d;
+  color: var(--ink);
+  background: var(--canvas);
+  font-family: var(--font-ui);
+}
+
+body,
+.app-shell,
+.mail-workspace,
+.reading-pane,
+.reading-empty,
+.loading-screen {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+h1, h2, h3, h4,
+.auth-card h1,
+.column-head h1,
+.detail-head h2,
+.compose-head h2,
+.panel-title h2,
+.home-copy h1,
+.home-proof strong,
+.home-brand strong,
+.landing-home .landing-hero h1,
+.landing-home .landing-section-heading h2,
+.landing-home .landing-process h2,
+.landing-home .landing-capabilities h2,
+.landing-home .landing-privacy h2,
+.landing-home .landing-final-cta h2 {
+  font-family: var(--font-display);
+}
+
+button,
+input,
+textarea,
+select { border-radius: 4px; }
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: transparent;
+  font-size: 0;
+}
+.brand-mark.small { width: 31px; height: 31px; border-radius: 7px; }
+.brand-mark img { display: block; width: 100%; height: 100%; }
+
+.auth-shell { background: var(--canvas) !important; }
+.auth-card {
+  border-color: var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 18px 44px rgba(23, 37, 34, .09);
+}
+.auth-card h1,
+.auth-aside .aside-quote { color: var(--ink); font-weight: 500; }
+.auth-copy,
+.aside-meta { color: var(--muted); }
+.primary-button,
+.compose-button,
+.onboarding-actions .primary-button { background: var(--accent); box-shadow: none; }
+.primary-button:hover,
+.compose-button:hover,
+.onboarding-actions .primary-button:hover { background: #185643; }
+.secondary-button { border-color: var(--line-strong); background: var(--surface); color: var(--ink-soft); }
+.secondary-button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.text-button { color: var(--accent); }
+input, textarea, select { border-color: var(--line-strong); background: var(--surface); color: var(--ink); }
+input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 107, 88, .12); }
+.form-notice { background: var(--accent-soft); color: var(--accent); }
+.form-error { background: #f9e9e5; color: var(--danger); }
+
+.onboarding-shell { background: var(--canvas) !important; }
+.onboarding-frame {
+  border-color: var(--line-strong);
+  border-radius: 14px;
+  box-shadow: 0 18px 46px rgba(23, 37, 34, .12);
+}
+.onboarding-rail { background: var(--ink) !important; }
+.onboarding-rail::before,
+.onboarding-rail::after { display: none; }
+.onboarding-brand .brand-mark { background: transparent !important; }
+.onboarding-rail-copy h1 { color: #f4f7f4; }
+.onboarding-rail-copy h1 em { color: var(--teal); }
+.onboarding-rail-copy p:not(.eyebrow),
+.onboarding-brand span,
+.onboarding-rail-foot { color: rgba(244, 247, 244, .68); }
+.onboarding-rail-foot svg { color: var(--teal); }
+.onboarding-progress span.complete { background: var(--accent); }
+.onboarding-choice.selected { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); color: var(--accent); }
+.onboarding-hint { border-left-color: var(--teal); background: var(--surface-muted); }
+.onboarding-success-mark { background: #dce8e1; color: var(--accent); box-shadow: none; }
+.pending-badge { background: #f3eee7; color: #8b684d; }
+.verified-badge { background: var(--accent-soft); color: var(--accent); }
+.registrar-guide,
+.dns-preview,
+.cloudflare-connect-card { background: var(--surface); box-shadow: none; }
+
+/* Public pages use the light brand surface; the product still offers an
+   optional dark workspace theme after sign-in. */
+.landing-home { background: var(--canvas) !important; color: var(--ink) !important; }
+.landing-home .landing-nav { border-bottom: 1px solid var(--line); }
+.landing-home .home-brand,
+.landing-home .home-brand strong,
+.landing-home .home-nav-links a,
+.landing-home .home-signin { color: var(--ink); }
+.landing-home .home-brand small,
+.landing-home .landing-lede,
+.landing-home .landing-microcopy,
+.landing-home .landing-section-heading > p:last-child,
+.landing-home .landing-privacy > p,
+.landing-home .landing-capabilities-intro > p:last-child { color: var(--muted); }
+.landing-home .home-nav-links a:hover,
+.landing-home .home-signin:hover { color: var(--accent); }
+.landing-home .landing-nav-cta { border: 1px solid var(--accent); border-radius: 4px; background: var(--accent); color: #fff; }
+.landing-home .landing-nav-cta:hover { background: #185643; }
+.landing-home .landing-hero {
+  display: grid;
+  width: min(100% - 80px, 1120px);
+  min-height: 0;
+  padding: 78px 0 94px;
+}
+.landing-home .landing-hero::before,
+.landing-home .landing-hero::after,
+.landing-poster::before,
+.landing-poster::after { display: none !important; }
+.landing-poster {
+  display: grid;
+  grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr);
+  align-items: center;
+  gap: clamp(40px, 7vw, 100px);
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.landing-poster .landing-hero-copy { display: flex; max-width: 520px; align-items: flex-start; padding: 0; text-align: left; }
+.landing-home .landing-eyebrow { color: var(--accent); }
+.landing-home .landing-eyebrow svg,
+.landing-home .landing-microcopy svg { color: var(--teal); }
+.landing-home .landing-hero h1 { color: var(--ink); font-weight: 500; letter-spacing: -.045em; line-height: .98; }
+.landing-wordmark { color: var(--accent) !important; font-family: var(--font-ui) !important; font-weight: 600 !important; letter-spacing: -.055em !important; }
+.landing-home .landing-hero-title { color: var(--ink); }
+.landing-home .landing-hero h1 em { color: var(--accent); }
+.landing-home .landing-primary { background: var(--accent); color: #fff; box-shadow: none; }
+.landing-home .landing-primary:hover { background: #185643; box-shadow: none; }
+.landing-home .landing-secondary { border-color: var(--line-strong); color: var(--ink-soft); }
+.landing-home .landing-secondary:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.landing-poster .landing-product-shot { width: 100%; min-height: 0; margin: 0; border: 1px solid var(--line-strong); border-radius: 8px; background: #dce8e1; box-shadow: 0 18px 42px rgba(23, 37, 34, .1); }
+.landing-poster .mock-mail-app { margin: 12px 13px 16px; transform: none; box-shadow: 0 12px 24px rgba(23, 37, 34, .1); }
+.landing-poster-caption { position: static; grid-column: 1 / -1; width: 100%; margin: -26px 0 0; color: var(--muted); text-align: left; }
+.landing-poster-caption span:last-child { text-align: right; }
+.landing-home .landing-trust,
+.landing-home .landing-features,
+.landing-home .landing-process,
+.landing-home .landing-privacy,
+.landing-home .landing-final-cta,
+.landing-home .home-footer { border-color: var(--line); }
+.landing-home .landing-trust { color: var(--muted); }
+.landing-home .landing-trust svg,
+.landing-home .landing-feature-grid a,
+.landing-home .landing-feature-grid a:hover,
+.landing-home .landing-capability-row svg { color: var(--accent); }
+.landing-home .landing-feature-grid h3,
+.landing-home .landing-process-grid h3,
+.landing-home .landing-capability-row strong { color: var(--ink); }
+.landing-home .landing-feature-grid p,
+.landing-home .landing-process-grid p,
+.landing-home .landing-capability-row span { color: var(--muted); }
+.landing-home .landing-feature-grid,
+.landing-home .landing-feature-grid article + article,
+.landing-home .landing-capability-panel,
+.landing-home .landing-capability-row,
+.landing-home .landing-process-grid article,
+.landing-home .landing-process-grid article + article { border-color: var(--line); }
+.landing-home .landing-process-grid article:first-child { border-color: var(--accent); }
+.landing-home .landing-final-cta .landing-primary { background: var(--accent); }
+.landing-home .home-footer a,
+.landing-home .home-footer button { color: var(--accent); }
+
+@media (max-width: 900px) {
+  .landing-poster { grid-template-columns: 1fr; gap: 38px; }
+  .landing-poster .landing-hero-copy { max-width: 680px; }
+  .landing-poster-caption { grid-column: auto; margin: -15px 0 0; }
+}
+@media (max-width: 700px) {
+  .landing-home .landing-hero { width: min(100% - 38px, 560px); padding: 50px 0 66px; }
+  .landing-poster { width: 100%; gap: 28px; }
+  .landing-poster .landing-hero-copy { align-items: flex-start; text-align: left; }
+  .landing-poster .landing-hero h1 { font-size: clamp(53px, 14vw, 78px); }
+  .landing-poster-caption { flex-direction: column; gap: 4px; }
+  .landing-poster-caption span:last-child { text-align: left; }
 }

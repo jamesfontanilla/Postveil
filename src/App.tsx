@@ -74,6 +74,10 @@ import { sanitizeEmailHtml } from "./lib/email-html";
 import { qrImageSource } from "./lib/qr";
 import RichEmailBody from "./components/RichEmailBody";
 
+function BrandMark({ small = false }: { small?: boolean }) {
+  return <span className={`brand-mark${small ? " small" : ""}`}><img src="/postveil-logo.svg" alt="Postveil" /></span>;
+}
+
 type SystemFolder = "inbox" | "sent" | "drafts" | "archive" | "trash" | "spam" | "quarantine";
 type ViewKey = SystemFolder | "focused" | "other" | "important" | "snoozed" | "muted" | `custom:${string}`;
 const TURNSTILE_SITE_KEY = "0x4AAAAAAEqXXuhzdUlMoSuz";
@@ -972,7 +976,7 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
   if (verificationPending && mode === "signup") return (
     <main className="auth-shell auth-shell-verification">
       <section className="auth-card auth-verification-card">
-        <div className="brand-mark">P</div>
+        <BrandMark />
         <div className="auth-journey" aria-label="Signup progress"><span className="active">Account</span><span className="active">Verify</span><span>Set up</span></div>
         <div className="auth-verification-icon"><Mail size={24} aria-hidden="true" /></div>
         <p className="eyebrow">STEP 2 / 3 · CHECK YOUR INBOX</p>
@@ -997,7 +1001,7 @@ function AuthScreen({ initialMode = "signin", initialNotice = "", onBack }: { in
     <main className="auth-shell">
       <section className="auth-card">
         {onBack && <button type="button" className="auth-back-link" onClick={onBack}><ArrowLeft size={14} /> Back to overview</button>}
-        <div className="brand-mark">P</div>
+        <BrandMark />
         {mode === "signup" && <div className="auth-journey" aria-label="Signup progress"><span className="active">Account</span><span>Verify</span><span>Set up</span></div>}
         <p className="eyebrow">PRIVATE MAIL / {new Date().getFullYear()}</p>
         <h1>{mode === "signup" ? "Start with your account." : mode === "forgot" || mode === "recovery" ? "Get back in safely." : "Keep your address close."}</h1>
@@ -1160,7 +1164,7 @@ function PasswordResetScreen({ onComplete, token }: { onComplete: () => void; to
   return (
     <main className="auth-shell">
       <section className="auth-card">
-        <div className="brand-mark">P</div>
+        <BrandMark />
         <p className="eyebrow">ACCOUNT RECOVERY</p>
         <h1>Choose a new password.</h1>
         <p className="auth-copy">This link is temporary. Set a strong password, then sign in again on your other devices.</p>
@@ -1405,7 +1409,7 @@ function OnboardingWizard({ session, onComplete }: { session: Session; onComplet
     <main className="onboarding-shell">
       <section className="onboarding-frame" aria-labelledby="onboarding-title">
         <aside className="onboarding-rail">
-          <div className="onboarding-brand"><div className="brand-mark">P</div><div><strong>Postveil</strong><span>private mail</span></div></div>
+          <div className="onboarding-brand"><BrandMark /><div><strong>Postveil</strong><span>private mail</span></div></div>
           <div className="onboarding-rail-copy"><p className="eyebrow">FIRST RUN / {new Date().getFullYear()}</p><h1 id="onboarding-title">Your domain,<br /><em>properly addressed.</em></h1><p>Bring the name you already own. Postveil turns it into a calm, private mailbox in a few deliberate steps.</p></div>
           <div className="onboarding-rail-foot"><ShieldCheck size={16} aria-hidden="true" /><span>No provider credentials appear here.</span></div>
         </aside>
@@ -1507,7 +1511,7 @@ function MfaSetupRequiredScreen({ onVerified }: { onVerified: () => void }) {
   }
 
   return (
-    <main className="auth-shell"><section className="auth-card"><div className="brand-mark">P</div><p className="eyebrow">ADMINISTRATOR MFA</p><h1>Protect workspace administration.</h1><p className="auth-copy">Administrator access requires a verified authenticator app. Your mailbox stays available, but workspace changes remain locked until this one-time setup is complete.</p>{setup ? <form onSubmit={verify} className="auth-form mfa-required-form"><div className="mfa-setup-key"><strong>1. Add Postveil to your authenticator</strong><small>Scan the QR code if your authenticator supports it, or enter the setup key manually.</small>{setup.qrCode && qrImageSource(setup.qrCode) && <img className="mfa-qr" src={qrImageSource(setup.qrCode)} alt="QR code for administrator MFA" />}{!setup.qrCode && <div className="mfa-qr-fallback">Use the setup key below. It is shown only during this setup.</div>}<code>{setup.secret}</code><details><summary>Show authenticator URI</summary><code>{setup.uri}</code></details></div><label>2. Enter the six-digit code<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" disabled={busy || code.length !== 6}>{busy ? "Checking…" : "Verify and protect admin access"}</button></form> : <><div className="form-error" role="alert">{error || "Preparing your secure setup…"}</div><button className="secondary-button" onClick={() => void begin()} disabled={busy}>{busy ? "Preparing…" : "Try again"}</button></>}<p className="auth-microcopy"><ShieldCheck size={14} aria-hidden="true" /> TOTP secrets are encrypted before storage and are never sent to a third party.</p></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> workspace protection</div><p className="aside-quote">Your password is only the first lock.</p><p className="aside-meta">Keep your authenticator available. Passkeys can be added later when the WebAuthn credential service is enabled.</p></aside></main>
+    <main className="auth-shell"><section className="auth-card"><BrandMark /><p className="eyebrow">ADMINISTRATOR MFA</p><h1>Protect workspace administration.</h1><p className="auth-copy">Administrator access requires a verified authenticator app. Your mailbox stays available, but workspace changes remain locked until this one-time setup is complete.</p>{setup ? <form onSubmit={verify} className="auth-form mfa-required-form"><div className="mfa-setup-key"><strong>1. Add Postveil to your authenticator</strong><small>Scan the QR code if your authenticator supports it, or enter the setup key manually.</small>{setup.qrCode && qrImageSource(setup.qrCode) && <img className="mfa-qr" src={qrImageSource(setup.qrCode)} alt="QR code for administrator MFA" />}{!setup.qrCode && <div className="mfa-qr-fallback">Use the setup key below. It is shown only during this setup.</div>}<code>{setup.secret}</code><details><summary>Show authenticator URI</summary><code>{setup.uri}</code></details></div><label>2. Enter the six-digit code<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" disabled={busy || code.length !== 6}>{busy ? "Checking…" : "Verify and protect admin access"}</button></form> : <><div className="form-error" role="alert">{error || "Preparing your secure setup…"}</div><button className="secondary-button" onClick={() => void begin()} disabled={busy}>{busy ? "Preparing…" : "Try again"}</button></>}<p className="auth-microcopy"><ShieldCheck size={14} aria-hidden="true" /> TOTP secrets are encrypted before storage and are never sent to a third party.</p></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> workspace protection</div><p className="aside-quote">Your password is only the first lock.</p><p className="aside-meta">Keep your authenticator available. Passkeys can be added later when the WebAuthn credential service is enabled.</p></aside></main>
   );
 }
 
@@ -1545,7 +1549,7 @@ function MfaChallengeScreen({ onVerified }: { onVerified: () => void }) {
     }
   }
   return (
-    <main className="auth-shell"><section className="auth-card"><div className="brand-mark">P</div><p className="eyebrow">SECOND STEP</p><h1>Confirm it’s you.</h1><p className="auth-copy">Open your authenticator app and enter the six-digit code to continue to Postveil.</p>{factors.length > 1 && <label>Authenticator<select value={factorId} onChange={(event) => setFactorId(event.target.value)}>{factors.map((factor) => <option key={factor.id} value={factor.id}>{factor.friendly_name || "Authenticator app"}</option>)}</select></label>}<form onSubmit={submit} className="auth-form"><label>Authentication code<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" /></label>{error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={busy || !factorId}>{busy ? "Checking…" : "Verify and open mailbox"}</button></form><button className="text-button" onClick={() => void requireSupabase().auth.signOut()}>Sign out</button></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> two-step verification</div><p className="aside-quote">Your password is only the first lock.</p><p className="aside-meta">Keep your authenticator app available. Recovery email is for resetting access, not a replacement for the second factor.</p></aside></main>
+    <main className="auth-shell"><section className="auth-card"><BrandMark /><p className="eyebrow">SECOND STEP</p><h1>Confirm it’s you.</h1><p className="auth-copy">Open your authenticator app and enter the six-digit code to continue to Postveil.</p>{factors.length > 1 && <label>Authenticator<select value={factorId} onChange={(event) => setFactorId(event.target.value)}>{factors.map((factor) => <option key={factor.id} value={factor.id}>{factor.friendly_name || "Authenticator app"}</option>)}</select></label>}<form onSubmit={submit} className="auth-form"><label>Authentication code<input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="000000" /></label>{error && <div className="form-error">{error}</div>}<button className="primary-button" disabled={busy || !factorId}>{busy ? "Checking…" : "Verify and open mailbox"}</button></form><button className="text-button" onClick={() => void requireSupabase().auth.signOut()}>Sign out</button></section><aside className="auth-aside"><div className="aside-note"><span className="status-dot" /> two-step verification</div><p className="aside-quote">Your password is only the first lock.</p><p className="aside-meta">Keep your authenticator app available. Recovery email is for resetting access, not a replacement for the second factor.</p></aside></main>
   );
 }
 
@@ -5453,7 +5457,7 @@ function MailboxApp({ session }: { session: Session }) {
       <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}>
         <div className="sidebar-top">
           <div className="brand-lockup">
-            <div className="brand-mark small">P</div>
+            <BrandMark small />
             <div>
               <strong>Postveil</strong>
               <span>private mail</span>
@@ -6668,7 +6672,7 @@ function AppContent() {
   if (!ready)
     return (
       <div className="loading-screen">
-        <div className="brand-mark">P</div>
+        <BrandMark />
         <p>Loading Postveil…</p>
       </div>
     );
@@ -6686,7 +6690,7 @@ function AppContent() {
     : <AuthScreen initialMode={authMode} initialNotice={emailVerificationNotice} onBack={() => setShowPublicHome(true)} />;
   if (mfaSetupRequired) return <MfaSetupRequiredScreen onVerified={() => { setMfaSetupRequired(false); setMfaRequired(false); }} />;
   if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
-  if (!onboardingChecked) return <div className="loading-screen"><div className="brand-mark">P</div><p>Preparing your private desk…</p></div>;
+  if (!onboardingChecked) return <div className="loading-screen"><BrandMark /><p>Preparing your private desk…</p></div>;
   if (onboardingRequired) return <OnboardingWizard session={session} onComplete={() => setOnboardingRequired(false)} />;
   return <MailboxApp session={session} />;
 }
