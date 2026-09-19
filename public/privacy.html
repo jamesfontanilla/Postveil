@@ -4,44 +4,96 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#eef1ed" />
-    <title>Postveil privacy notice</title>
+    <title>Postveil privacy policy</title>
     <style>
       :root { color-scheme: light; font-family: Arial, sans-serif; color: #1b3028; background: #eef1ed; }
       body { margin: 0; }
-      main { box-sizing: border-box; width: min(760px, calc(100% - 36px)); margin: 0 auto; padding: 72px 0; }
+      main { box-sizing: border-box; width: min(820px, calc(100% - 36px)); margin: 0 auto; padding: 64px 0; }
       a { color: #2b6755; }
-      .mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px 11px 11px 3px; background: #1e332b; color: #d9f19a; font-weight: 800; }
+      .mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px 11px 11px 3px; background: #1e332b; color: #d9f19a; font-weight: 800; text-decoration: none; }
       .eyebrow { margin: 24px 0 12px; color: #72867a; font: 11px monospace; letter-spacing: .12em; text-transform: uppercase; }
       h1 { margin: 0 0 18px; font-size: clamp(36px, 7vw, 64px); letter-spacing: -.06em; }
       h2 { margin: 34px 0 8px; font-size: 20px; }
+      h3 { margin: 24px 0 6px; font-size: 16px; }
       p, li { color: #5f7368; font-size: 15px; line-height: 1.7; }
-      .card { margin-top: 28px; padding: 24px; border: 1px solid #d5e1d8; border-radius: 12px; background: rgba(255,255,255,.64); }
+      .lede { max-width: 680px; font-size: 17px; }
+      .card { margin-top: 28px; padding: 28px; border: 1px solid #d5e1d8; border-radius: 12px; background: rgba(255,255,255,.68); }
+      .note { border-left: 3px solid #2b6755; padding-left: 16px; }
       footer { margin-top: 46px; color: #84958a; font: 11px monospace; }
+      @media (max-width: 560px) { main { padding: 40px 0; } .card { padding: 21px; } }
     </style>
   </head>
   <body>
     <main>
       <a class="mark" href="/" aria-label="Back to Postveil">P</a>
-      <p class="eyebrow">Postveil / privacy notice</p>
+      <p class="eyebrow">Postveil / privacy policy</p>
       <h1>Your mailbox stays yours.</h1>
-      <p>Postveil provides custom-domain email access. This notice explains what we collect, why we use it, and which infrastructure providers help operate the service.</p>
+      <p class="lede">This policy explains what Postveil collects, why it is needed to provide custom-domain email, which providers process it, and how to request access or deletion.</p>
+      <p class="note"><strong>Beta notice.</strong> Postveil is an early-release service operated by James Fontanilla. This policy is written from the current production implementation and is not legal advice. It should be reviewed and adapted by a qualified privacy professional before unrestricted or paid launch.</p>
       <div class="card">
-        <h2>Information we use</h2>
+        <h2>1. Who is responsible for your information</h2>
+        <p>Postveil is operated by James Fontanilla. For privacy questions and data requests, contact <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a>. If you use Postveil to manage other people’s messages, you may have separate legal responsibilities for that content; Postveil may act as your service provider or processor depending on the arrangement and applicable law.</p>
+
+        <h2>2. Information we collect</h2>
+        <h3>Account and authentication information</h3>
         <ul>
-          <li>Account information such as your email address, sign-in method, and optional profile name.</li>
-          <li>Mailbox data, messages, attachments, delivery events, and settings needed to provide email service.</li>
-          <li>Security information such as session records, rate-limit signals, device information, and audit events used to protect accounts.</li>
+          <li>Your email address, display name, password-derived verifier, account status, verification state, recovery records, and sign-in timestamps.</li>
+          <li>If you use Google Sign-In, Google provides the identity information needed to authenticate you, such as your email address, name, and stable Google account identifier. Postveil does not request access to Gmail, Drive, Contacts, or other Google content.</li>
+          <li>Session tokens are stored in your browser’s local storage so the app can keep you signed in. Passwords and OAuth client secrets are not stored in the browser.</li>
         </ul>
-        <h2>How providers are used</h2>
-        <p>Postveil uses Cloudflare to run the application and database, Backblaze B2 to store private message objects, Amazon SES to deliver mail, and Google to provide optional sign-in. Provider credentials are kept server-side. Postveil does not sell mailbox content or use it to train an AI model. Email delivery can require sharing message data with the selected delivery provider.</p>
-        <h2>Security and retention</h2>
-        <p>Access is tenant-scoped and protected with authenticated sessions. Data is retained while your account is active or as needed to complete delivery, prevent abuse, resolve disputes, or comply with legal obligations. Deleting an account may not immediately remove encrypted backups or provider-side delivery records. You may request account deletion or export through the service.</p>
-        <h2>Your choices</h2>
-        <p>You may request access, correction, export, deletion, or clarification about processing by contacting us. You may also stop using the service and remove your domain routing records. We may need to verify your identity before fulfilling a request.</p>
+        <h3>Domain and mailbox information</h3>
+        <p>We store the domains, mailbox addresses, display names, DNS verification results, provider status, routing status, mailbox settings, and domain records needed to connect and operate your mailbox. If you choose Cloudflare’s guided connection, Postveil uses a short-lived OAuth access token to inspect or configure the selected zone and email route; the token itself is not stored as a lasting credential in the application database.</p>
+        <h3>Mail and address-book information</h3>
+        <p>To provide the mailbox, we process message headers, sender and recipient addresses, subjects, message bodies, drafts, threads, folders, labels, contacts, search history, rules, signatures, delivery events, bounce and complaint information, and other settings you create. The current production configuration does not enable hosted attachment ingestion; if that changes, this policy will be updated before the feature is enabled.</p>
+        <h3>Security and technical information</h3>
+        <p>We process request timestamps, approximate network and security signals supplied at the edge, rate-limit signals, bounded user-agent data, and hashed email and IP values in authentication audit events. These records help prevent account takeover, abuse, duplicate processing, and delivery failures.</p>
+
+        <h2>3. Why we use information</h2>
+        <ul>
+          <li>To create accounts, authenticate users, verify email addresses, recover access, and enforce multi-factor authentication.</li>
+          <li>To provision domains, check DNS readiness, configure supported email routing, and create or enable mailboxes.</li>
+          <li>To store, search, render, organize, send, receive, and deliver messages at your direction.</li>
+          <li>To screen suspicious mail, inspect links, proxy remote images when you request them, prevent abuse, enforce limits, and investigate security events.</li>
+          <li>To operate, troubleshoot, maintain, and improve the service; respond to support and legal requests; and comply with applicable law.</li>
+        </ul>
+        <p>For people protected by the GDPR or UK GDPR, the appropriate legal basis depends on the activity. Typical bases are performance of a contract, legitimate interests in security and service operation, compliance with legal obligations, and consent where an optional feature specifically requires it. A final launch should document those choices with counsel.</p>
+
+        <h2>4. Providers and disclosures</h2>
+        <p>We disclose information only as needed to operate Postveil, protect users, process mail at your direction, or comply with law. The current deployment uses:</p>
+        <ul>
+          <li><strong>Cloudflare:</strong> Workers runs the application; D1 stores application records; R2 stores private raw-message objects and related mail objects; Turnstile helps protect signup; and Cloudflare OAuth can be used for a customer’s selected DNS and email-routing setup.</li>
+          <li><strong>Amazon Web Services:</strong> Amazon SES sends outbound mail and produces delivery, bounce, complaint, and suppression events. The inbound path temporarily stores raw mail in an AWS S3 bucket and uses an AWS Lambda function to forward it to Postveil. The configured AWS region is Singapore.</li>
+          <li><strong>Google:</strong> Google Sign-In authenticates users and supplies the limited OpenID Connect profile fields described above. It is not a Gmail mailbox integration.</li>
+          <li><strong>Recipients and other mail systems:</strong> Messages are sent to the addresses you specify and may be processed by those recipients’ mail providers. Their handling is governed by their own policies.</li>
+          <li><strong>Authorities and professional advisers:</strong> We may disclose information when reasonably necessary to comply with law, enforce these terms, protect users, or respond to a valid legal process.</li>
+        </ul>
+        <p>The current production configuration uses Cloudflare R2 for application mail storage. Older deployments or operator backups may use other storage providers; those systems are outside the current hosted storage path.</p>
+
+        <h2>5. Message content, privacy tools, and tracking</h2>
+        <p>Postveil is not universal end-to-end encryption. Ordinary email travels through SMTP and third-party delivery systems. We may process content to parse MIME messages, render HTML safely, inspect links, apply screening decisions, deliver mail, and show delivery status. Remote images are blocked or privacy-proxied by default in the reader; enabling them can cause a request to the sender’s or Postveil’s proxy infrastructure.</p>
+        <p>When you enable delivery or read-related options in the composer, message metadata may record those choices and the resulting provider events. Do not send highly sensitive or regulated information unless you have assessed whether Postveil and the connected providers are appropriate for that use.</p>
+
+        <h2>6. International processing</h2>
+        <p>Postveil and its providers may process information in countries other than where you live. The current deployment uses AWS resources in Singapore, while Cloudflare, Google, recipient providers, and email routing can operate across multiple countries. Postveil does not currently promise a single-country data-residency boundary. Before launch in a regulated market, the operator should document applicable transfer mechanisms, contracts, and provider locations.</p>
+
+        <h2>7. Retention and deletion</h2>
+        <p>We keep account, mailbox, and message information for as long as needed to provide the service, complete delivery, prevent abuse, resolve disputes, maintain legal holds, and meet legal obligations. Delivery providers may retain events or suppression records under their own policies. Failed inbound processing can temporarily retain a raw object for retry.</p>
+        <p>The current release does not expose a self-service account-deletion control. To request deletion or export, email <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a> from an address we can verify. Before deleting a domain-connected mailbox, remove its DNS and routing records or ask us to help coordinate that change. We will verify the request, delete active account-scoped D1 records and private R2 objects where the service controls them, and explain any records that must be retained or remain with providers, backups, legal holds, or recipients.</p>
+
+        <h2>8. Your choices and rights</h2>
+        <p>Depending on where you live, you may have rights to access, correct, export, delete, restrict, object to, or limit certain processing, and to withdraw consent where consent is the basis. California residents may also have rights under the CCPA/CPRA, including to know, delete, correct, opt out of sale or sharing, and limit certain uses of sensitive personal information. Postveil does not sell personal information or use mailbox content for cross-context behavioral advertising.</p>
+        <p>Send requests to <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a>. We may ask for reasonable information to verify identity and protect another person’s mailbox. You may also complain to your local data-protection authority where applicable.</p>
+
+        <h2>9. Children</h2>
+        <p>Postveil is not directed to children under 13, and we do not knowingly create accounts for them. If local law sets a higher minimum age or requires parental authorization, that rule applies.</p>
+
+        <h2>10. Security and changes</h2>
+        <p>We use authenticated, tenant-scoped access, encrypted transport, hashed authentication tokens, rate limiting, multi-factor authentication support, private object storage, and provider-side controls. No system is risk-free, and we cannot guarantee that a message or account will never be compromised. We may update this policy when the service, providers, or legal requirements change. We will change the date below and provide a more prominent notice when a change materially affects how we use personal information.</p>
+
         <h2>Contact</h2>
-        <p>For privacy questions, data requests, or security concerns, contact <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a>. Read the <a href="/terms">terms of service</a> before using Postveil.</p>
+        <p>Privacy, data requests, security concerns, and abuse reports: <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a>. Read the <a href="/terms">Terms of Service</a> before using Postveil.</p>
       </div>
-      <footer>Last updated: September 6, 2026 · <a href="/">Return to Postveil</a></footer>
+      <footer>Last updated: September 19, 2026 · <a href="/">Return to Postveil</a></footer>
     </main>
   </body>
 </html>

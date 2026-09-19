@@ -23,7 +23,7 @@ not a substitute for provider approval, a restore exercise, or legal review.
 - Mailbox onboarding checks exact public MX targets from `INBOUND_MX_TARGETS`.
   Zone ownership alone never enables send/receive.
 - Raw mail and attachments remain behind authenticated, tenant-scoped routes;
-  the B2 bucket is private. Hosted attachment ingestion is currently disabled
+  the R2 bucket is private. Hosted attachment ingestion is currently disabled
   until an antivirus scanner and quarantine workflow are connected.
 - Cloudflare Turnstile is configured for `postveil.jamesfontanilla.com` signup;
   the browser widget is explicit and the Worker rejects missing or invalid
@@ -64,12 +64,12 @@ not a substitute for provider approval, a restore exercise, or legal review.
   configuration currently rejects attachment uploads, inbound attachment
   storage, and outbound messages containing attachments.
 - Set up alerting for failed logins, webhook failures, queue dead letters,
-  bounce/complaint rates, D1 errors, B2 errors, and provider throttling.
+  bounce/complaint rates, D1 errors, R2 errors, and provider throttling.
 
 ### Data, recovery, and growth
 
 - Export and retain encrypted D1 backups in an independent account or region;
-  Time Travel alone is not an independent backup. Set B2 lifecycle rules and
+  Time Travel alone is not an independent backup. Set R2 lifecycle rules and
   take a protected snapshot of the production bucket.
 - Perform and record a restore test against a disposable recovery database or
   bucket before accepting customer data.

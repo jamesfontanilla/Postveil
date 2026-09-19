@@ -8,15 +8,18 @@
     <style>
       :root { color-scheme: light; font-family: Arial, sans-serif; color: #1b3028; background: #eef1ed; }
       body { margin: 0; }
-      main { box-sizing: border-box; width: min(760px, calc(100% - 36px)); margin: 0 auto; padding: 72px 0; }
+      main { box-sizing: border-box; width: min(820px, calc(100% - 36px)); margin: 0 auto; padding: 64px 0; }
       a { color: #2b6755; }
-      .mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px 11px 11px 3px; background: #1e332b; color: #d9f19a; font-weight: 800; }
+      .mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 11px 11px 11px 3px; background: #1e332b; color: #d9f19a; font-weight: 800; text-decoration: none; }
       .eyebrow { margin: 24px 0 12px; color: #72867a; font: 11px monospace; letter-spacing: .12em; text-transform: uppercase; }
       h1 { margin: 0 0 18px; font-size: clamp(36px, 7vw, 64px); letter-spacing: -.06em; }
       h2 { margin: 34px 0 8px; font-size: 20px; }
       p, li { color: #5f7368; font-size: 15px; line-height: 1.7; }
-      .card { margin-top: 28px; padding: 24px; border: 1px solid #d5e1d8; border-radius: 12px; background: rgba(255,255,255,.64); }
+      .lede { max-width: 680px; font-size: 17px; }
+      .card { margin-top: 28px; padding: 28px; border: 1px solid #d5e1d8; border-radius: 12px; background: rgba(255,255,255,.68); }
+      .note { border-left: 3px solid #2b6755; padding-left: 16px; }
       footer { margin-top: 46px; color: #84958a; font: 11px monospace; }
+      @media (max-width: 560px) { main { padding: 40px 0; } .card { padding: 21px; } }
     </style>
   </head>
   <body>
@@ -24,20 +27,48 @@
       <a class="mark" href="/" aria-label="Back to Postveil">P</a>
       <p class="eyebrow">Postveil / terms of service</p>
       <h1>Use mail responsibly.</h1>
-      <p>These baseline terms describe the responsibilities for using Postveil while the hosted service is in early release. Have a qualified adviser review them before accepting paid customers.</p>
+      <p class="lede">These Terms govern your use of Postveil, an early-release custom-domain email service operated by James Fontanilla.</p>
+      <p class="note"><strong>Beta notice.</strong> The current release is provided for testing and early access. These terms are a product draft, not legal advice. Before paid or unrestricted launch, the operator should have counsel add the legal entity, governing-law, dispute, tax, refund, service-level, and data-processing terms required for the intended market.</p>
       <div class="card">
-        <h2>Your account and domains</h2>
-        <p>You must provide accurate account information, protect your sign-in methods, and control every domain and sender address connected to your account. Do not claim a domain or mailbox you do not control.</p>
-        <h2>Acceptable use</h2>
-        <p>Do not use Postveil for spam, phishing, malware, harassment, unlawful surveillance, unsolicited bulk mail, impersonation, or content that violates applicable law or provider policies. We may throttle, quarantine, suspend, or terminate abusive sending.</p>
-        <h2>Email delivery and privacy</h2>
-        <p>Email delivery depends on third-party infrastructure and recipient networks. Messages may be processed by delivery, storage, security, and identity providers. Postveil is not universal end-to-end encryption; ordinary SMTP delivery is not end-to-end encrypted.</p>
-        <h2>Availability and limits</h2>
-        <p>The service is provided during an early-release period and may change. Quotas, storage, sending limits, retention, and provider availability apply. Keep independent copies of important information.</p>
+        <h2>1. Acceptance and eligibility</h2>
+        <p>By creating an account, connecting a domain, or using Postveil, you agree to these Terms and the <a href="/privacy">Privacy Policy</a>. You must be legally able to enter this agreement and meet the minimum age required where you live. Postveil is not directed to children under 13.</p>
+
+        <h2>2. Your account</h2>
+        <p>Provide accurate information, keep your sign-in methods and recovery codes private, and promptly report unauthorized access. You are responsible for activity performed through your account unless it resulted from Postveil’s failure to apply reasonable security controls. We may require email verification, multi-factor authentication, or additional checks before allowing sensitive actions.</p>
+
+        <h2>3. Domains, DNS, and mailboxes</h2>
+        <p>You may connect only a domain and sender address that you control or are authorized to administer. You are responsible for registrar access, DNS changes, domain renewal, SPF/DKIM/DMARC decisions, routing records, and removing Postveil records when you stop using the service. A Cloudflare connection is optional; if you use it, you authorize Postveil to perform only the zone and email-routing actions shown in the connection flow. Postveil does not become the owner or registrar of your domain.</p>
+
+        <h2>4. Email content and limited service license</h2>
+        <p>You keep your rights in the messages, contacts, files, and other content you submit. You grant Postveil and its service providers a limited, non-exclusive permission to host, copy, parse, render, screen, route, transmit, and otherwise process that content only as needed to provide the features you request, protect the service, comply with law, or operate delivery and recovery systems. This permission ends when the applicable processing ends, subject to backups, provider logs, legal holds, and other lawful retention.</p>
+        <p>Postveil is not universal end-to-end encryption. Ordinary SMTP delivery and provider processing can expose message metadata and content to the systems needed to deliver mail. Do not use the service for regulated or highly sensitive material unless you have assessed the risks and required agreements.</p>
+
+        <h2>5. Acceptable use</h2>
+        <p>You must not use Postveil to send or receive spam, phishing, malware, credential theft, unlawful surveillance, harassment, threats, fraud, impersonation, unsolicited bulk mail, or content that violates law or another person’s rights. Do not operate an open relay, evade sending limits, rotate accounts to avoid abuse controls, or use a domain without authorization.</p>
+        <p>If you send commercial messages, you are responsible for accurate headers and subject lines, legally required identification and address information, consent and suppression practices, and clear opt-out handling. You must comply with applicable anti-spam and electronic-communications laws, including CAN-SPAM where it applies.</p>
+
+        <h2>6. Delivery, screening, and third-party services</h2>
+        <p>Email delivery depends on DNS, recipient systems, reputation, provider limits, and network conditions. Messages may be delayed, rejected, quarantined, marked as spam, or lost by systems outside Postveil’s control. Postveil may screen, rate-limit, defer, suppress, or block mail to protect users and providers. Cloudflare, Amazon SES, AWS S3/Lambda, Google, and recipient providers may process information as described in the Privacy Policy and their own terms.</p>
+
+        <h2>7. Availability, limits, and beta changes</h2>
+        <p>The service is provided during an early-release period. Features, quotas, storage limits, sending limits, supported domains, providers, and retention behavior may change. We do not promise uninterrupted availability, a particular delivery rate, inbox placement, data residency, or a permanent free tier. Keep independent copies of important information.</p>
+
+        <h2>8. Suspension and termination</h2>
+        <p>We may restrict, suspend, or terminate access when reasonably necessary to prevent abuse, protect users or providers, respond to legal requirements, address non-payment if paid plans are introduced, or protect the service. You may stop using Postveil at any time. When stopping, remove routing records and export information you need. Deletion may require verification and may not remove provider-side logs, recipient copies, backups, suppression records, or content subject to a legal hold.</p>
+
+        <h2>9. Intellectual property and feedback</h2>
+        <p>Postveil’s software, branding, interface, and documentation remain with their respective owners. These Terms give you a limited right to use the hosted service; they do not transfer ownership. If you send feedback, you allow us to use it to improve the service without owing compensation, provided we do not publicly identify you without permission.</p>
+
+        <h2>10. Disclaimers and liability</h2>
+        <p>To the extent permitted by law, Postveil is provided “as is” and “as available,” without warranties that the service will be uninterrupted, error-free, secure, or suitable for a particular purpose. Nothing in these Terms removes rights or remedies that cannot legally be waived. To the extent permitted by law, the operator will not be responsible for indirect, incidental, special, consequential, exemplary, or lost-profit damages arising from use of the service. Any launch-ready version should replace this baseline with jurisdiction-specific limitations reviewed by counsel.</p>
+
+        <h2>11. Changes</h2>
+        <p>We may update these Terms as the service changes. We will update the date below and provide a more prominent notice when a change materially affects your obligations. Continuing to use Postveil after the updated Terms take effect means you accept them.</p>
+
         <h2>Contact</h2>
-        <p>For questions or abuse reports, contact <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a>. See the <a href="/privacy">privacy notice</a>.</p>
+        <p>Questions, abuse reports, and legal notices: <a href="mailto:jamesfontanilla.dev@gmail.com">jamesfontanilla.dev@gmail.com</a>. Read the <a href="/privacy">Privacy Policy</a> for information handling and data requests.</p>
       </div>
-      <footer>Last updated: September 6, 2026 · <a href="/">Return to Postveil</a></footer>
+      <footer>Last updated: September 19, 2026 · <a href="/">Return to Postveil</a></footer>
     </main>
   </body>
 </html>

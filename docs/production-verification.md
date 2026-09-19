@@ -9,7 +9,7 @@ npm run test:prod
 The check only reads the public health/config endpoints, confirms unsafe
 methods are rejected, confirms a private route still requires authentication,
 and verifies the browser isolation headers. It does not sign in, create an
-account, send mail, mutate D1, access B2, or read mailbox content.
+account, send mail, mutate D1, access R2, or read mailbox content.
 
 ## Current release evidence
 

@@ -1,11 +1,11 @@
 # Postveil — self-hosted custom-domain mail
 
-Postveil is a Cloudflare Worker and React webmail application for custom-domain mail. It can receive mail through a configured Cloudflare Email Worker route, parse MIME messages, store metadata in Cloudflare D1, store raw mail and attachments in a private Backblaze B2 bucket, and send mail through Amazon SES.
+Postveil is a Cloudflare Worker and React webmail application for custom-domain mail. In the current production configuration, Amazon SES receives inbound mail, stages raw messages in AWS S3, and invokes Lambda to forward parsed mail to the Worker; the Worker stores metadata in Cloudflare D1, stores application mail objects in a private Cloudflare R2 bucket, and sends mail through Amazon SES.
 
 This repository is an early-release reference implementation. The current deployment is not a turnkey multi-tenant custom-domain SaaS: domain verification, provider identity provisioning, and inbound routing still require operator-controlled setup. Each deployment must use its own D1 database, provider accounts, storage bucket, domain, and secrets until the hosted multi-tenant architecture is completed.
 
-- Cloudflare Email Routing sends inbound mail to the email Worker.
-- The Worker parses MIME messages, stores metadata in D1, and stores raw messages/attachments in a private Backblaze B2 bucket.
+- Cloudflare OAuth can automate supported customer-domain DNS and email-routing setup; the current production inbound path uses Amazon SES, AWS S3, and Lambda.
+- The Worker parses MIME messages, stores metadata in D1, and stores raw messages/attachments in a private Cloudflare R2 bucket.
 - The Worker owns authentication and session tokens in D1; the browser never receives a database credential.
 - Amazon SES provides outbound delivery. Other provider adapter interfaces can be added later, but no provider secret is required in the browser.
 - Provider webhooks update delivery state, bounce/complaint suppression, reputation, and the message timeline with replay protection.
@@ -17,9 +17,9 @@ This repository is an early-release reference implementation. The current deploy
 
 ## Security boundaries
 
-- The browser receives no database or provider key. Never expose AWS SES or Backblaze application keys to the browser.
+- The browser receives no database or provider key. Never expose AWS SES, Google OAuth, or Cloudflare OAuth secrets to the browser.
 - D1 access is only through authenticated Worker routes, with owner-scoped queries and server-side authorization.
-- Backblaze B2 must use a private bucket and an application key limited to the required object operations.
+- Cloudflare R2 must remain private and be accessed through the Worker binding. AWS inbound S3/Lambda credentials must remain server-only and limited to the required object operations.
 - The hosted deployment currently disables attachment ingestion until an
   antivirus scanner and quarantine workflow are connected. The code includes
   static type and size checks, but those are not antivirus scanning.
@@ -33,7 +33,7 @@ This repository is an early-release reference implementation. The current deploy
 3. Run `npm ci`.
 4. Run `npm run dev`.
 
-The Vite app does not require provider credentials. Never place AWS SES or Backblaze application keys in browser build variables.
+The Vite app does not require provider credentials. Never place AWS SES, Google OAuth, or Cloudflare OAuth secrets in browser build variables.
 
 ## D1 setup
 
@@ -64,11 +64,6 @@ store with normalized D1 tables and add organization-scoped indexes.
 Set these as Cloudflare Worker variables or secrets. Variables identify the deployment; secrets contain credentials.
 
 ```text
-B2_ENDPOINT
-B2_REGION
-B2_KEY_ID
-B2_APPLICATION_KEY
-B2_BUCKET
 INBOUND_SHARED_SECRET
 INTERNAL_TEST_TOKEN
 OUTLOOK_FORWARD_TO (optional)
@@ -146,7 +141,9 @@ Configure each provider webhook to send `POST` requests with the deployment's pr
 ## Deployment
 
 1. Create the D1 database and apply every ordered migration under `migrations/`.
-2. Create a private Backblaze B2 bucket and a least-privilege application key.
+2. Create and bind a private Cloudflare R2 bucket as `MAIL_STORAGE`. If inbound
+   mail is enabled, configure the separate AWS S3/Lambda staging path with
+   server-only credentials.
 3. Authenticate each sending domain and sender with Amazon SES. For password signups, verify the `SYSTEM_FROM_EMAIL` domain and move the SES account out of the sandbox before sending verification messages to arbitrary recipients.
 4. Configure DNS for the exact inbound MX target(s) in `INBOUND_MX_TARGETS`, plus SPF, DKIM, and DMARC.
 5. Set Worker variables and secrets with `wrangler secret put` or the Cloudflare dashboard.
@@ -154,7 +151,7 @@ Configure each provider webhook to send `POST` requests with the deployment's pr
 7. Run `npm run typecheck`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
 8. Deploy with `npm run deploy` and verify authenticated API routes, inbound mail, outbound mail, webhook delivery, and signed attachment downloads.
 
-Do not deploy the example domain or example credentials. Do not reuse another deployment's D1 database, B2 bucket, SES account, or secrets.
+Do not deploy the example domain or example credentials. Do not reuse another deployment's D1 database, R2 bucket, SES account, or secrets.
 
 ## Routes
 
@@ -179,7 +176,7 @@ Do not deploy the example domain or example credentials. Do not reuse another de
 - `/api/drafts` — autosaved drafts
 - `/api/drafts/:id/versions` — draft history and version restore
 - `/api/send` — authenticated provider-routed send with threading, CC/BCC, attachments, quotas, suppression checks, tracking controls, and scheduled send
-- `/api/attachments` — private B2 upload and signed download URLs
+- `/api/attachments` — private R2 upload and signed download URLs
 - `/api/domains/dns-records` — tenant-scoped domain ownership, DNS, and inbound-route status with manual records when needed
 - `/api/domains/verification/refresh` — exact public MX/TXT verification for manual domains and route-state refresh
 - `/api/webhooks/:provider` — provider delivery callback with idempotency and replay protection
