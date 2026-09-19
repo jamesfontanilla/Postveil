@@ -3280,3 +3280,262 @@ h1, h2, h3, h4,
   .outlook-message-toolbar { min-height: 54px; }
   .message-toolbar-button, .message-toolbar-more > summary { min-width: 66px; }
 }
+
+/* Public light theme: keep marketing and informational routes warm, quiet, and
+   readable without changing sign-up, onboarding, recovery, or mailbox UI. */
+.landing-home {
+  --public-paper: #f6f7f2;
+  --public-surface: #ffffff;
+  --public-surface-soft: #edf3e9;
+  --public-ink: #17362a;
+  --public-muted: #60776b;
+  --public-faint: #8a9b90;
+  --public-line: #d8e3d8;
+  --public-green: #b9eb78;
+  --public-deep: #0f5b3c;
+  color-scheme: light;
+  background: var(--public-paper);
+  color: var(--public-ink);
+}
+
+.landing-home .landing-nav {
+  border-bottom-color: var(--public-line);
+}
+
+.landing-home .home-brand,
+.landing-home .home-brand strong,
+.landing-home .home-nav-links a,
+.landing-home .home-signin {
+  color: var(--public-ink);
+}
+
+.landing-home .home-brand small,
+.landing-home .landing-eyebrow,
+.landing-home .landing-poster-caption,
+.landing-home .landing-microcopy,
+.landing-home .home-footer {
+  color: var(--public-muted);
+}
+
+.landing-home .home-nav-links a:hover,
+.landing-home .home-signin:hover,
+.landing-home .home-footer a:hover,
+.landing-home .home-footer button:hover {
+  color: var(--public-deep);
+}
+
+.landing-home .landing-nav-cta {
+  border-color: #93bd72;
+  background: var(--public-surface-soft);
+  color: var(--public-deep);
+}
+
+.landing-home .landing-nav-cta:hover {
+  border-color: var(--public-deep);
+  background: #e2efd9;
+}
+
+.landing-home .landing-hero {
+  background: var(--public-paper);
+}
+
+.landing-home .landing-hero::before,
+.landing-home .landing-hero::after {
+  display: none;
+}
+
+.landing-home .landing-poster {
+  border: 1px solid var(--public-line);
+  border-radius: 12px;
+  background: var(--public-surface);
+  box-shadow: 0 22px 55px rgba(24, 62, 43, .08);
+}
+
+.landing-home .landing-poster::before,
+.landing-home .landing-poster::after {
+  display: none;
+}
+
+.landing-home .landing-poster .landing-eyebrow,
+.landing-home .landing-poster .landing-eyebrow svg {
+  color: var(--public-deep);
+}
+
+.landing-home .landing-poster .landing-hero h1,
+.landing-home .landing-poster .landing-wordmark {
+  color: var(--public-ink);
+}
+
+.landing-home .landing-poster .landing-hero h1 em {
+  color: var(--public-deep);
+}
+
+.landing-home .landing-poster .landing-lede {
+  color: var(--public-muted);
+}
+
+.landing-home .landing-poster .landing-primary,
+.landing-home .landing-primary {
+  background: var(--public-deep);
+  color: #f5f9ec;
+  box-shadow: 0 10px 22px rgba(15, 91, 60, .16);
+}
+
+.landing-home .landing-poster .landing-primary:hover,
+.landing-home .landing-primary:hover {
+  background: #0b4930;
+  box-shadow: 0 12px 26px rgba(15, 91, 60, .2);
+}
+
+.landing-home .landing-poster .landing-secondary,
+.landing-home .landing-secondary {
+  border-color: #bfcfc2;
+  background: var(--public-surface);
+  color: var(--public-deep);
+}
+
+.landing-home .landing-poster .landing-secondary:hover,
+.landing-home .landing-secondary:hover {
+  border-color: var(--public-deep);
+  background: var(--public-surface-soft);
+}
+
+.landing-home .landing-poster .landing-microcopy svg {
+  color: var(--public-deep);
+}
+
+.landing-home .landing-poster .landing-product-shot {
+  border: 1px solid var(--public-line);
+  background: var(--public-surface-soft);
+  box-shadow: 0 18px 38px rgba(24, 62, 43, .08);
+}
+
+.landing-home .landing-poster .mock-window-bar,
+.landing-home .landing-product-proof .mock-window-bar {
+  border-bottom-color: var(--public-line);
+}
+
+.landing-home .landing-poster .mock-window-brand,
+.landing-home .landing-product-proof .mock-window-brand {
+  color: var(--public-ink);
+}
+
+.landing-home .landing-poster .mock-window-status,
+.landing-home .landing-product-proof .mock-window-status {
+  color: var(--public-muted);
+}
+
+.landing-home .landing-poster-caption {
+  color: var(--public-faint);
+}
+
+.landing-home .landing-product-proof {
+  border-top-color: var(--public-line);
+}
+
+.landing-home .landing-product-proof-copy h2,
+.landing-home .landing-section-heading h2,
+.landing-home .landing-privacy h2,
+.landing-home .landing-capabilities-intro h2,
+.landing-home .landing-final-cta h2 {
+  color: var(--public-ink);
+}
+
+.landing-home .landing-product-proof-copy > p:last-child,
+.landing-home .landing-section-heading > p:last-child,
+.landing-home .landing-privacy > p,
+.landing-home .landing-capabilities-intro > p:last-child {
+  color: var(--public-muted);
+}
+
+.landing-home .landing-product-proof .landing-product-shot {
+  border-color: var(--public-line);
+  background: var(--public-surface-soft);
+  box-shadow: 0 20px 42px rgba(24, 62, 43, .1);
+}
+
+.landing-home .landing-product-proof .mock-window-brand,
+.landing-home .landing-product-proof .mock-window-status {
+  color: var(--public-ink);
+}
+
+.landing-home .landing-product-proof .mock-mail-app {
+  box-shadow: 0 16px 32px rgba(24, 62, 43, .1);
+}
+
+.landing-home .landing-trust,
+.landing-home .landing-features,
+.landing-home .landing-process,
+.landing-home .landing-privacy,
+.landing-home .landing-final-cta,
+.landing-home .home-footer {
+  border-color: var(--public-line);
+}
+
+.landing-home .landing-trust {
+  color: var(--public-muted);
+}
+
+.landing-home .landing-trust svg,
+.landing-home .landing-eyebrow svg,
+.landing-home .landing-feature-grid a,
+.landing-home .landing-feature-grid a:hover,
+.landing-home .landing-capability-row svg {
+  color: var(--public-deep);
+}
+
+.landing-home .landing-feature-grid,
+.landing-home .landing-feature-grid article + article,
+.landing-home .landing-capability-panel,
+.landing-home .landing-capability-row,
+.landing-home .landing-process-grid article,
+.landing-home .landing-process-grid article + article {
+  border-color: var(--public-line);
+}
+
+.landing-home .landing-feature-number,
+.landing-home .landing-process-grid article > span {
+  color: var(--public-deep);
+}
+
+.landing-home .landing-feature-grid h3,
+.landing-home .landing-process-grid h3,
+.landing-home .landing-capability-row strong {
+  color: #28533e;
+}
+
+.landing-home .landing-feature-grid p,
+.landing-home .landing-process-grid p,
+.landing-home .landing-capability-row span {
+  color: var(--public-muted);
+}
+
+.landing-home .landing-process-grid article:first-child {
+  border-color: var(--public-deep);
+}
+
+.landing-home .landing-final-cta .landing-primary {
+  background: var(--public-deep);
+}
+
+.landing-home .home-footer a,
+.landing-home .home-footer button {
+  color: var(--public-deep);
+}
+
+@media (max-width: 700px) {
+  .landing-home .landing-poster {
+    border-radius: 10px;
+  }
+}
+
+/* The older poster rules set the nested title colors directly; keep the
+   public light palette authoritative for this final composition. */
+.landing-home .landing-poster .landing-hero-title {
+  color: var(--public-ink) !important;
+}
+
+.landing-home .landing-poster .landing-hero-title em {
+  color: var(--public-deep) !important;
+  -webkit-text-fill-color: var(--public-deep) !important;
+}
