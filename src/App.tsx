@@ -5487,6 +5487,32 @@ function MailboxApp({ session }: { session: Session }) {
                 <X size={14} />
               </button>
             ) : null}
+            {searchFocused && searchSuggestions.length > 0 && (
+              <div className="search-suggestions" role="listbox" aria-label="Search suggestions">
+                <div className="search-suggestion-head"><span>Suggestions</span>{searchHistory.length > 0 && <button className="text-button" onClick={() => void clearSearchHistory()}>Clear history</button>}</div>
+                {searchSuggestions.map((suggestion, index) => (
+                  <button className="search-suggestion" key={`${suggestion.kind}-${suggestion.value}-${index}`} onClick={() => applySearchSuggestion(suggestion)} role="option">
+                    <span className={`search-suggestion-kind kind-${suggestion.kind}`}>{suggestion.kind === "recent" ? <History size={13} /> : suggestion.kind === "saved" ? <Bookmark size={13} /> : suggestion.kind === "label" ? <Tag size={13} /> : <Search size={13} />}</span>
+                    <span className="search-suggestion-copy"><strong>{suggestion.label}</strong>{suggestion.detail && <small>{suggestion.detail}</small>}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {searchHelpOpen && (
+              <div className="search-help" aria-label="Search syntax documentation">
+                <div className="search-help-head"><div><p className="eyebrow">SEARCH SYNTAX</p><strong>Find exactly what you need</strong></div><button className="icon-button" onClick={() => setSearchHelpOpen(false)} aria-label="Close search help"><X size={15} /></button></div>
+                <div className="search-help-grid">
+                  <code>from:alex@example.com</code><span>Sender</span><code>to:team@example.com</code><span>Recipient</span>
+                  <code>subject:"launch plan"</code><span>Subject phrase</span><code>filename:invoice</code><span>Attachment name</span>
+                  <code>type:pdf</code><span>File type</span><code>label:Projects</code><span>Label</span>
+                  <code>in:sent domain:example.com</code><span>Folder or domain</span><code>auth:pass</code><span>Authentication</span>
+                  <code>is:unread has:attachment</code><span>State and attachments</span><code>has:calendar has:work</code><span>Events and follow-ups</span>
+                  <code>spam:&gt;70% links:&gt;0</code><span>Risk and links</span><code>after:7d larger:5MB</code><span>Date and size</span>
+                  <code>work:reply_later project:launch</code><span>Work and project</span><code>without attachments this week</code><span>Natural language</span>
+                </div>
+                <small>Prefix any filter with <code>-</code> to exclude it. Use quotes for phrases. Export includes up to 5,000 matching results.</small>
+              </div>
+            )}
           </div>
         </div>
 
@@ -6080,28 +6106,14 @@ function MailboxApp({ session }: { session: Session }) {
                 </button>
               </div>
             </div>
-             <div className="search-workbench">
-              <div className="search-box">
-                <Search size={16} />
-                <input
-                  value={query}
-                  onFocus={() => setSearchFocused(true)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      setSearchFocused(false);
-                      setSearchHelpOpen(false);
-                    }
-                    if (event.key === "Enter") setSearchFocused(false);
-                  }}
-                  onChange={(event) => {
-                    setQuery(event.target.value);
-                    setActiveSavedSearchId(null);
-                    clearListSelection();
-                  }}
-                  placeholder="Search messages, people, or files"
-                  aria-label="Search messages"
-                />
-                <button className={`search-tool-button ${searchHelpOpen ? "active" : ""}`} onClick={() => setSearchHelpOpen((current) => !current)} aria-label="Search syntax help" title="Search syntax help"><HelpCircle size={16} /></button>
+            <div className="message-list-toolbar" aria-label="Message list filters">
+              <div className="search-filter-row" aria-label="Quick search filters">
+                {[{ value: "all", label: "All mail" }, { value: "unread", label: "Unread" }, { value: "starred", label: "Starred" }, { value: "attachments", label: "Attachments" }].map((item) => (
+                  <button key={item.value} type="button" className={`search-chip ${filter === item.value ? "active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }} aria-pressed={filter === item.value}>{item.label}</button>
+                ))}
+                {query.trim() && normalizedQuery && <span className="search-status-copy">Query: {query.trim()} ({resultTotal ?? 0})</span>}
+              </div>
+              <div className="message-list-sort-actions">
                 <select
                   value={sort}
                   onChange={(event) => {
@@ -6109,122 +6121,14 @@ function MailboxApp({ session }: { session: Session }) {
                     setSort(event.target.value);
                   }}
                   aria-label="Sort messages"
+                  className="message-list-sort-select"
                 >
-                  <option value="newest">Newest</option>
-                  <option value="oldest">Oldest</option>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
                 </select>
-                <button className="search-tool-button" onClick={() => void downloadSearchResults("csv")} aria-label="Export search results" title="Export search results"><Download size={16} /></button>
+                <button className="icon-button compact-icon" onClick={() => void downloadSearchResults("csv")} aria-label="Export search results" title="Export CSV"><Download size={15} /></button>
               </div>
-              {searchFocused && searchSuggestions.length > 0 && (
-                <div className="search-suggestions" role="listbox" aria-label="Search suggestions">
-                  <div className="search-suggestion-head"><span>Suggestions</span>{searchHistory.length > 0 && <button className="text-button" onClick={() => void clearSearchHistory()}>Clear history</button>}</div>
-                  {searchSuggestions.map((suggestion, index) => (
-                    <button className="search-suggestion" key={`${suggestion.kind}-${suggestion.value}-${index}`} onClick={() => applySearchSuggestion(suggestion)} role="option">
-                      <span className={`search-suggestion-kind kind-${suggestion.kind}`}>{suggestion.kind === "recent" ? <History size={13} /> : suggestion.kind === "saved" ? <Bookmark size={13} /> : suggestion.kind === "label" ? <Tag size={13} /> : <Search size={13} />}</span>
-                      <span className="search-suggestion-copy"><strong>{suggestion.label}</strong>{suggestion.detail && <small>{suggestion.detail}</small>}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {searchHelpOpen && (
-                <div className="search-help" aria-label="Search syntax documentation">
-                  <div className="search-help-head"><div><p className="eyebrow">SEARCH SYNTAX</p><strong>Find exactly what you need</strong></div><button className="icon-button" onClick={() => setSearchHelpOpen(false)} aria-label="Close search help"><X size={15} /></button></div>
-                  <div className="search-help-grid">
-                    <code>from:alex@example.com</code><span>Sender</span><code>to:team@example.com</code><span>Recipient</span>
-                    <code>subject:"launch plan"</code><span>Subject phrase</span><code>filename:invoice</code><span>Attachment name</span>
-                    <code>type:pdf</code><span>File type</span><code>label:Projects</code><span>Label</span>
-                    <code>in:sent domain:example.com</code><span>Folder or domain</span><code>auth:pass</code><span>Authentication</span>
-                    <code>is:unread has:attachment</code><span>State and attachments</span><code>has:calendar has:work</code><span>Events and follow-ups</span>
-                    <code>spam:&gt;70% links:&gt;0</code><span>Risk and links</span><code>after:7d larger:5MB</code><span>Date and size</span>
-                    <code>work:reply_later project:launch</code><span>Work and project</span><code>without attachments this week</code><span>Natural language</span>
-                  </div>
-                  <small>Prefix any filter with <code>-</code> to exclude it. Use quotes for phrases. Export includes up to 5,000 matching results.</small>
-                </div>
-              )}
-              <div className="search-filter-row" aria-label="Quick search filters">
-                {[{ value: "all", label: "All mail" }, { value: "unread", label: "Unread" }, { value: "starred", label: "Starred" }, { value: "attachments", label: "Attachments" }].map((item) => (
-                  <button key={item.value} type="button" className={`search-chip ${filter === item.value ? "active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }} aria-pressed={filter === item.value}>{item.label}</button>
-                ))}
-                {query.trim() && normalizedQuery && <span className="search-status-copy">Query active · {resultTotal ?? 0} result{(resultTotal ?? 0) === 1 ? "" : "s"}</span>}
-               </div>
-             </div>
-             <div className="command-ribbon" aria-label="Mail command ribbon">
-               <div className="command-ribbon-context">
-                 <span className="eyebrow">{selectedIds.size > 0 || selectAllResults ? "SELECTION" : currentLabel.toUpperCase()}</span>
-                 <strong>{selectedIds.size > 0 || selectAllResults ? (selectAllResults ? `${resultTotal ?? "All"} selected` : `${selectedIds.size} selected`) : "Mailbox actions"}</strong>
-                 <small>{selectedIds.size > 0 || selectAllResults ? "Apply one command to the selected messages." : "Common actions stay close to your inbox."}</small>
-               </div>
-               <div className="command-ribbon-groups">
-                 {selectedIds.size > 0 || selectAllResults ? (
-                   <>
-                     <div className="command-ribbon-group" aria-label="Organize messages">
-                       <span>Organize</span>
-                       <button className="command-ribbon-button" onClick={() => void runBulkAction("archive")} disabled={bulkBusy} title="Archive selected messages"><Archive size={14} /> Archive</button>
-                       <label className="command-ribbon-select"><span className="sr-only">Move selected messages to</span><select value={bulkFolder} onChange={(event) => setBulkFolder(event.target.value)} aria-label="Move selected messages to">{(["inbox", "sent", "drafts", "archive", "trash", "spam", "quarantine"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}{folders.map((item) => <option key={item.id} value={`custom:${item.id}`}>{item.name}</option>)}</select></label>
-                       <button className="command-ribbon-button" onClick={() => void runBulkAction("move")} disabled={bulkBusy} title="Move selected messages"><ArrowRight size={14} /> Move</button>
-                     </div>
-                     <div className="command-ribbon-group" aria-label="Mark messages">
-                       <span>Mark</span>
-                       <button className="command-ribbon-button" onClick={() => void runBulkAction("mark_read")} disabled={bulkBusy} title="Mark selected messages as read"><Mail size={14} /> Read</button>
-                       <button className="command-ribbon-button" onClick={() => void runBulkAction("star")} disabled={bulkBusy} title="Star selected messages"><Star size={14} /> Star</button>
-                       <button className="command-ribbon-button" onClick={() => void runBulkAction("flag")} disabled={bulkBusy} title="Flag selected messages"><Flag size={14} /> Flag</button>
-                     </div>
-                     <div className="command-ribbon-group" aria-label="Trust and removal">
-                       <span>Trust & remove</span>
-                       <button className="command-ribbon-button" onClick={() => void runBulkAction("spam")} disabled={bulkBusy} title="Move selected messages to Spam"><ShieldAlert size={14} /> Spam</button>
-                       <button className="command-ribbon-button danger" onClick={() => void runBulkAction("trash")} disabled={bulkBusy} title="Move selected messages to Trash"><Trash2 size={14} /> Trash</button>
-                     </div>
-                     <div className="command-ribbon-group command-ribbon-more" aria-label="More message actions">
-                       <span>More</span>
-                       <select value={bulkAction} onChange={(event) => setBulkAction(event.target.value)} aria-label="More message actions">
-                         <option value="archive">Archive</option>
-                         <option value="move">Move to…</option>
-                         <option value="mark_read">Mark read</option>
-                         <option value="mark_unread">Mark unread</option>
-                         <option value="star">Star</option>
-                         <option value="unstar">Unstar</option>
-                         <option value="flag">Flag</option>
-                         <option value="unflag">Unflag</option>
-                         <option value="important">Mark important</option>
-                         <option value="not_important">Remove importance</option>
-                         <option value="mute">Mute conversations</option>
-                         <option value="unmute">Unmute conversations</option>
-                         <option value="ignore">Ignore threads</option>
-                         <option value="unignore">Stop ignoring threads</option>
-                         <option value="priority">Set priority</option>
-                         {labels.length > 0 && <option value="label">Add label…</option>}
-                         <option value="snooze">Snooze 1 hour</option>
-                         <option value="reminder">Remind me tomorrow</option>
-                         <option value="reply_later">Reply later</option>
-                         <option value="waiting_on">Waiting on</option>
-                         <option value="i_owe">I owe</option>
-                         <option value="create_task">Create task</option>
-                         <option value="export">Export JSON</option>
-                         <option value="restore">Restore</option>
-                         <option value="spam">Move to Spam</option>
-                         <option value="trash">Move to Trash</option>
-                       </select>
-                       {bulkAction === "priority" && <select value={bulkPriority} onChange={(event) => setBulkPriority(event.target.value)} aria-label="More action priority"><option value="0">Normal</option><option value="1">Important</option><option value="2">High</option></select>}
-                       {bulkAction === "label" && <select value={bulkLabelId} onChange={(event) => setBulkLabelId(event.target.value)} aria-label="More action label"><option value="">Choose label</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select>}
-                       <button className="command-ribbon-button apply" onClick={() => void runBulkAction()} disabled={bulkBusy}>{bulkBusy ? "Applying…" : "Apply"}</button>
-                     </div>
-                     <button className="command-ribbon-clear" onClick={clearListSelection}>Clear</button>
-                   </>
-                 ) : (
-                   <>
-                     <div className="command-ribbon-group" aria-label="Mailbox actions">
-                       <span>Mailbox</span>
-                       <button className="command-ribbon-button primary" onClick={() => openCompose()} title="Write a new message"><PenLine size={14} /> New message</button>
-                       <button className="command-ribbon-button" onClick={() => void loadMessages()} title="Refresh messages"><RefreshCcw size={14} /> Refresh</button>
-                     </div>
-                     <div className="command-ribbon-group" aria-label="Selection actions">
-                       <span>Select</span>
-                       <button className="command-ribbon-button" onClick={selectCurrentPage} disabled={!messages.length || loading} title="Select messages on this page"><Check size={14} /> Select page</button>
-                     </div>
-                   </>
-                 )}
-               </div>
-             </div>
+            </div>
              <div className={`sync-status sync-${liveState}`} role="status" aria-live="polite">
               <span className="sync-dot" />
               {liveState === "live" ? "Live updates" : liveState === "connecting" ? "Connecting to live updates…" : liveState === "reconnecting" ? "Reconnecting…" : "Polling for updates"}
