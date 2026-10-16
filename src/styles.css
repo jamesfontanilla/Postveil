@@ -4272,35 +4272,77 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   scrollbar-width: thin;
 }
 .mail-ribbon-split-btn {
-  display: inline-flex;
-  align-items: center;
-  margin-right: 6px;
-  border-radius: 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  display: inline-flex !important;
+  align-items: stretch !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  margin-right: 8px !important;
+  border-radius: 4px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12) !important;
+  overflow: hidden !important;
+  flex-shrink: 0 !important;
+  border: 0 !important;
+  padding: 0 !important;
 }
 .mail-ribbon-split-btn .mail-ribbon-command.primary {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  padding: 0 10px 0 12px;
-  box-shadow: none;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  min-width: 96px !important;
+  background: #0078d4 !important;
+  color: #ffffff !important;
+  padding: 0 12px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border: 0 !important;
+  border-radius: 4px 0 0 4px !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  cursor: pointer !important;
+  transition: background 0.12s ease !important;
+}
+.mail-ribbon-split-btn .mail-ribbon-command.primary:hover {
+  background: #006abc !important;
+  color: #ffffff !important;
+}
+.mail-ribbon-split-btn .mail-ribbon-command.primary svg {
+  width: 15px !important;
+  height: 15px !important;
+  margin: 0 !important;
+  stroke-width: 2 !important;
 }
 .mail-ribbon-split-arrow {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 30px;
-  background: #0078d4;
-  color: #ffffff;
-  border: 0;
-  border-left: 1px solid #0066b3;
-  border-top-right-radius: 4px;
-  border-bottom-right-radius: 4px;
-  padding: 0 6px;
-  cursor: pointer;
-  transition: background 0.12s ease;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  max-height: 32px !important;
+  width: 24px !important;
+  background: #0078d4 !important;
+  color: #ffffff !important;
+  border: 0 !important;
+  border-left: 1px solid #0066b3 !important;
+  border-radius: 0 4px 4px 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  cursor: pointer !important;
+  transition: background 0.12s ease !important;
 }
 .mail-ribbon-split-arrow:hover {
-  background: #006abc;
+  background: #006abc !important;
+  color: #ffffff !important;
+}
+.mail-ribbon-split-arrow svg {
+  width: 12px !important;
+  height: 12px !important;
+  margin: 0 !important;
 }
 .mail-ribbon-separator {
   width: 1px;
