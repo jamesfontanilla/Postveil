@@ -694,8 +694,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .bulk-toolbar .primary-button { padding: 7px 10px; font-size: 10px; }
 .command-ribbon, .message-command-ribbon { display: flex; align-items: stretch; gap: 12px; margin: 0 16px 10px; overflow: hidden; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-muted); }
 .command-ribbon { min-height: 52px; }
-.message-command-ribbon { display: grid; grid-template-rows: 32px auto; gap: 0; margin: 0 0 20px; background: var(--surface-muted); }
-.mail-workspace.is-reading-message > .mail-ribbon { display: none; }
+/* In Outlook mode, mail ribbon remains visible across message reading view */
+.mail-workspace.is-reading-message > .mail-ribbon { display: flex !important; }
 .message-ribbon-tabs { display: flex; align-items: flex-end; gap: 18px; border-bottom: 1px solid var(--line); padding: 0 12px; }
 .message-ribbon-tab { position: relative; min-height: 32px; border: 0; background: transparent; color: var(--muted); padding: 8px 1px 7px; font-size: 10px; font-weight: 700; cursor: pointer; }
 .message-ribbon-tab:hover, .message-ribbon-tab:focus-visible { color: var(--ink); }
@@ -1980,29 +1980,191 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .mail-workspace { display: grid; grid-column: 2 / -1; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; background: var(--canvas); }
 .mail-columns { display: grid; grid-template-columns: minmax(390px, .92fr) minmax(0, 1.58fr); min-width: 0; min-height: 0; }
-.mail-ribbon { display: grid; grid-template-rows: 34px auto; min-width: 0; border-bottom: 1px solid var(--line-strong); background: var(--surface); }
-.mail-ribbon-tabs { display: flex; align-items: flex-end; gap: 22px; min-width: 0; border-bottom: 1px solid var(--line); padding: 0 18px; }
-.mail-ribbon-tab { position: relative; padding: 0 1px 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
-.mail-ribbon-tab.active { color: var(--ink); }
-.mail-ribbon-tab.active::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); }
-.mail-ribbon-context-label { overflow: hidden; margin-left: auto; padding-bottom: 8px; color: var(--accent); font: 9px var(--font-mono); letter-spacing: .06em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-.mail-ribbon-toolbar { display: flex; align-items: stretch; min-width: 0; gap: 12px; overflow-x: auto; padding: 7px 12px 8px; scrollbar-width: thin; }
-.mail-ribbon-group { display: flex; align-items: stretch; flex: 0 0 auto; gap: 2px; border-right: 1px solid var(--line); padding-right: 12px; }
-.mail-ribbon-group:last-of-type { border-right: 0; }
-.mail-ribbon-command { display: grid; min-width: 57px; align-content: center; justify-items: center; gap: 4px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--ink-soft); padding: 5px 8px; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
-.mail-ribbon-command:hover, .mail-ribbon-command:focus-visible { border-color: var(--line-strong); background: var(--surface-muted); color: var(--accent); }
-.mail-ribbon-command.primary { min-width: 94px; border-color: var(--accent); background: var(--accent); color: #fff; }
-.mail-ribbon-command.primary:hover, .mail-ribbon-command.primary:focus-visible { border-color: var(--accent); background: #1e5745; color: #fff; }
-.mail-ribbon-command.danger { color: var(--danger); }
-.mail-ribbon-command.danger:hover, .mail-ribbon-command.danger:focus-visible { border-color: #dfaaaa; background: #fff3f3; color: var(--danger); }
-.mail-ribbon-command:disabled { cursor: not-allowed; color: var(--faint); opacity: .65; }
-.mail-ribbon-command small { color: inherit; font-size: 8px; font-weight: 400; opacity: .78; }
-.mail-ribbon-command.apply { border-color: var(--line-strong); background: var(--surface); color: var(--accent); }
-.mail-ribbon-group-label { align-self: center; margin-right: 5px; color: var(--muted); font: 8px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
-.mail-ribbon-group select { align-self: center; min-width: 112px; max-width: 150px; height: 30px; border: 1px solid var(--line-strong); border-radius: 3px; background: var(--surface); color: var(--ink-soft); padding: 0 7px; font-size: 10px; }
-.mail-ribbon-refresh { display: inline-grid; place-items: center; align-self: center; flex: 0 0 30px; height: 30px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
-.mail-ribbon-refresh:hover, .mail-ribbon-refresh:focus-visible { border-color: var(--line-strong); background: var(--surface-muted); color: var(--accent); }
-.message-column > .command-ribbon { display: none !important; }
+.mail-ribbon {
+  display: flex !important;
+  flex-direction: column;
+  min-width: 0;
+  border-bottom: 1px solid #edebe9;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
+  z-index: 5;
+}
+.mail-ribbon-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  border-bottom: 1px solid #f3f4f6;
+  padding: 3px 12px 0;
+  background: #ffffff;
+}
+.mail-ribbon-tab {
+  position: relative;
+  border: 0;
+  background: transparent;
+  padding: 5px 12px 6px;
+  color: #616161;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+.mail-ribbon-tab:hover {
+  color: #242424;
+}
+.mail-ribbon-tab.active {
+  color: #0078d4;
+  font-weight: 600;
+  border-bottom-color: #0078d4;
+}
+.mail-ribbon-tab.active::after {
+  display: none;
+}
+.mail-ribbon-context-label {
+  overflow: hidden;
+  margin-left: auto;
+  color: #0078d4;
+  font: 11px var(--font-mono);
+  letter-spacing: .04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-ribbon-toolbar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 4px 12px 5px;
+  background: #ffffff;
+  scrollbar-width: thin;
+}
+.mail-ribbon-group {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 3px;
+  border-right: 1px solid #edebe9;
+  padding-right: 6px;
+  margin-right: 3px;
+}
+.mail-ribbon-group:last-of-type {
+  border-right: 0;
+  padding-right: 0;
+  margin-right: 0;
+}
+.mail-ribbon-group-label {
+  display: none;
+}
+.mail-ribbon-command {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  min-height: 42px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #323130;
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.mail-ribbon-command:hover, .mail-ribbon-command:focus-visible {
+  border-color: transparent;
+  background: #f3f4f6;
+  color: #201f1e;
+}
+.mail-ribbon-command svg {
+  width: 15px;
+  height: 15px;
+  margin-bottom: 2px;
+  stroke-width: 2;
+}
+.mail-ribbon-command.primary {
+  flex-direction: row;
+  min-width: 96px;
+  height: 30px;
+  min-height: 30px;
+  border-radius: 4px;
+  background: #0078d4;
+  color: #ffffff;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+.mail-ribbon-command.primary:hover, .mail-ribbon-command.primary:focus-visible {
+  background: #006abc;
+  color: #ffffff;
+}
+.mail-ribbon-command.primary small {
+  display: none;
+}
+.mail-ribbon-command.danger {
+  color: #d13438;
+}
+.mail-ribbon-command.danger svg {
+  color: #d13438;
+}
+.mail-ribbon-command.danger:hover {
+  background: #fde7e9;
+  color: #a80000;
+}
+.mail-ribbon-command:disabled {
+  cursor: not-allowed;
+  color: #a19f9d;
+  opacity: .5;
+}
+.mail-ribbon-command small {
+  display: none;
+}
+.mail-ribbon-command.apply {
+  flex-direction: row;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #d2d0ce;
+  background: #ffffff;
+  color: #0078d4;
+  font-weight: 600;
+}
+.mail-ribbon-group select {
+  height: 28px;
+  border: 1px solid #d2d0ce;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #323130;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.mail-ribbon-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #616161;
+  cursor: pointer;
+  margin-left: auto;
+}
+.mail-ribbon-refresh:hover {
+  background: #f3f4f6;
+  color: #0078d4;
+}
+.mail-workspace.is-reading-message > .mail-ribbon {
+  display: flex !important;
+}
 .theme-dark .mail-ribbon { background: var(--surface); }
 .theme-dark .mail-ribbon-command.danger:hover, .theme-dark .mail-ribbon-command.danger:focus-visible { background: rgba(166,72,72,.16); }
 .sidebar {
@@ -3899,3 +4061,466 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 @media (max-width: 720px) {
   .mobile-detail-back { display: inline-flex; }
 }
+
+/* ==========================================================================
+   OUTLOOK WEB APP REPLICA THEME & ARCHITECTURE (Matching code.html)
+   ========================================================================== */
+
+/* 1. Global Outlook Viewport Container */
+.outlook-viewport {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #f0f2f5;
+  color: #242424;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  user-select: none;
+}
+
+/* 2. Top Global Outlook Header (48px, #0078d4) */
+.outlook-global-header {
+  height: 48px;
+  min-height: 48px;
+  background: #0078d4;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  flex-shrink: 0;
+  z-index: 50;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+.outlook-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 200px;
+}
+.outlook-header-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.outlook-header-btn:hover {
+  background: #005a9e;
+}
+.outlook-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+}
+.outlook-header-brand .brand-mark.small {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.outlook-header-brand .brand-mark.small img {
+  width: 22px;
+  height: 22px;
+}
+.outlook-brand-name {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.outlook-brand-badge {
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.outlook-header-center {
+  flex: 1;
+  max-width: 580px;
+  margin: 0 16px;
+}
+.outlook-search-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.outlook-search-icon {
+  position: absolute;
+  left: 10px;
+  color: #0078d4;
+  pointer-events: none;
+}
+.outlook-search-bar input {
+  width: 100%;
+  height: 32px;
+  background: #ffffff !important;
+  color: #242424 !important;
+  border: 0 !important;
+  border-radius: 4px !important;
+  padding: 0 30px 0 34px !important;
+  font-size: 12px !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08) !important;
+  outline: none !important;
+  transition: box-shadow 0.15s ease !important;
+}
+.outlook-search-bar input:focus {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #005a9e !important;
+}
+.outlook-search-clear {
+  position: absolute;
+  right: 6px;
+  background: transparent;
+  border: 0;
+  color: #616161;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 50%;
+}
+.outlook-search-clear:hover {
+  background: #edebe9;
+  color: #242424;
+}
+.outlook-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.outlook-user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  border: 1px solid #ffffff;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  margin-left: 6px;
+}
+
+/* 3. Top Ribbon Toolbar */
+.mail-ribbon {
+  display: flex !important;
+  flex-direction: column;
+  min-width: 0;
+  border-bottom: 1px solid #edebe9;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
+  z-index: 40;
+}
+.mail-ribbon-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  border-bottom: 1px solid #f3f4f6;
+  padding: 2px 14px 0;
+  background: #ffffff;
+}
+.mail-ribbon-tab {
+  position: relative;
+  border: 0;
+  background: transparent;
+  padding: 6px 12px 6px;
+  color: #616161;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+.mail-ribbon-tab:hover {
+  color: #242424;
+}
+.mail-ribbon-tab.active {
+  color: #0078d4;
+  font-weight: 600;
+  border-bottom-color: #0078d4;
+}
+.mail-ribbon-toolbar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 4px 12px;
+  background: #ffffff;
+  scrollbar-width: thin;
+}
+.mail-ribbon-split-btn {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+.mail-ribbon-split-btn .mail-ribbon-command.primary {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding: 0 10px 0 12px;
+  box-shadow: none;
+}
+.mail-ribbon-split-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  background: #0078d4;
+  color: #ffffff;
+  border: 0;
+  border-left: 1px solid #0066b3;
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+  padding: 0 6px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.mail-ribbon-split-arrow:hover {
+  background: #006abc;
+}
+.mail-ribbon-separator {
+  width: 1px;
+  height: 22px;
+  background: #edebe9;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.mail-ribbon-command {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 42px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #323130;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.mail-ribbon-command:hover:not(:disabled) {
+  background: #f3f4f6;
+  color: #201f1e;
+}
+.mail-ribbon-command:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.mail-ribbon-command svg {
+  margin-bottom: 2px;
+}
+
+/* 4. Main Workspace & Left App Rail */
+.outlook-main-container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  height: calc(100vh - 48px - 82px);
+}
+.outlook-app-rail {
+  width: 48px;
+  background: #f3f4f6;
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 12px;
+  flex-shrink: 0;
+  z-index: 30;
+}
+.outlook-rail-btn {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  border: 0;
+  background: transparent;
+  color: #616161;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.outlook-rail-btn:hover {
+  background: #e5e7eb;
+  color: #242424;
+}
+.outlook-rail-btn.active {
+  background: rgba(219, 234, 254, 0.7);
+  color: #0078d4;
+}
+.outlook-rail-btn.active::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 5px;
+  bottom: 5px;
+  width: 3px;
+  background: #0078d4;
+  border-radius: 0 2px 2px 0;
+}
+.outlook-rail-divider {
+  width: 24px;
+  height: 1px;
+  background: #d1d5db;
+  margin: 2px 0;
+}
+.outlook-rail-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: #0078d4;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 10px;
+  padding: 0 4px;
+  line-height: 14px;
+}
+
+/* 5. App Shell & Inner Columns Alignment */
+.app-shell {
+  display: grid !important;
+  grid-template-columns: 220px minmax(340px, 440px) minmax(400px, 1fr) !important;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  height: 100% !important;
+  overflow: hidden;
+  background: #f0f2f5;
+}
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px;
+  border-right: 1px solid #e5e7eb;
+  background: #fbfbfb;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.sidebar-top {
+  display: none !important;
+}
+.compose-button {
+  display: none !important;
+}
+.folder-nav {
+  gap: 2px;
+}
+.folder-link {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #4b5563;
+  transition: background 0.12s ease;
+}
+.folder-link:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+.folder-link.active {
+  background: #e5e7eb;
+  color: #0078d4;
+  font-weight: 600;
+}
+.folder-link em {
+  margin-left: auto;
+  color: #0078d4;
+  font-weight: 700;
+  font-size: 11px;
+  background: transparent;
+  padding: 0;
+}
+.mail-workspace {
+  display: flex !important;
+  grid-column: 2 / -1 !important;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+}
+.mail-columns {
+  display: grid !important;
+  grid-template-columns: minmax(340px, 440px) minmax(0, 1fr) !important;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.message-column {
+  border-right: 1px solid #e5e7eb;
+  background: #ffffff;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.reading-pane {
+  background: #ffffff;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+/* 6. Mobile Responsiveness */
+@media (max-width: 900px) {
+  .outlook-app-rail {
+    display: none !important;
+  }
+  .outlook-global-header {
+    padding: 0 8px;
+  }
+  .outlook-header-left {
+    min-width: unset;
+  }
+  .outlook-brand-badge {
+    display: none;
+  }
+  .sidebar-top {
+    display: flex !important;
+  }
+  .compose-button {
+    display: inline-flex !important;
+  }
+  .app-shell {
+    display: flex !important;
+    flex-direction: column;
+  }
+}
+
