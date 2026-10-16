@@ -5852,6 +5852,7 @@ input:focus, select:focus, textarea:focus {
     height: 52px !important;
     min-height: 52px !important;
     padding: 0 16px !important;
+    margin: 0 !important;
   }
 
   .settings-panel .panel-title .icon-button {
@@ -5867,27 +5868,36 @@ input:focus, select:focus, textarea:focus {
 
   .settings-sidebar {
     width: 100% !important;
-    max-height: 140px !important;
+    height: auto !important;
+    max-height: none !important;
+    flex-shrink: 0 !important;
     border-right: none !important;
     border-bottom: 1px solid #edebe9 !important;
     padding: 6px !important;
   }
 
   .settings-panel .settings-tabs {
+    flex: none !important;
+    height: auto !important;
+    min-height: 44px !important;
     flex-direction: row !important;
     overflow-x: auto !important;
     gap: 6px !important;
-    padding-bottom: 4px !important;
+    padding: 4px 8px !important;
   }
 
   .settings-panel .settings-tabs button {
     flex: 0 0 auto !important;
     width: auto !important;
-    padding: 0 12px !important;
-    height: 34px !important;
+    padding: 0 14px !important;
+    height: 36px !important;
     white-space: nowrap !important;
     border-left: none !important;
     border-bottom: 3px solid transparent !important;
+  }
+
+  .settings-sidebar-note {
+    display: none !important;
   }
 
   .settings-panel .settings-tabs button.active {
