@@ -1,18 +1,46 @@
 @import url("https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400..600&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
 
+/* Subtle Outlook custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c8c8c8;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a6a6a6;
+}
+
 :root {
-  --font-ui: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
-  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
-  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --font-ui: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "Segoe UI Mono", "Cascadia Code", "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
   font-family: var(--font-ui);
-  color: #172522;
-  background: #f4f7f4;
+  color: #242424;
+  background: #f0f2f5;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: #f4f7f4; }
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: #f0f2f5;
+  color: #242424;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+.text-xxs {
+  font-size: 0.65rem;
+}
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 .eyebrow { margin: 0 0 8px; color: #8190a5; font: 500 10px/1.2 var(--font-mono); letter-spacing: .14em; }
@@ -292,19 +320,19 @@ input:focus, textarea:focus, select:focus { border-color: #1f6b57; background: #
 .detail-labels .eyebrow { margin-right: .25rem; }
 .label-chip { display: inline-flex; align-items: center; gap: .25rem; border: 1px solid currentColor; border-radius: 999px; background: transparent; padding: .28rem .55rem; font-size: .75rem; }
 
-/* Postveil visual system: a quiet, paper-like mail desk with strong hierarchy. */
+/* Postveil visual system: Outlook-grade sovereign workspace layout. */
 :root {
-  --canvas: #f4f7f4;
+  --canvas: #f0f2f5;
   --surface: #ffffff;
-  --surface-muted: #f8fbf8;
-  --ink: #172522;
-  --ink-soft: #52635b;
-  --muted: #718078;
-  --faint: #a0ada5;
-  --line: #dce6df;
-  --line-strong: #c4d5ca;
-  --accent: #1f6b57;
-  --accent-soft: #e8f3ec;
+  --surface-muted: #fbfbfb;
+  --ink: #242424;
+  --ink-soft: #424242;
+  --muted: #616161;
+  --faint: #8a8886;
+  --line: #edebe9;
+  --line-strong: #d2d0ce;
+  --accent: #0078d4;
+  --accent-soft: #deecf9;
   --danger: #b64945;
   font-family: var(--font-ui);
   color: var(--ink);
