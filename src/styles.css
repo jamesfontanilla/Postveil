@@ -1952,18 +1952,18 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 
 /* Postveil workspace refresh: a quiet, dense mail desk with one clear visual language. */
 :root {
-  --canvas: #f5f6f3;
+  --canvas: #f0f2f5;
   --surface: #ffffff;
-  --surface-muted: #f8faf7;
-  --ink: #17221e;
-  --ink-soft: #3e4d46;
-  --muted: #718078;
-  --faint: #98a49e;
-  --line: #dce4de;
-  --line-strong: #c5d1c8;
-  --accent: #276b55;
-  --accent-soft: #eaf4ee;
-  --danger: #a8433c;
+  --surface-muted: #fbfbfb;
+  --ink: #242424;
+  --ink-soft: #424242;
+  --muted: #616161;
+  --faint: #8a8886;
+  --line: #edebe9;
+  --line-strong: #d2d0ce;
+  --accent: #0078d4;
+  --accent-soft: #deecf9;
+  --danger: #b64945;
   font-family: var(--font-ui);
   color: var(--ink);
   background: var(--canvas);
@@ -3568,25 +3568,23 @@ h1, h2, h3, h4,
   -webkit-text-fill-color: var(--public-deep) !important;
 }
 
-/* Postveil brand system: paper, ink, evergreen, and disciplined type. The
-   rules below are intentionally last so older experiments cannot reintroduce
-   gradients, glows, or the retired lime poster treatment. */
+/* Postveil sovereign system: crisp Outlook-grade typography, subtle scrollbars, and focused hierarchy. */
 :root {
-  --font-ui: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
-  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
-  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
-  --ink: #172522;
-  --ink-soft: #40534b;
-  --muted: #61736b;
-  --faint: #8a9a92;
-  --canvas: #f4f7f4;
+  --font-ui: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "Segoe UI Mono", "Cascadia Code", "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --ink: #242424;
+  --ink-soft: #424242;
+  --muted: #616161;
+  --faint: #8a8886;
+  --canvas: #f0f2f5;
   --surface: #ffffff;
-  --surface-muted: #f4f7f4;
-  --line: rgba(23, 37, 34, .12);
-  --line-strong: rgba(23, 37, 34, .24);
-  --accent: #1f6b58;
-  --accent-soft: #dce8e1;
-  --teal: #2aafa5;
+  --surface-muted: #fbfbfb;
+  --line: #edebe9;
+  --line-strong: #d2d0ce;
+  --accent: #0078d4;
+  --accent-soft: #deecf9;
+  --teal: #0078d4;
   --signal: #d98b5f;
   --danger: #b24a3d;
   color: var(--ink);
