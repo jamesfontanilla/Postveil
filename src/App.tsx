@@ -5885,13 +5885,23 @@ function MailboxApp({ session }: { session: Session }) {
         <div className="mini-brand">
           <span>P</span> Postveil
         </div>
-        <button
-          className="icon-button"
-          onClick={() => void loadMessages()}
-          aria-label="Refresh"
-        >
-          <RefreshCcw size={17} />
-        </button>
+        <div className="mobile-topbar-actions">
+          <button
+            className="icon-button"
+            onClick={() => void loadMessages()}
+            aria-label="Refresh"
+          >
+            <RefreshCcw size={17} />
+          </button>
+          <button
+            className="icon-button mobile-compose-btn"
+            onClick={() => openCompose()}
+            aria-label="New message"
+            title="New message"
+          >
+            <PenLine size={18} />
+          </button>
+        </div>
       </header>
       {mobileNav && <button className="mobile-nav-backdrop" type="button" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
       <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}>
