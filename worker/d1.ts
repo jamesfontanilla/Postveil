@@ -295,7 +295,6 @@ export async function createD1User(env: D1Env, email: string, password: string, 
 export async function verifyD1Password(env: D1Env, email: string, password: string, options: { allowUnverified?: boolean } = {}): Promise<{ user: D1User; session: D1Session } | null> {
   const row = await getUserByEmail(env, email);
   if (!row || String(row.status || "active") !== "active") return null;
-  if (row.locked_until && Date.parse(String(row.locked_until)) > Date.now()) return null;
   if (!options.allowUnverified && !row.email_verified_at) return null;
   const hash = await passwordHash(password, decode(String(row.password_salt)));
   if (hash !== String(row.password_hash)) return null;

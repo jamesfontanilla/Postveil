@@ -17,9 +17,9 @@
 }
 
 :root {
-  --font-ui: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
-  --font-display: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: "Segoe UI Mono", "Cascadia Code", "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --font-ui: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Fraunces", "Schibsted Grotesk", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
   font-family: var(--font-ui);
   color: #242424;
   background: #f0f2f5;
@@ -34,7 +34,7 @@ body {
   min-height: 100vh;
   background: #f0f2f5;
   color: #242424;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -331,8 +331,8 @@ input:focus, textarea:focus, select:focus { border-color: #1f6b57; background: #
   --faint: #8a8886;
   --line: #edebe9;
   --line-strong: #d2d0ce;
-  --accent: #0078d4;
-  --accent-soft: #deecf9;
+  --accent: #1f6b57;
+  --accent-soft: #e8f3ec;
   --danger: #b64945;
   font-family: var(--font-ui);
   color: var(--ink);
@@ -1961,8 +1961,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
   --faint: #8a8886;
   --line: #edebe9;
   --line-strong: #d2d0ce;
-  --accent: #0078d4;
-  --accent-soft: #deecf9;
+  --accent: #1f6b57;
+  --accent-soft: #e8f3ec;
   --danger: #b64945;
   font-family: var(--font-ui);
   color: var(--ink);
@@ -2015,9 +2015,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: #242424;
 }
 .mail-ribbon-tab.active {
-  color: #0078d4;
+  color: #1f6b57;
   font-weight: 600;
-  border-bottom-color: #0078d4;
+  border-bottom-color: #1f6b57;
 }
 .mail-ribbon-tab.active::after {
   display: none;
@@ -2025,7 +2025,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-ribbon-context-label {
   overflow: hidden;
   margin-left: auto;
-  color: #0078d4;
+  color: #1f6b57;
   font: 11px var(--font-mono);
   letter-spacing: .04em;
   text-overflow: ellipsis;
@@ -2093,7 +2093,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   height: 30px;
   min-height: 30px;
   border-radius: 4px;
-  background: #0078d4;
+  background: #1f6b57;
   color: #ffffff;
   padding: 0 12px;
   font-size: 12px;
@@ -2102,7 +2102,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 .mail-ribbon-command.primary:hover, .mail-ribbon-command.primary:focus-visible {
-  background: #006abc;
+  background: #175343;
   color: #ffffff;
 }
 .mail-ribbon-command.primary small {
@@ -2133,7 +2133,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   padding: 0 10px;
   border: 1px solid #d2d0ce;
   background: #ffffff;
-  color: #0078d4;
+  color: #1f6b57;
   font-weight: 600;
 }
 .mail-ribbon-group select {
@@ -2160,7 +2160,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .mail-ribbon-refresh:hover {
   background: #f3f4f6;
-  color: #0078d4;
+  color: #1f6b57;
 }
 .mail-workspace.is-reading-message > .mail-ribbon {
   display: flex !important;
@@ -3732,9 +3732,9 @@ h1, h2, h3, h4,
 
 /* Postveil sovereign system: crisp Outlook-grade typography, subtle scrollbars, and focused hierarchy. */
 :root {
-  --font-ui: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
-  --font-display: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: "Segoe UI Mono", "Cascadia Code", "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --font-ui: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Fraunces", "Schibsted Grotesk", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
   --ink: #242424;
   --ink-soft: #424242;
   --muted: #616161;
@@ -3744,9 +3744,9 @@ h1, h2, h3, h4,
   --surface-muted: #fbfbfb;
   --line: #edebe9;
   --line-strong: #d2d0ce;
-  --accent: #0078d4;
-  --accent-soft: #deecf9;
-  --teal: #0078d4;
+  --accent: #1f6b57;
+  --accent-soft: #e8f3ec;
+  --teal: #1f6b57;
   --signal: #d98b5f;
   --danger: #b24a3d;
   color: var(--ink);
@@ -4075,15 +4075,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   overflow: hidden;
   background: #f0f2f5;
   color: #242424;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif;
+  font-family: var(--font-ui);
   user-select: none;
 }
 
-/* 2. Top Global Outlook Header (48px, #0078d4, true 3-column optical centering) */
+/* 2. Top Global Header (48px, #1f6b57 Postveil Green, true 3-column optical centering) */
 .outlook-global-header {
   height: 48px !important;
   min-height: 48px !important;
-  background: #0078d4 !important;
+  background: #1f6b57 !important;
   color: #ffffff !important;
   display: grid !important;
   grid-template-columns: 240px 1fr 240px !important;
@@ -4113,7 +4113,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   transition: background 0.12s ease !important;
 }
 .outlook-header-btn:hover {
-  background: #005a9e !important;
+  background: #175343 !important;
 }
 .outlook-header-brand {
   display: flex !important;
@@ -4136,20 +4136,13 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   height: 22px !important;
 }
 .outlook-brand-name {
-  font-size: 16px !important;
-  font-weight: 600 !important;
+  font-size: 17px !important;
+  font-weight: 700 !important;
   letter-spacing: -0.02em !important;
+  font-family: var(--font-ui) !important;
 }
 .outlook-brand-badge {
-  height: 16px !important;
-  line-height: 14px !important;
-  font-size: 10px !important;
-  font-weight: 700 !important;
-  background: rgba(255, 255, 255, 0.22) !important;
-  padding: 1px 6px !important;
-  border-radius: 4px !important;
-  letter-spacing: 0.05em !important;
-  text-transform: uppercase !important;
+  display: none !important;
 }
 .outlook-header-center {
   display: flex !important;
@@ -4167,7 +4160,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 .outlook-search-icon {
   position: absolute !important;
   left: 10px !important;
-  color: #0078d4 !important;
+  color: #1f6b57 !important;
   pointer-events: none !important;
 }
 .outlook-search-bar input {
@@ -4184,7 +4177,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   transition: box-shadow 0.15s ease !important;
 }
 .outlook-search-bar input:focus {
-  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #005a9e !important;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #175343 !important;
 }
 .outlook-search-clear {
   position: absolute !important;
@@ -4289,8 +4282,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   color: #242424 !important;
 }
 .mail-ribbon-tab.active {
-  color: #0078d4 !important;
-  border-bottom-color: #0078d4 !important;
+  color: #1f6b57 !important;
+  border-bottom-color: #1f6b57 !important;
 }
 .mail-ribbon-toolbar {
   height: 44px !important;
@@ -4327,7 +4320,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   min-height: 32px !important;
   max-height: 32px !important;
   min-width: 96px !important;
-  background: #0078d4 !important;
+  background: #1f6b57 !important;
   color: #ffffff !important;
   padding: 0 12px !important;
   font-size: 12px !important;
@@ -4340,7 +4333,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   transition: background 0.12s ease !important;
 }
 .mail-ribbon-split-btn .mail-ribbon-command.primary:hover {
-  background: #006abc !important;
+  background: #175343 !important;
   color: #ffffff !important;
 }
 .mail-ribbon-split-btn .mail-ribbon-command.primary svg {
@@ -4357,10 +4350,10 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   min-height: 32px !important;
   max-height: 32px !important;
   width: 24px !important;
-  background: #0078d4 !important;
+  background: #1f6b57 !important;
   color: #ffffff !important;
   border: 0 !important;
-  border-left: 1px solid #0066b3 !important;
+  border-left: 1px solid #175343 !important;
   border-radius: 0 4px 4px 0 !important;
   padding: 0 !important;
   margin: 0 !important;
@@ -4368,7 +4361,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   transition: background 0.12s ease !important;
 }
 .mail-ribbon-split-arrow:hover {
-  background: #006abc !important;
+  background: #175343 !important;
   color: #ffffff !important;
 }
 .mail-ribbon-split-arrow svg {
@@ -4461,8 +4454,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   color: #242424 !important;
 }
 .outlook-rail-btn.active {
-  background: rgba(219, 234, 254, 0.7) !important;
-  color: #0078d4 !important;
+  background: #e8f3ec !important;
+  color: #1f6b57 !important;
 }
 .outlook-rail-btn.active::before {
   content: "" !important;
@@ -4471,7 +4464,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   top: 4px !important;
   bottom: 4px !important;
   width: 3px !important;
-  background: #0078d4 !important;
+  background: #1f6b57 !important;
   border-radius: 0 2px 2px 0 !important;
 }
 .outlook-rail-divider {
@@ -4484,7 +4477,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   position: absolute !important;
   top: -2px !important;
   right: -2px !important;
-  background: #0078d4 !important;
+  background: #1f6b57 !important;
   color: #ffffff !important;
   font-size: 9px !important;
   font-weight: 700 !important;
@@ -4539,14 +4532,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   color: #111827 !important;
 }
 .folder-link.active {
-  background: #eff6fc !important;
-  color: #0078d4 !important;
+  background: #e8f3ec !important;
+  color: #1f6b57 !important;
   font-weight: 600 !important;
   padding: 0 12px !important;
 }
 .folder-link em {
   margin-left: auto !important;
-  color: #0078d4 !important;
+  color: #1f6b57 !important;
   font-weight: 700 !important;
   font-size: 11px !important;
   background: transparent !important;
@@ -4636,9 +4629,9 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   color: #111827 !important;
 }
 .search-chip.active {
-  background: #eff6fc !important;
-  color: #0078d4 !important;
-  border-color: #c7e0f4 !important;
+  background: #e8f3ec !important;
+  color: #1f6b57 !important;
+  border-color: #c3decb !important;
   font-weight: 600 !important;
 }
 .message-row {
@@ -4648,8 +4641,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   gap: 10px !important;
 }
 .message-row.selected {
-  border-left-color: #0078d4 !important;
-  background: #eff6fc !important;
+  border-left-color: #1f6b57 !important;
+  background: #e8f3ec !important;
 }
 .message-row .avatar, .row-avatar {
   width: 32px !important;
@@ -4695,12 +4688,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   font-weight: 600 !important;
 }
 :focus-visible {
-  outline: 2px solid #0078d4 !important;
+  outline: 2px solid #1f6b57 !important;
   outline-offset: 1px !important;
 }
 input:focus, select:focus, textarea:focus {
-  border-color: #0078d4 !important;
-  box-shadow: 0 0 0 1px #0078d4 !important;
+  border-color: #1f6b57 !important;
+  box-shadow: 0 0 0 1px #1f6b57 !important;
 }
 
 /* 6. Mobile Responsiveness */
@@ -4768,7 +4761,7 @@ input:focus, select:focus, textarea:focus {
     width: 26px !important;
     height: 26px !important;
     border-radius: 6px !important;
-    background: #0078d4 !important;
+    background: #1f6b57 !important;
     color: #ffffff !important;
     font-size: 13px !important;
     font-weight: 700 !important;
@@ -4829,7 +4822,7 @@ input:focus, select:focus, textarea:focus {
     width: 100% !important;
     height: 40px !important;
     margin-bottom: 16px !important;
-    background: #0078d4 !important;
+    background: #1f6b57 !important;
     color: #ffffff !important;
     border: none !important;
     border-radius: 4px !important;
@@ -4880,7 +4873,7 @@ input:focus, select:focus, textarea:focus {
     padding: 0 8px !important;
     font-size: 14px !important;
     font-weight: 600 !important;
-    color: #0078d4 !important;
+    color: #1f6b57 !important;
     border: none !important;
     background: transparent !important;
     cursor: pointer !important;
@@ -5030,8 +5023,8 @@ input:focus, select:focus, textarea:focus {
 }
 
 .settings-search-field:focus-within {
-  border-color: #0078d4 !important;
-  box-shadow: 0 0 0 1px #0078d4 !important;
+  border-color: #1f6b57 !important;
+  box-shadow: 0 0 0 1px #1f6b57 !important;
 }
 
 .settings-search-field input {
@@ -5108,10 +5101,10 @@ input:focus, select:focus, textarea:focus {
 }
 
 .settings-panel .settings-tabs button.active {
-  background: #eff6fc !important;
-  color: #0078d4 !important;
+  background: #e8f3ec !important;
+  color: #1f6b57 !important;
   font-weight: 600 !important;
-  border-left: 3px solid #0078d4 !important;
+  border-left: 3px solid #1f6b57 !important;
 }
 
 .settings-panel .settings-tabs button svg {
@@ -5170,7 +5163,7 @@ input:focus, select:focus, textarea:focus {
 .settings-content-header .eyebrow {
   font-size: 11px !important;
   font-weight: 600 !important;
-  color: #0078d4 !important;
+  color: #1f6b57 !important;
   letter-spacing: 0.5px !important;
   margin-bottom: 2px !important;
 }
@@ -5261,9 +5254,9 @@ input:focus, select:focus, textarea:focus {
 
 .settings-panel input:not([type="checkbox"]):not([type="radio"]):focus,
 .settings-panel select:focus {
-  outline: 2px solid #0078d4 !important;
+  outline: 2px solid #1f6b57 !important;
   outline-offset: 1px !important;
-  border-color: #0078d4 !important;
+  border-color: #1f6b57 !important;
 }
 
 /* Standardized Form Buttons */
@@ -5273,7 +5266,7 @@ input:focus, select:focus, textarea:focus {
   font-size: 13px !important;
   font-weight: 600 !important;
   color: #ffffff !important;
-  background: #0078d4 !important;
+  background: #1f6b57 !important;
   border: none !important;
   border-radius: 4px !important;
   display: inline-flex !important;
@@ -5573,7 +5566,7 @@ input:focus, select:focus, textarea:focus {
   margin-left: auto !important;
   border: none !important;
   background: transparent !important;
-  color: #0078d4 !important;
+  color: #1f6b57 !important;
   font-size: 12px !important;
   font-weight: 600 !important;
   cursor: pointer !important;
@@ -5644,8 +5637,8 @@ input:focus, select:focus, textarea:focus {
 }
 
 .compose-mode-tabs button.is-active {
-  color: #0078d4 !important;
-  border-bottom-color: #0078d4 !important;
+  color: #1f6b57 !important;
+  border-bottom-color: #1f6b57 !important;
   font-weight: 600 !important;
 }
 
@@ -5681,7 +5674,7 @@ input:focus, select:focus, textarea:focus {
   height: 32px !important;
   min-width: 80px !important;
   padding: 0 16px !important;
-  background: #0078d4 !important;
+  background: #1f6b57 !important;
   color: #ffffff !important;
   border-radius: 4px !important;
   font-size: 13px !important;
@@ -5742,7 +5735,7 @@ input:focus, select:focus, textarea:focus {
   width: 8px !important;
   height: 8px !important;
   border-radius: 50% !important;
-  background: #0078d4 !important;
+  background: #1f6b57 !important;
   flex-shrink: 0 !important;
 }
 
@@ -5902,7 +5895,7 @@ input:focus, select:focus, textarea:focus {
 
   .settings-panel .settings-tabs button.active {
     border-left-color: transparent !important;
-    border-bottom-color: #0078d4 !important;
+    border-bottom-color: #1f6b57 !important;
   }
 
   .settings-content {

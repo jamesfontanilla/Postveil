@@ -5451,8 +5451,7 @@ function MailboxApp({ session }: { session: Session }) {
           </button>
           <div className="outlook-header-brand">
             <BrandMark small />
-            <span className="outlook-brand-name">Outlook</span>
-            <span className="outlook-brand-badge">Postveil</span>
+            <span className="outlook-brand-name">Postveil</span>
           </div>
         </div>
 

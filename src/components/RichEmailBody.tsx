@@ -264,6 +264,27 @@ export default function RichEmailBody({
 
   return (
     <section className="rich-email-reader" aria-label="Message content">
+      <div className="rich-email-toolbar">
+        <details className="rich-email-toolbar-menu">
+          <summary><SlidersHorizontal size={13} /> View</summary>
+          <div className="rich-email-toolbar-popover">
+            <div className="rich-email-toolbar-group rich-email-reader-tools" role="group" aria-label="Reading tools">
+              <button onClick={() => setZoom((value) => Math.max(75, value - 10))} aria-label="Zoom out" title="Zoom out"><Minus size={13} /></button>
+              <span className="rich-email-zoom" aria-live="polite">{zoom}%</span>
+              <button onClick={() => setZoom((value) => Math.min(150, value + 10))} aria-label="Zoom in" title="Zoom in"><Plus size={13} /></button>
+              <button className={darkEmail ? "is-active" : ""} onClick={() => setDarkEmail((value) => !value)} aria-pressed={darkEmail} title="Dark background">{darkEmail ? <Sun size={13} /> : <Moon size={13} />}</button>
+              <button className={!responsive ? "is-active" : ""} onClick={() => setResponsive((value) => !value)} aria-pressed={!responsive} title="Original width">{responsive ? "Original" : "Fit"}</button>
+              <button className={findOpen ? "is-active" : ""} onClick={() => setFindOpen((value) => !value)} aria-pressed={findOpen} title="Find in message"><Search size={13} /> Find</button>
+              <button className={speaking ? "is-active" : ""} onClick={toggleReadAloud} aria-pressed={speaking} title="Read aloud">{speaking ? <Square size={13} /> : <Volume2 size={13} />} Read</button>
+              <button onClick={() => setImmersiveOpen(true)} title="Immersive reader"><BookOpen size={13} /> Focus</button>
+              <button onClick={printEmail} title="Print message"><Printer size={13} /> Print</button>
+              <button onClick={openInNewWindow} title="Open in new window"><ExternalLink size={13} /> Pop out</button>
+            </div>
+          </div>
+        </details>
+        {stats.linkCount > 0 && <span className="rich-email-security-strip"><Link2 size={13} /> {stats.linkCount} link{stats.linkCount === 1 ? "" : "s"} protected</span>}
+      </div>
+
       {findOpen && <div className="rich-email-find" role="search" aria-label="Find in message"><Search size={14} /><input autoFocus value={findQuery} onChange={(event) => setFindQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); findNextMatch(); } }} placeholder="Find in this message" aria-label="Find in this message" /><span>{findQuery ? `${findMatchCount} match${findMatchCount === 1 ? "" : "es"}` : "Type to search"}</span><button onClick={findNextMatch} disabled={!findQuery.trim()}>Next</button><button onClick={() => { setFindOpen(false); setFindQuery(""); }} aria-label="Close message search"><X size={14} /></button></div>}
 
       {externalImageCount > 0 && (
