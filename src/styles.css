@@ -501,7 +501,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .sender-details dt { color: var(--muted); }
 .sender-details dd { min-width: 0; margin: 0; color: var(--ink-soft); overflow-wrap: anywhere; }
 .detail-labels { margin: 18px 0 0; padding-bottom: 17px; border-bottom: 1px solid var(--line); }
-.body-copy { max-width: 68ch; margin-top: 24px; font-size: 15px; line-height: 1.75; overflow-wrap: anywhere; }
+.body-copy { width: 100%; max-width: 100%; margin-top: 24px; font-size: 15px; line-height: 1.75; overflow-wrap: anywhere; }
 .body-copy-rich { max-width: 100%; }
 .email-html { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; overflow-y: hidden; overflow-wrap: anywhere; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; padding: 0 1px 5px; line-height: normal; }
 .email-html :where(p, h1, h2, h3, h4, h5, h6, blockquote, pre) { max-width: 100%; }
@@ -2244,7 +2244,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sender-line strong { color: var(--ink); }
 .sender-line small { color: var(--ink-soft); }
 .sender-line span { color: var(--muted); }
-.body-copy { max-width: 76ch; margin-top: 28px; color: var(--ink-soft); font-size: 15px; line-height: 1.75; overflow-wrap: anywhere; }
+.body-copy { width: 100%; max-width: 100%; margin-top: 28px; color: var(--ink-soft); font-size: 15px; line-height: 1.75; overflow-wrap: anywhere; }
 .trash-notice, .work-state-callout { border-radius: 3px; }
 .trust-lens { border-radius: 4px; background: var(--surface-muted); }
 .trust-lens-item, .trust-host { border-radius: 4px; }
@@ -3139,7 +3139,7 @@ h1, h2, h3, h4,
   padding-bottom: 14px;
 }
 .mail-workspace.is-reading-message .detail-head h2 {
-  max-width: 70ch;
+  max-width: none;
   margin-top: 4px;
   font-size: clamp(21px, 2.3vw, 29px);
   letter-spacing: -.035em;
@@ -6260,9 +6260,9 @@ input:focus, select:focus, textarea:focus {
 
 .reading-pane {
   background: #ffffff !important;
-  min-width: 0;
-  height: 100%;
-  overflow-y: auto;
+  min-width: 0 !important;
+  height: 100% !important;
+  overflow-y: auto !important;
 }
 
 .theme-dark .reading-pane {
@@ -6271,9 +6271,9 @@ input:focus, select:focus, textarea:focus {
 
 .message-detail {
   width: 100% !important;
-  max-width: 1050px !important;
+  max-width: 100% !important;
   margin: 0 auto !important;
-  padding: 20px 32px 60px !important;
+  padding: 24px clamp(24px, 4vw, 56px) 60px !important;
   box-sizing: border-box !important;
 }
 
@@ -6643,13 +6643,60 @@ input:focus, select:focus, textarea:focus {
   color: #242424;
 }
 
-/* Reading Canvas Body (Seamless, No Gray Card Box) */
+/* Reading Canvas Body (Seamless, Responsive, Evenly Spaced & Centered) */
+.body-copy,
+.body-copy-rich,
+.rich-email-reader {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
+
 .rich-email-surface {
+  width: 100% !important;
+  max-width: 100% !important;
   border: none !important;
   box-shadow: none !important;
   border-radius: 0 !important;
   padding: 16px 0 32px 0 !important;
   background: transparent !important;
+  box-sizing: border-box !important;
+}
+
+.rich-email-html {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Ensure structured email layout tables, cards, or centered containers balance gracefully in the middle */
+.rich-email-html > table,
+.rich-email-html table[align="center"],
+.rich-email-html .email-container,
+.rich-email-html .container,
+.rich-email-html center {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.rich-email-html table {
+  max-width: 100% !important;
+}
+
+.rich-email-html img {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+.conversation-section,
+.detail-actions,
+.trash-notice,
+.work-state-callout,
+.quoted-block {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 /* Modal Drawer for Trust Lens and Delivery Timeline */
