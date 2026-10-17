@@ -20,8 +20,7 @@ Security vulnerabilities must not be reported in a public issue. Follow the
 process in `SECURITY.md` instead.
 
 Database changes belong in a new ordered migration under
-`supabase/migrations/` and should include allow/deny coverage in
-`supabase/tests/`. Do not apply migrations to someone else's project.
+`migrations/` for Cloudflare D1. Do not apply migrations to someone else's project.
 
 ## Pull requests
 

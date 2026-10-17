@@ -27,7 +27,7 @@ test("recognizes recent rate-limit timestamps", () => {
   assert.equal(isRecent("2026-08-26T09:58:59.000Z", 60_000, now), false);
 });
 
-test("normalizes Supabase QR payloads without double-encoding image sources", () => {
+test("normalizes authenticator QR payloads without double-encoding image sources", () => {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';
   assert.equal(qrImageSource(svg), `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
   assert.equal(qrImageSource("data:image/svg+xml;base64,abc"), "data:image/svg+xml;base64,abc");

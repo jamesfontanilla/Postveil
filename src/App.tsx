@@ -92,7 +92,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { requireSupabase, supabase, type JsonRecord, type Session } from "./lib/supabase";
+import { requireSupabase, supabase, type JsonRecord, type Session } from "./lib/auth";
 import { sanitizeEmailHtml } from "./lib/email-html";
 import { qrImageSource } from "./lib/qr";
 import RichEmailBody from "./components/RichEmailBody";

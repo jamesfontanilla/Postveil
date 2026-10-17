@@ -19,7 +19,7 @@ import type {
   OnboardingStep,
 } from "../../types/mail";
 import { apiFetch } from "../../lib/api";
-import type { JsonRecord, Session } from "../../lib/supabase";
+import type { JsonRecord, Session } from "../../lib/auth";
 
 const ONBOARDING_STEPS = [
   { label: "Purpose", note: "Choose your starting point" },

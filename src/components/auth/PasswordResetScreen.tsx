@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import BrandMark from "../BrandMark";
 import { publicApiFetch } from "../../lib/api";
-import { requireSupabase } from "../../lib/supabase";
+import { requireSupabase } from "../../lib/auth";
 
 export default function PasswordResetScreen({ onComplete, token }: { onComplete: () => void; token?: string | null }) {
   const [password, setPassword] = useState("");

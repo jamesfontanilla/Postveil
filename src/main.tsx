@@ -2,9 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import App from "./App";
-import { initializeSupabase } from "./lib/supabase";
+import { initializeAuthClient } from "./lib/auth";
 
-void initializeSupabase().finally(() => {
+void initializeAuthClient().finally(() => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <App />

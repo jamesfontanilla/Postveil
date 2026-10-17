@@ -38,7 +38,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { requireSupabase, type Session } from "../../lib/supabase";
+import { requireSupabase, type Session } from "../../lib/auth";
 import { qrImageSource } from "../../lib/qr";
 import { apiFetch, apiUpload, ApiError } from "../../lib/api";
 import {

@@ -1,4 +1,4 @@
-import { requireSupabase, type Session } from "./supabase";
+import { requireSupabase, type Session } from "./auth";
 
 export class ApiError extends Error {
   status: number;

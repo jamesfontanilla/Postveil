@@ -2,7 +2,7 @@ import { useState, useEffect, type FormEvent } from "react";
 import { ShieldCheck } from "lucide-react";
 import BrandMark from "../BrandMark";
 import type { MfaFactor } from "../../types/mail";
-import { requireSupabase } from "../../lib/supabase";
+import { requireSupabase } from "../../lib/auth";
 import { qrImageSource } from "../../lib/qr";
 
 export function MfaSetupRequiredScreen({ onVerified }: { onVerified: () => void }) {

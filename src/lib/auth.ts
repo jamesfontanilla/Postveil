@@ -78,9 +78,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<AuthRes
     const errorMessage = payloadError && typeof payloadError === "object" && "message" in payloadError
       ? String((payloadError as JsonRecord).message)
       : String(payloadError ?? payload.message ?? `Request failed (${response.status})`);
-    if (!response.ok) return { data: {} as T, error: authError(errorMessage, response.status) };
-    // Worker auth endpoints use the same { data, error } envelope as the
-    // Supabase client. Unwrap it before the auth methods read session/user.
+    // Worker auth endpoints return standard { data, error } envelopes.
+    // Unwrap payload data before auth methods read session/user.
     const data = Object.prototype.hasOwnProperty.call(payload, "data") ? payload.data : payload;
     return { data: data as T, error: null };
   } catch (error) {
@@ -217,7 +216,7 @@ const auth = {
   registerPasskey: (_params?: JsonRecord) => unsupported<{}>("Passkeys are not available in the D1-only adapter yet."),
 };
 
-export const supabase = {
+export const authClient = {
   auth,
   channel: (_name: string): RealtimeChannel => {
     const channel: RealtimeChannel = {
@@ -230,10 +229,15 @@ export const supabase = {
   removeChannel: (_channel: unknown) => undefined,
 };
 
-export async function initializeSupabase() {
-  return supabase;
+export async function initializeAuthClient() {
+  return authClient;
 }
 
-export function requireSupabase() {
-  return supabase;
+export function requireAuthClient() {
+  return authClient;
 }
+
+// Backwards-compatible aliases
+export const supabase = authClient;
+export const initializeSupabase = initializeAuthClient;
+export const requireSupabase = requireAuthClient;

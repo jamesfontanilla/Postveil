@@ -3,7 +3,7 @@ import { ArrowLeft, ArrowRight, Check, Mail, ShieldCheck } from "lucide-react";
 import BrandMark from "../BrandMark";
 import { TURNSTILE_SITE_KEY } from "../../types/mail";
 import { publicApiFetch, recordExplicitSignIn } from "../../lib/api";
-import { requireSupabase } from "../../lib/supabase";
+import { requireSupabase } from "../../lib/auth";
 
 export default function AuthScreen({
   initialMode = "signin",
