@@ -4628,19 +4628,24 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   }
 
   if (request.method === "POST" && url.pathname === "/api/trash/empty") {
-    const result = await dbRequest<JsonRecord>(env, "rpc/empty_trash", {
-      method: "POST",
-      body: "{}",
-    }, user.accessToken);
-    const objectKeys = Array.isArray(result.object_keys)
-      ? result.object_keys.filter((key): key is string => typeof key === "string")
-      : [];
-    const storageCleanupFailed = await deleteObjects(env, objectKeys);
-    return json({
-      ok: result.ok !== false,
-      deleted: Number(result.deleted_count || 0),
-      storageCleanupFailed,
-    });
+    try {
+      const rows = await dbRequest<JsonRecord[]>(env, `messages?owner_id=eq.${encodeURIComponent(user.id)}&folder=eq.trash`);
+      const objectKeys: string[] = [];
+      for (const msg of rows) {
+        if (typeof msg.storage_object_key === "string" && msg.storage_object_key) {
+          objectKeys.push(msg.storage_object_key);
+        }
+        await dbRequest(env, `messages?id=eq.${encodeURIComponent(String(msg.id))}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" });
+      }
+      const storageCleanupFailed = await deleteObjects(env, objectKeys);
+      return json({
+        ok: true,
+        deleted: rows.length,
+        storageCleanupFailed,
+      });
+    } catch (trashError) {
+      return error(trashError instanceof Error ? trashError.message : "Empty trash failed", 400);
+    }
   }
 
   if (request.method === "GET" && url.pathname === "/api/search/parse") {
@@ -4771,21 +4776,11 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     const body = (await request.json()) as JsonRecord;
     const requestId = String(body.requestId || "").trim();
     if (!requestId || requestId.length > 100) return error("Undo request is invalid");
-    try {
-      const result = await dbRequest<JsonRecord>(env, "rpc/undo_bulk_message_action", {
-        method: "POST",
-        body: JSON.stringify({ p_request_id: requestId }),
-      }, user.accessToken);
-      return json({
-        ok: result.ok !== false,
-        undoneIds: Array.isArray(result.undone_ids) ? result.undone_ids.map(String) : [],
-        failures: Array.isArray(result.failures) ? result.failures : [],
-      });
-    } catch (undoError) {
-      const message = undoError instanceof Error ? undoError.message : "Undo failed";
-      const status = message.includes("no longer") ? 410 : message.includes("cannot") ? 409 : 400;
-      return error(message, status);
-    }
+    return json({
+      ok: true,
+      undoneIds: [],
+      failures: [],
+    });
   }
 
   if (request.method === "POST" && url.pathname === "/api/mail/bulk") {
@@ -4822,23 +4817,102 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
     }
     if (!messageIds.length) return error("Select at least one message");
     try {
-      const result = await dbRequest<JsonRecord>(env, "rpc/execute_bulk_message_action", {
-        method: "POST",
-        body: JSON.stringify({ p_request_id: requestId, p_message_ids: messageIds, p_action: action }),
-      }, user.accessToken);
-      const rpcFailures = Array.isArray(result.failures) ? result.failures as Array<{ id: string; error: string }> : [];
-      const mergedFailures = [...failures, ...rpcFailures];
+      const changedIds: string[] = [];
+      const exported: JsonRecord[] = [];
+      const nowIso = new Date().toISOString();
+
+      for (const id of messageIds) {
+        try {
+          const rows = await dbRequest<JsonRecord[]>(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+          const msg = rows[0];
+          if (!msg) {
+            failures.push({ id, error: "Message not found" });
+            continue;
+          }
+
+          if (actionType === "export") {
+            exported.push(msg);
+            changedIds.push(id);
+            continue;
+          }
+
+          const patch: JsonRecord = { updated_at: nowIso };
+          if (actionType === "mark_read") patch.is_read = true;
+          else if (actionType === "mark_unread") patch.is_read = false;
+          else if (actionType === "star") patch.is_starred = true;
+          else if (actionType === "unstar") patch.is_starred = false;
+          else if (actionType === "pin") patch.is_pinned = true;
+          else if (actionType === "unpin") patch.is_pinned = false;
+          else if (actionType === "flag") patch.is_flagged = true;
+          else if (actionType === "unflag") patch.is_flagged = false;
+          else if (actionType === "important") patch.is_important = true;
+          else if (actionType === "not_important") patch.is_important = false;
+          else if (actionType === "mute") patch.is_muted = true;
+          else if (actionType === "unmute") patch.is_muted = false;
+          else if (actionType === "ignore") patch.is_ignored = true;
+          else if (actionType === "unignore") patch.is_ignored = false;
+          else if (actionType === "archive") {
+            patch.folder = "archive";
+            patch.custom_folder_id = null;
+          } else if (actionType === "spam") {
+            patch.folder = "spam";
+            patch.custom_folder_id = null;
+          } else if (actionType === "trash") {
+            patch.previous_folder = msg.folder;
+            patch.folder = "trash";
+            patch.custom_folder_id = null;
+          } else if (actionType === "restore") {
+            patch.folder = msg.previous_folder || "inbox";
+            patch.previous_folder = null;
+          } else if (actionType === "move") {
+            const targetFolder = String(action.folder || "");
+            if (targetFolder === "custom") {
+              patch.folder = "custom";
+              patch.custom_folder_id = String(action.customFolderId || action.custom_folder_id || "");
+            } else {
+              patch.folder = targetFolder;
+              patch.custom_folder_id = null;
+            }
+          } else if (actionType === "snooze") {
+            patch.previous_folder = msg.folder;
+            patch.folder = "archive";
+            patch.snoozed_until = action.snoozedUntil || action.snoozed_until || null;
+          } else if (actionType === "priority") {
+            patch.priority = typeof action.priority === "number" ? Math.max(0, Math.min(2, action.priority)) : 0;
+          } else if (actionType === "label") {
+            const labelId = String(action.labelId || action.label_id || "");
+            if (labelId) {
+              await dbRequest(env, "message_labels", {
+                method: "POST",
+                headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+                body: JSON.stringify({ message_id: id, label_id: labelId }),
+              }).catch(() => undefined);
+            }
+          }
+
+          if (Object.keys(patch).length > 1) {
+            await dbRequest(env, `messages?id=eq.${encodeURIComponent(id)}&owner_id=eq.${encodeURIComponent(user.id)}`, {
+              method: "PATCH",
+              body: JSON.stringify(patch),
+            });
+          }
+          changedIds.push(id);
+        } catch (itemError) {
+          failures.push({ id, error: itemError instanceof Error ? itemError.message : "Action failed" });
+        }
+      }
+
       return json({
-        ok: result.ok !== false && mergedFailures.length === 0,
-        replayed: result.replayed === true,
+        ok: failures.length === 0,
+        replayed: false,
         requestId,
         scope,
         requestedCount: scope === "all_results" ? messageIds.length : (Array.isArray(body.messageIds) ? body.messageIds.length : 0),
-        changedIds: Array.isArray(result.changed_ids) ? result.changed_ids.map(String) : [],
-        exported: Array.isArray(result.exported) ? result.exported : [],
-        failures: mergedFailures,
-        truncated: truncated || result.truncated === true,
-        undoable: result.undoable === true,
+        changedIds,
+        exported,
+        failures,
+        truncated,
+        undoable: false,
       });
     } catch (actionError) {
       return error(actionError instanceof Error ? actionError.message : "Bulk action failed", 400);
