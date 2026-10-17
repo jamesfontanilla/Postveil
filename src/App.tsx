@@ -98,6 +98,8 @@ import { qrImageSource } from "./lib/qr";
 import RichEmailBody from "./components/RichEmailBody";
 import BrandMark from "./components/BrandMark";
 import PublicHome from "./components/auth/PublicHome";
+import AccountsHub from "./components/accounts/AccountsHub";
+import OAuthConsentCard from "./components/accounts/OAuthConsentCard";
 import PasswordResetScreen from "./components/auth/PasswordResetScreen";
 import AuthScreen from "./components/auth/AuthScreen";
 import { MfaSetupRequiredScreen, MfaChallengeScreen } from "./components/auth/MfaScreens";
@@ -230,7 +232,17 @@ function detailIdentityForMessage(message: Message, contacts: Contact[], mailbox
 function MailboxApp({ session }: { session: Session }) {
   const { confirm, prompt } = useAppDialog();
   const imagePreferenceKey = `postveil.load_remote_images:${session.user.id}`;
-  const [view, setView] = useState<"mail" | "calendar" | "tasks">("mail");
+  const [view, setView] = useState<"mail" | "calendar" | "tasks" | "accounts">(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (
+      params.get("view") === "accounts" ||
+      window.location.hostname.startsWith("accounts.") ||
+      window.location.pathname.startsWith("/accounts")
+    ) {
+      return "accounts";
+    }
+    return "mail";
+  });
   const [folder, setFolder] = useState<ViewKey>("inbox");
   const [messages, setMessages] = useState<Message[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
@@ -1213,6 +1225,22 @@ function MailboxApp({ session }: { session: Session }) {
     setRibbonTab(next);
     window.requestAnimationFrame(() => document.getElementById(`mail-ribbon-tab-${next}`)?.focus());
   }
+  if (view === "accounts") {
+    return (
+      <AccountsHub
+        currentUserEmail={session.user.email}
+        currentUserName={displayName(session.user.email || "James")}
+        onBackToMail={() => {
+          setView("mail");
+          const url = new URL(window.location.href);
+          url.searchParams.delete("view");
+          window.history.replaceState({}, "", url.toString());
+        }}
+        onSignOut={() => void requireSupabase().auth.signOut()}
+      />
+    );
+  }
+
   return (
     <div
       className={`outlook-viewport theme-${settings.theme || "light"} density-${settings.density || "comfortable"}`}
@@ -2105,6 +2133,13 @@ function MailboxApp({ session }: { session: Session }) {
           >
             <HardDrive size={18} />
           </button>
+          <button
+            className="outlook-rail-btn"
+            onClick={() => setView("accounts")}
+            title="Postveil Account & Sovereignty Hub"
+          >
+            <ShieldCheck size={18} />
+          </button>
 
           <div className="outlook-rail-divider" />
 
@@ -2372,7 +2407,7 @@ function MailboxApp({ session }: { session: Session }) {
           </button>
         </nav>
         <div className="sidebar-spacer" />
-        <div className="account-chip">
+        <div className="account-chip" onClick={() => setView("accounts")} style={{ cursor: "pointer" }} title="Manage your Postveil Account">
           <div className="avatar">
             {(session.user.email || "J").slice(0, 1).toUpperCase()}
           </div>
@@ -3295,9 +3330,24 @@ function AppContent() {
     setShowPublicHome(false);
     setAuthMode("signin");
   }} />;
-  if (!session) return showPublicHome
+  if (!session) {
+    if (window.location.search.includes("view=consent") || window.location.search.includes("oauth=test")) {
+      return (
+        <OAuthConsentCard
+          onConsent={(shareReal, alias) => {
+            alert(`Authorized! Sharing: ${shareReal ? "Real Email" : alias}`);
+            window.location.href = "/";
+          }}
+          onCancel={() => {
+            window.location.href = "/";
+          }}
+        />
+      );
+    }
+    return showPublicHome
     ? <PublicHome onSignIn={() => { setAuthMode("signin"); setShowPublicHome(false); }} onSignUp={() => { setAuthMode("signup"); setShowPublicHome(false); }} />
     : <AuthScreen initialMode={authMode} initialNotice={emailVerificationNotice} onBack={() => setShowPublicHome(true)} />;
+  }
   if (mfaSetupRequired) return <MfaSetupRequiredScreen onVerified={() => { setMfaSetupRequired(false); setMfaRequired(false); }} />;
   if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
   if (!onboardingChecked) return <div className="loading-screen"><BrandMark /><p>Preparing your private desk…</p></div>;

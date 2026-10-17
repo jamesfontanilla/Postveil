@@ -5116,6 +5116,11 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/share/") || url.pathname.startsWith("/api/share/")) { try { return protectedHeaders(await handleConfidentialRoute(request, env)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Message could not be opened", 500); } }
     if (url.pathname.startsWith("/api/")) { try { return protectedHeaders(await api(request, env, ctx)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
+    if (url.pathname === "/accounts" || url.pathname === "/accounts/" || url.hostname.startsWith("accounts.")) {
+      const assetRequest = new Request(new URL("/index.html?view=accounts", request.url), request);
+      const accountsAsset = await env.ASSETS.fetch(assetRequest);
+      return protectedHeaders(accountsAsset);
+    }
     const assetResponse = await env.ASSETS.fetch(request);
     const noStoreAsset = url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest";
     return protectedHeaders(assetResponse, noStoreAsset);

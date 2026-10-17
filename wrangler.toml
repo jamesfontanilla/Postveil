@@ -55,3 +55,7 @@ CLOUDFLARE_EMAIL_WORKER_NAME = "postveil"
 [[routes]]
 pattern = "postveil.jamesfontanilla.com"
 custom_domain = true
+
+[[routes]]
+pattern = "accounts.postveil.jamesfontanilla.com"
+custom_domain = true
