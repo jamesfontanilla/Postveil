@@ -1,12 +1,4 @@
 import { SESv2Client, CreateEmailIdentityCommand, GetEmailIdentityCommand } from "@aws-sdk/client-sesv2";
-import {
-  SESClient,
-  CreateReceiptRuleSetCommand,
-  CreateReceiptRuleCommand,
-  UpdateReceiptRuleCommand,
-  SetActiveReceiptRuleSetCommand,
-  DescribeActiveReceiptRuleSetCommand,
-} from "@aws-sdk/client-ses";
 import PostalMime from "postal-mime";
 import { DOMParser as XmlDomParser } from "@xmldom/xmldom";
 import {

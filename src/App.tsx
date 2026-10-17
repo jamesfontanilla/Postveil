@@ -271,7 +271,6 @@ type RetentionPolicy = {
 };
 type ScreeningEvent = { id: string; decision: string; previous_folder?: string | null; created_at: string; restored_at?: string | null };
 type TrustData = Message & { screening_history?: ScreeningEvent[] };
-type DeliveryInspection = { message: Message; attempts: Array<Record<string, unknown>>; events: Array<Record<string, unknown>> };
 type Signature = {
   id: string;
   name: string;
@@ -585,17 +584,6 @@ function workDueLabel(value?: string | null) {
   if (!value) return "No follow-up date";
   const date = new Date(value);
   return date.getTime() <= Date.now() ? `Overdue · ${date.toLocaleString()}` : `Follow up · ${date.toLocaleString()}`;
-}
-function splitQuotedBody(value: string) {
-  const lines = value.split(/\r?\n/);
-  const quoteStart = lines.findIndex((line, index) =>
-    index > 0 && (/^On .+wrote:\s*$/i.test(line.trim()) || /^>/.test(line.trim())),
-  );
-  if (quoteStart < 0) return { body: value.trim(), quote: "" };
-  return {
-    body: lines.slice(0, quoteStart).join("\n").trim(),
-    quote: lines.slice(quoteStart).join("\n").trim(),
-  };
 }
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
@@ -1576,489 +1564,6 @@ function MfaChallengeScreen({ onVerified }: { onVerified: () => void }) {
   );
 }
 
-function LegacyCompose({
-  mailboxes,
-  signatures,
-  undoSeconds,
-  seed,
-  onClose,
-  onSent,
-}: {
-  mailboxes: Mailbox[];
-  signatures: Signature[];
-  undoSeconds: 0 | 10 | 20 | 30;
-  seed?: ComposeSeed;
-  onClose: () => void;
-  onSent: () => void;
-}) {
-  const defaultMailbox =
-    mailboxes.find((mailbox) => mailbox.is_default) || mailboxes[0];
-  const [fromAddress, setFromAddress] = useState(defaultMailbox?.address || "");
-  const [sendMode, setSendMode] = useState<"send_as" | "send_on_behalf">("send_as");
-  const [to, setTo] = useState(seed?.to || "");
-  const [cc, setCc] = useState(seed?.cc || "");
-  const [bcc, setBcc] = useState("");
-  const [subject, setSubject] = useState(seed?.subject || "");
-  const [text, setText] = useState(seed?.text || "");
-  const [scheduledAt, setScheduledAt] = useState("");
-  const [draftId, setDraftId] = useState(seed?.draftId || "");
-  const [attachments, setAttachments] = useState<
-    Array<{
-      filename: string;
-      object_key: string;
-      byte_size: number;
-      content_type?: string;
-    }>
-  >([]);
-  const [signatureId, setSignatureId] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [uploading, setUploading] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [showCcBcc, setShowCcBcc] = useState(Boolean(seed?.cc));
-  const [showMoreOptions, setShowMoreOptions] = useState(false);
-  const [openTrackingEnabled, setOpenTrackingEnabled] = useState(false);
-  const [clickTrackingEnabled, setClickTrackingEnabled] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [error, setError] = useState("");
-  const [warnings, setWarnings] = useState<Array<{ code: string; title: string; detail: string }>>([]);
-  const idempotencyKeyRef = useRef(crypto.randomUUID());
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const selectedMailbox = mailboxes.find((mailbox) => mailbox.address === fromAddress);
-  useEffect(() => {
-    if (!selectedMailbox?.is_shared) { setSendMode("send_as"); return; }
-    if (sendMode === "send_as" && selectedMailbox.can_send_as) return;
-    if (sendMode === "send_on_behalf" && selectedMailbox.can_send_on_behalf) return;
-    setSendMode(selectedMailbox.can_send_as ? "send_as" : "send_on_behalf");
-  }, [selectedMailbox?.id, selectedMailbox?.is_shared, selectedMailbox?.can_send_as, selectedMailbox?.can_send_on_behalf, sendMode]);
-  useEffect(() => {
-    const available = mailboxes.filter((mailbox) => mailbox.can_send);
-    if (!available.length) { setFromAddress(""); return; }
-    if (!available.some((mailbox) => mailbox.address === fromAddress)) setFromAddress(available[0].address);
-  }, [mailboxes, fromAddress]);
-  const saveDraft = useCallback(async () => {
-    if (!fromAddress || (!to.trim() && !subject.trim() && !text.trim())) return;
-    setSaving(true);
-    try {
-      const saved = await apiFetch<Message>("/api/drafts", {
-        method: "POST",
-        body: JSON.stringify({
-          id: draftId || undefined,
-          fromAddress,
-          to,
-          cc,
-          bcc,
-          subject,
-          text,
-        }),
-      });
-      if (saved?.id) setDraftId(saved.id);
-      setLastSavedAt(new Date());
-    } catch (draftError) {
-      setError(
-        draftError instanceof Error
-          ? draftError.message
-          : "Draft could not be saved",
-      );
-    } finally {
-      setSaving(false);
-    }
-  }, [bcc, cc, draftId, fromAddress, subject, text, to]);
-  useEffect(() => {
-    const timer = window.setTimeout(() => void saveDraft(), 3000);
-    return () => window.clearTimeout(timer);
-  }, [saveDraft]);
-  function chooseSignature(id: string) {
-    setSignatureId(id);
-    const signature = signatures.find((item) => item.id === id);
-    if (signature && !text.includes(signature.text_body))
-      setText(
-        (current) => `${current}${current ? "\n\n" : ""}${signature.text_body}`,
-      );
-  }
-  async function uploadFiles(files: File[]) {
-    if (!files.length) return;
-    setUploading((current) => current + files.length);
-    setError("");
-    for (const file of files) {
-      try {
-        const item = await apiUpload<{
-          filename: string;
-          object_key: string;
-          byte_size: number;
-          content_type?: string;
-        }>("/api/attachments", file, { fromAddress });
-        setAttachments((current) => [...current, item]);
-      } catch (uploadError) {
-        setError(
-          uploadError instanceof Error
-            ? uploadError.message
-            : "Attachment upload failed",
-        );
-      } finally {
-        setUploading((current) => Math.max(0, current - 1));
-      }
-    }
-  }
-  async function upload(event: ChangeEvent<HTMLInputElement>) {
-    await uploadFiles(Array.from(event.target.files || []));
-    event.target.value = "";
-  }
-  function removeAttachment(objectKey: string) {
-    setAttachments((current) =>
-      current.filter((attachment) => attachment.object_key !== objectKey),
-    );
-  }
-  function handleDragOver(event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    setIsDragging(true);
-  }
-  function handleDragLeave(event: DragEvent<HTMLElement>) {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null))
-      setIsDragging(false);
-  }
-  async function handleDrop(event: DragEvent<HTMLElement>) {
-    event.preventDefault();
-    setIsDragging(false);
-    await uploadFiles(Array.from(event.dataTransfer.files));
-  }
-  function draftStatus() {
-    if (saving) return "Saving draft…";
-    if (uploading) return `Uploading ${uploading} file${uploading === 1 ? "" : "s"}…`;
-    if (lastSavedAt) return `Saved ${lastSavedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
-    if (draftId) return "Draft saved";
-    return "Draft saves automatically";
-  }
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      await apiFetch("/api/send", {
-        method: "POST",
-        body: JSON.stringify({
-          fromAddress,
-          sendMode,
-          to,
-          cc,
-          bcc,
-          subject,
-          text,
-          scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
-          undoSendSeconds: undoSeconds,
-          idempotencyKey: idempotencyKeyRef.current,
-          warningsAcknowledged: warnings.map((warning) => warning.code),
-          threadId: seed?.threadId,
-          inReplyTo: seed?.inReplyTo,
-          references: seed?.references,
-          attachments,
-          openTrackingEnabled,
-          clickTrackingEnabled,
-        }),
-      });
-      onSent();
-      onClose();
-    } catch (sendError) {
-      if (sendError instanceof ApiError && Array.isArray(sendError.payload.warnings)) {
-        setWarnings(sendError.payload.warnings as Array<{ code: string; title: string; detail: string }>);
-        setError("");
-      } else {
-        setError(
-          sendError instanceof Error
-            ? sendError.message
-            : "The message could not be sent",
-        );
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-  if (isMinimized) {
-    return (
-      <div className="compose-minimized" role="dialog" aria-label="Minimized draft">
-        <button
-          type="button"
-          className="compose-minimized-main"
-          onClick={() => setIsMinimized(false)}
-        >
-          <span className="compose-minimized-dot" />
-          <span>
-            <strong>{subject.trim() || "New message"}</strong>
-            <small>{draftStatus()}</small>
-          </span>
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={onClose}
-          aria-label="Close draft"
-          title="Close draft"
-        >
-          <X size={16} />
-        </button>
-      </div>
-    );
-  }
-  return (
-    <div className="compose-overlay" role="dialog" aria-modal="true" aria-labelledby="compose-title">
-      <form
-        className={`compose-card${isExpanded ? " compose-card-expanded" : ""}`}
-        onSubmit={send}
-      >
-        <div className="compose-head">
-          <div>
-            <p className="eyebrow">
-              {seed?.to ? "REPLY / FORWARD" : "NEW MESSAGE"}
-            </p>
-            <h2 id="compose-title">{seed?.to ? "Continue the thread" : "New message"}</h2>
-            <span className="compose-subtitle">
-              {seed?.to ? "Your reply stays connected to this conversation." : "A private message from your mailbox."}
-            </span>
-          </div>
-          <div className="compose-head-actions">
-            <button
-              type="button"
-              className="icon-button"
-              onClick={() => setIsMinimized(true)}
-              aria-label="Minimize draft"
-              title="Minimize draft"
-            >
-              <Minimize2 size={16} />
-            </button>
-            <button
-              type="button"
-              className="icon-button compose-expand-button"
-              onClick={() => setIsExpanded((current) => !current)}
-              aria-label={isExpanded ? "Restore compose size" : "Expand compose"}
-              title={isExpanded ? "Restore compose size" : "Expand compose"}
-            >
-              <Maximize2 size={16} />
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              onClick={onClose}
-              aria-label="Close draft"
-              title="Close draft"
-            >
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-        <div className="compose-fields">
-          <div className="compose-recipient-row">
-            <label className="compose-field-inline">
-              From
-              <select
-                value={fromAddress}
-                onChange={(event) => setFromAddress(event.target.value)}
-                name="from"
-              >
-                {mailboxes
-                  .filter((mailbox) => mailbox.can_send)
-                  .map((mailbox) => (
-                    <option key={mailbox.id} value={mailbox.address}>
-                      {mailbox.display_name ? `${mailbox.display_name} · ${mailbox.address}` : mailbox.address}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            {selectedMailbox?.is_shared && (
-              <label className="compose-field-inline">
-                Send mode
-                <select value={sendMode} onChange={(event) => setSendMode(event.target.value as "send_as" | "send_on_behalf")}>
-                  {selectedMailbox.can_send_as && <option value="send_as">Send as</option>}
-                  {selectedMailbox.can_send_on_behalf && <option value="send_on_behalf">Send on behalf</option>}
-                </select>
-              </label>
-            )}
-            <button
-              type="button"
-              className="compose-recipient-toggle"
-              onClick={() => setShowCcBcc((current) => !current)}
-              aria-expanded={showCcBcc}
-            >
-              {showCcBcc ? "Hide Cc/Bcc" : "Cc / Bcc"}
-            </button>
-          </div>
-          <label>
-            To
-            <input
-              required
-              name="to"
-              type="email"
-              value={to}
-              onChange={(event) => setTo(event.target.value)}
-              placeholder="recipient@example.com…"
-              autoComplete="email"
-            />
-          </label>
-          {showCcBcc && (
-            <div className="compose-recipient-grid">
-              <label>
-                Cc
-                <input
-                  name="cc"
-                  value={cc}
-                  onChange={(event) => setCc(event.target.value)}
-                  placeholder="Optional…"
-                  autoComplete="email"
-                />
-              </label>
-              <label>
-                Bcc
-                <input
-                  name="bcc"
-                  value={bcc}
-                  onChange={(event) => setBcc(event.target.value)}
-                  placeholder="Optional…"
-                  autoComplete="email"
-                />
-              </label>
-            </div>
-          )}
-          <label>
-            Subject
-            <input
-              name="subject"
-              value={subject}
-              onChange={(event) => setSubject(event.target.value)}
-              placeholder="What is this about?"
-            />
-          </label>
-          <label className="message-input">
-            Message
-            <textarea
-              required
-              name="message"
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder="Start writing…"
-              rows={isExpanded ? 13 : 8}
-            />
-          </label>
-        </div>
-        <div className="compose-option-row">
-          <button
-            type="button"
-            className="compose-option-button"
-            onClick={() => setShowMoreOptions((current) => !current)}
-            aria-expanded={showMoreOptions}
-          >
-            <MoreHorizontal size={15} /> More options
-          </button>
-          {showMoreOptions && signatures.length > 0 && (
-            <label className="compose-signature-select">
-              <Tag size={14} aria-hidden="true" />
-              <span className="sr-only">Signature</span>
-              <select
-                value={signatureId}
-                onChange={(event) => chooseSignature(event.target.value)}
-                aria-label="Add signature"
-              >
-                <option value="">Add signature</option>
-                {signatures.map((signature) => (
-                  <option key={signature.id} value={signature.id}>
-                    {signature.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-           {showMoreOptions && (
-             <label className="schedule-field">
-              <Clock3 size={14} aria-hidden="true" />
-              <span>Send later</span>
-              <input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(event) => setScheduledAt(event.target.value)}
-                aria-label="Schedule send"
-               />
-             </label>
-           )}
-           {showMoreOptions && (
-             <div className="compose-tracking-controls" aria-label="Tracking controls">
-               <label className="checkbox-row"><input type="checkbox" checked={openTrackingEnabled} onChange={(event) => setOpenTrackingEnabled(event.target.checked)} /> Track opens</label>
-               <label className="checkbox-row"><input type="checkbox" checked={clickTrackingEnabled} onChange={(event) => setClickTrackingEnabled(event.target.checked)} /> Track link clicks</label>
-             </div>
-           )}
-         </div>
-        <div
-          className={`attachment-dropzone${isDragging ? " is-dragging" : ""}`}
-          role="group"
-          aria-label="Attachment drop zone"
-          aria-describedby="attachment-help"
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={(event) => void handleDrop(event)}
-        >
-          <UploadCloud size={18} aria-hidden="true" />
-          <div>
-            <strong>{isDragging ? "Drop files to attach" : "Add attachments"}</strong>
-            <span id="attachment-help">Drag files here or choose from your device · 15 MB each</span>
-          </div>
-          <label className="file-button">
-            <Paperclip size={15} /> Attach files
-            <input ref={fileInputRef} type="file" multiple onChange={upload} />
-          </label>
-        </div>
-        {warnings.length > 0 && (
-          <div className="compose-warning" role="alert">
-            <div className="compose-warning-head"><AlertTriangle size={15} /><strong>Review before sending</strong></div>
-            {warnings.map((warning) => <p key={warning.code}><strong>{warning.title}.</strong> {warning.detail}</p>)}
-            <small>Send again to confirm these checks.</small>
-          </div>
-        )}
-        <div className="attachment-strip" aria-live="polite">
-          {attachments.map((attachment) => (
-            <span className="attachment-chip" key={attachment.object_key}>
-              <Paperclip size={13} aria-hidden="true" />
-              <span className="attachment-chip-copy">
-                <strong>{attachment.filename}</strong>
-                <small>{formatBytes(attachment.byte_size)}</small>
-              </span>
-              <button
-                type="button"
-                className="attachment-remove"
-                onClick={() => removeAttachment(attachment.object_key)}
-                aria-label={`Remove ${attachment.filename}`}
-                title={`Remove ${attachment.filename}`}
-              >
-                <X size={13} />
-              </button>
-            </span>
-          ))}
-        </div>
-        {error && <div className="form-error compose-error">{error}</div>}
-        <div className="compose-foot">
-          <span className="compose-hint" aria-live="polite">
-            <span className={`save-dot${saving ? " is-saving" : ""}`} />
-            {draftStatus()}
-          </span>
-          <div className="compose-foot-actions">
-            <button
-              type="button"
-              className="secondary-button compose-discard-btn"
-              onClick={onClose}
-              title="Discard draft"
-            >
-              <Trash2 size={14} /> Discard
-            </button>
-            <button className="primary-button" disabled={busy || uploading > 0}>
-              <Send size={15} />{" "}
-              {busy ? "Sending…" : scheduledAt ? "Schedule send" : "Send"}
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 function Compose({
   mailboxes,
   signatures,
@@ -2437,74 +1942,11 @@ function MailboxAdministration({ onChanged }: { onChanged: () => void }) {
     finally { setBusy(false); }
   }
 
-  async function resetPassword(member: AdminMember) {
-    setBusy(true); setError("");
-    try { await apiFetch(`/api/admin/users/${member.user_id}/reset-password`, { method: "POST" }); setNotice(`Password reset sent to ${member.email}`); }
-    catch (resetError) { setError(resetError instanceof Error ? resetError.message : "Password reset could not be sent"); }
-    finally { setBusy(false); }
-  }
-
-  async function revokeSessions(member: AdminMember) {
-    if (!(await confirm({
-      title: "Sign out everywhere?",
-      message: `Sign ${member.email} out on every device? They will need to sign in again.`,
-      confirmLabel: "Sign out everywhere",
-      danger: true,
-    }))) return;
-    setBusy(true); setError("");
-    try { await apiFetch(`/api/admin/users/${member.user_id}/revoke-sessions`, { method: "POST" }); setNotice(`All sessions revoked for ${member.email}`); }
-    catch (revokeError) { setError(revokeError instanceof Error ? revokeError.message : "Sessions could not be revoked"); }
-    finally { setBusy(false); }
-  }
-
-  async function deleteMember(member: AdminMember) {
-    if (!(await confirm({
-      title: "Delete this account permanently?",
-      message: `Permanently delete ${member.email} and all of this account’s mailbox data. This cannot be undone.`,
-      confirmLabel: "Delete account",
-      danger: true,
-    }))) return;
-    setBusy(true); setError("");
-    try { await apiFetch(`/api/admin/users/${member.user_id}`, { method: "DELETE" }); setNotice(`${member.email} was permanently deleted`); await load(); onChanged(); }
-    catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Account could not be deleted"); }
-    finally { setBusy(false); }
-  }
-
   async function updateMailbox(mailbox: AdminMailbox, patch: Record<string, unknown>, message: string) {
     setBusy(true); setError("");
     try { await apiFetch(`/api/admin/mailboxes/${mailbox.id}`, { method: "PATCH", body: JSON.stringify(patch) }); setNotice(message); await load(); onChanged(); }
     catch (updateError) { setError(updateError instanceof Error ? updateError.message : "Mailbox could not be updated"); }
     finally { setBusy(false); }
-  }
-
-  async function deleteMailbox(mailbox: AdminMailbox) {
-    if (!(await confirm({
-      title: "Delete this mailbox permanently?",
-      message: `Permanently delete ${mailbox.address} and all messages stored in it. This cannot be undone.`,
-      confirmLabel: "Delete mailbox",
-      danger: true,
-    }))) return;
-    setBusy(true); setError("");
-    try { await apiFetch(`/api/admin/mailboxes/${mailbox.id}`, { method: "DELETE" }); setNotice(`${mailbox.address} was deleted`); await load(); onChanged(); }
-    catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Mailbox could not be deleted"); }
-    finally { setBusy(false); }
-  }
-
-  async function editSendingLimit(mailbox: AdminMailbox) {
-    const value = await prompt({
-      title: "Daily sending limit",
-      message: `Set the maximum number of messages ${mailbox.address} can send per day.`,
-      defaultValue: String(mailbox.sending_limit_daily),
-      inputType: "number",
-      confirmLabel: "Save limit",
-    });
-    if (value === null || !value.trim()) return;
-    const limit = Number(value);
-    if (!Number.isFinite(limit) || limit < 0) {
-      setError("Enter a valid non-negative sending limit");
-      return;
-    }
-    await updateMailbox(mailbox, { sendingLimitDaily: limit }, "Sending limit updated");
   }
 
   async function loadDelegates(mailboxId: string) {
@@ -4573,9 +4015,6 @@ function MailboxApp({ session }: { session: Session }) {
   const [trustLensOpen, setTrustLensOpen] = useState(false);
   const [trustLensBusy, setTrustLensBusy] = useState(false);
   const [trustData, setTrustData] = useState<TrustData | null>(null);
-  const [deliveryInspection, setDeliveryInspection] = useState<DeliveryInspection | null>(null);
-  const [deliveryInspectionOpen, setDeliveryInspectionOpen] = useState(false);
-  const [deliveryInspectionBusy, setDeliveryInspectionBusy] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [moreSubmenu, setMoreSubmenu] = useState<"security" | "view" | null>(null);
   const [showReactions, setShowReactions] = useState(false);
@@ -4770,8 +4209,6 @@ function MailboxApp({ session }: { session: Session }) {
     setDetailLoading(false);
     setTrustLensOpen(false);
     setTrustData(null);
-    setDeliveryInspectionOpen(false);
-    setDeliveryInspection(null);
     setShowMoreActions(false);
     setMoreSubmenu(null);
   }
@@ -5089,8 +4526,6 @@ function MailboxApp({ session }: { session: Session }) {
     setThreadMessages([]);
     setTrustLensOpen(false);
     setTrustData(null);
-    setDeliveryInspectionOpen(false);
-    setDeliveryInspection(null);
     setShowMoreActions(false);
     setMoreSubmenu(null);
     try {
@@ -5110,7 +4545,6 @@ function MailboxApp({ session }: { session: Session }) {
         if (detailRequestRef.current !== requestId) return;
         setInlineImageUrls(Object.fromEntries(inlineResults.filter((item): item is readonly [string, string] => Boolean(item && item[0] && item[1]))));
       }
-      void apiFetch<DeliveryInspection>(`/api/mail/${message.id}/inspection`).then(setDeliveryInspection).catch(() => undefined);
       const thread = await apiFetch<Message[]>(`/api/threads/${message.thread_id}`);
       if (detailRequestRef.current !== requestId) return;
       setThreadMessages(thread);
@@ -5145,16 +4579,7 @@ function MailboxApp({ session }: { session: Session }) {
     catch (trustError) { setError(trustError instanceof Error ? trustError.message : "Trust details unavailable"); }
     finally { setTrustLensBusy(false); }
   }
-  async function toggleDeliveryInspection() {
-    if (!selected) return;
-    if (deliveryInspectionOpen) { setDeliveryInspectionOpen(false); return; }
-    setDeliveryInspectionOpen(true);
-    if (deliveryInspection) return;
-    setDeliveryInspectionBusy(true);
-    try { setDeliveryInspection(await apiFetch<DeliveryInspection>(`/api/mail/${selected.id}/inspection`)); }
-    catch (inspectionError) { setError(inspectionError instanceof Error ? inspectionError.message : "Delivery details unavailable"); }
-    finally { setDeliveryInspectionBusy(false); }
-  }
+
   async function openRawSource() {
     if (!selected) return;
     try {
@@ -5401,17 +4826,7 @@ function MailboxApp({ session }: { session: Session }) {
       setError(blockError instanceof Error ? blockError.message : "Sender could not be blocked");
     }
   }
-  async function toggleLegalHold() {
-    if (!selected) return;
-    const held = !selected.legal_hold;
-    try {
-      await apiFetch("/api/mail/legal-hold", { method: "POST", body: JSON.stringify({ messageId: selected.id, held }) });
-      setSelected({ ...selected, legal_hold: held });
-      setBulkNotice(held ? "Legal hold enabled" : "Legal hold removed");
-    } catch (holdError) {
-      setError(holdError instanceof Error ? holdError.message : "Legal hold could not be changed");
-    }
-  }
+
   async function moveDraggedMessage(target: ViewKey, messageId: string) {
     if (["focused", "other", "important", "snoozed", "muted"].includes(target)) return;
     try {
@@ -7447,34 +6862,6 @@ function MailboxApp({ session }: { session: Session }) {
                   </div>
                 )}
 
-                {deliveryInspectionOpen && (
-                  <div className="outlook-modal-overlay" onClick={() => setDeliveryInspectionOpen(false)} role="dialog" aria-modal="true" aria-labelledby="delivery-modal-title">
-                    <div className="outlook-modal-box" onClick={(e) => e.stopPropagation()}>
-                      <div className="outlook-modal-header">
-                        <h3 id="delivery-modal-title"><History size={18} color="#1f6b57" /> Delivery Timeline & Inspection</h3>
-                        <button className="icon-button" onClick={() => setDeliveryInspectionOpen(false)} aria-label="Close Delivery Timeline"><X size={18} /></button>
-                      </div>
-                      {deliveryInspection ? (
-                        <>
-                          <div className="delivery-summary-grid">
-                            <div><span>Provider</span><strong>{selected.provider || "Not assigned"}</strong></div>
-                            <div><span>Message size</span><strong>{selected.message_size_bytes ? formatBytes(selected.message_size_bytes) : "Not recorded"}</strong></div>
-                            <div><span>Tracking</span><strong>{selected.open_tracking_enabled || selected.click_tracking_enabled ? `${selected.open_tracking_enabled ? "opens" : ""}${selected.open_tracking_enabled && selected.click_tracking_enabled ? " + " : ""}${selected.click_tracking_enabled ? "clicks" : ""}` : "off"}</strong></div>
-                            <div><span>Provider ID</span><strong>{selected.provider_message_id || "Pending"}</strong></div>
-                          </div>
-                          {selected.delivery_error && <div className="delivery-error"><strong>{selected.delivery_error_code || "Delivery issue"}</strong><span>{selected.delivery_error}</span></div>}
-                          <div className="delivery-timeline-list">
-                            {(() => { const timeline: Array<Record<string, unknown> & { kind: string; at?: unknown }> = [...deliveryInspection.attempts.map((item) => ({ ...item, kind: "attempt", at: item.started_at || item.completed_at })), ...deliveryInspection.events.map((item) => ({ ...item, kind: "event", at: item.occurred_at || item.created_at }))]; return timeline.sort((a, b) => Date.parse(String(a.at || "")) - Date.parse(String(b.at || ""))).map((item, index) => <div className="delivery-timeline-item" key={`${String(item.id || item.event_id || item.at)}-${index}`}><span className="delivery-timeline-dot" /><div><strong>{String(item.kind === "attempt" ? item.status || "attempt" : item.event_type || "event")}</strong><small>{String(item.provider || selected.provider || "provider")} · {item.at ? new Date(String(item.at)).toLocaleString() : "time unavailable"}</small>{typeof item.error_message === "string" && <p>{item.error_message}</p>}{typeof item.payload === "object" && item.payload !== null && <p>{String((item.payload as Record<string, unknown>).reason || "")}</p>}</div></div>); })()}
-                            {!deliveryInspection.attempts.length && !deliveryInspection.events.length && <p className="delivery-empty">No provider events yet. Accepted means the provider took custody; delivery confirmation arrives through its webhook.</p>}
-                          </div>
-                          <details className="raw-inspection"><summary>Full headers and MIME parts</summary><div className="inspection-columns"><div><strong>Headers</strong>{(selected.raw_headers || []).map((header, index) => <code key={`${header.key}-${index}`}>{header.key}: {header.value}</code>)}{!(selected.raw_headers || []).length && <small>No stored headers.</small>}</div><div><strong>MIME parts</strong>{(selected.mime_parts || []).map((part, index) => <code key={index}>{JSON.stringify(part)}</code>)}{!(selected.mime_parts || []).length && <small>No MIME metadata.</small>}</div></div></details>
-                        </>
-                      ) : (
-                        <p className="trust-lens-note">{deliveryInspectionBusy ? "Loading delivery timeline…" : "No delivery events available."}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
               </article>
             )}
           </section>
