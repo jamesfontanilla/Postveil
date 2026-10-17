@@ -34,6 +34,7 @@ import {
   Columns,
   Copy,
   Download,
+  ExternalLink,
   Eye,
   FileText,
   Filter,
@@ -77,6 +78,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
+  Smile,
   Sparkles,
   Star,
   Sun,
@@ -4563,6 +4565,8 @@ function MailboxApp({ session }: { session: Session }) {
   const [deliveryInspectionOpen, setDeliveryInspectionOpen] = useState(false);
   const [deliveryInspectionBusy, setDeliveryInspectionBusy] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
+  const [showReactions, setShowReactions] = useState(false);
+  const [messageReactions, setMessageReactions] = useState<Record<string, string>>({});
   const [trashBusy, setTrashBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectAllResults, setSelectAllResults] = useState(false);
@@ -5140,6 +5144,13 @@ function MailboxApp({ session }: { session: Session }) {
       window.open(objectUrl, "_blank", "noopener,noreferrer");
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
     } catch (sourceError) { setError(sourceError instanceof Error ? sourceError.message : "Raw source unavailable"); }
+  }
+  function openInNewWindow(msg: Message) {
+    const popup = window.open("", "postveil-email", "noopener,noreferrer,width=920,height=760");
+    if (!popup) return;
+    const bodyContent = msg.html_body || `<pre style="font-family:inherit;white-space:pre-wrap;">${(msg.text_body || msg.snippet || "No content").replace(/[&<>]/g, (c: string) => (({ "&": "&amp;", "<": "&lt;", ">": "&gt;" } as Record<string, string>)[c] || c))}</pre>`;
+    popup.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${(msg.subject || "Email").replace(/[&<>"']/g, "")} · Postveil</title><style>body{margin:0;background:#f4f6f2;color:#17221f;font:15px/1.6 system-ui,-apple-system,sans-serif}.email{box-sizing:border-box;width:min(860px,100%);margin:0 auto;padding:40px 28px;background:#fff;min-height:100vh;overflow-wrap:anywhere}.email img{max-width:100%;height:auto}.email table{max-width:100%}a{color:#1f6b57}h1{font-size:20px;margin-top:0}</style></head><body><main class="email" aria-label="Email message"><h1>${(msg.subject || "(no subject)").replace(/[&<>"']/g, "")}</h1><div style="font-size:13px;color:#616161;margin-bottom:24px;padding-bottom:12px;border-bottom:1px solid #edebe9;">From: ${msg.from_address}<br>Date: ${new Date(msg.received_at || msg.sent_at || msg.created_at).toLocaleString()}</div>${bodyContent}</main></body></html>`);
+    popup.document.close();
   }
   async function submitSpamFeedback(feedback: "spam" | "not_spam") {
     if (!selected) return;
@@ -6837,229 +6848,279 @@ function MailboxApp({ session }: { session: Session }) {
                     <button className="mobile-detail-back" type="button" onClick={closeSelectedMessage}>
                       <ArrowLeft size={15} aria-hidden="true" /> Back to messages
                     </button>
-                    <p className="eyebrow">{selected.direction === "inbound" ? "RECEIVED" : "SENT"}</p>
                     <h2>{selected.subject || "(no subject)"}</h2>
                     <div className="detail-meta">
-                      <span>{messageStatusLabel(selected)}</span>
                       {selected.spam_score !== undefined && selected.spam_score >= 0.35 && (
-                        <span>
-                          Spam risk {Math.round(selected.spam_score * 100)}%
-                        </span>
-                      )}
-                      {selected.focused_category && (
-                        <span>{selected.focused_category === "focused" ? "Focused" : "Other"}</span>
+                        <span>Spam risk {Math.round(selected.spam_score * 100)}%</span>
                       )}
                       {selected.is_important && <span className="detail-status-accent">Important</span>}
                       {selected.is_muted && <span>Muted</span>}
                       {selected.legal_hold && <span className="detail-status-accent">Legal hold</span>}
+                      {labels.map((label) => (
+                        <button
+                          key={label.id}
+                          className="label-chip"
+                          onClick={() => void assignLabel(label.id)}
+                          style={{ borderColor: label.color, color: label.color }}
+                        >
+                          <Tag size={12} /> {label.name}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  {selected.folder === "trash" && <div className="head-actions">
-                    <button
-                      className="icon-button"
-                      title={selected.is_starred ? "Unstar message" : "Star message"}
-                      onClick={() =>
-                        void mutateMessage({ isStarred: !selected.is_starred })
-                      }
-                      aria-label={selected.is_starred ? "Unstar message" : "Star message"}
-                    >
-                      <Star
-                        size={17}
-                        fill={selected.is_starred ? "currentColor" : "none"}
-                      />
-                    </button>
+                  <div className="outlook-subject-actions">
                     <button
                       className="icon-button"
                       title={selected.is_pinned ? "Unpin message" : "Pin message"}
-                      onClick={() =>
-                        void mutateMessage({ isPinned: !selected.is_pinned })
-                      }
+                      onClick={() => void mutateMessage({ isPinned: !selected.is_pinned })}
                       aria-label={selected.is_pinned ? "Unpin message" : "Pin message"}
                     >
-                      <Pin
-                        size={17}
-                        fill={selected.is_pinned ? "currentColor" : "none"}
-                      />
+                      <Pin size={16} fill={selected.is_pinned ? "currentColor" : "none"} />
                     </button>
                     <button
-                      className={`icon-button ${selected.is_important ? "is-active" : ""}`}
-                      title={selected.is_important ? "Remove importance" : "Mark important"}
-                      onClick={() => void mutateMessage({ isImportant: !selected.is_important })}
-                      aria-label={selected.is_important ? "Remove importance" : "Mark important"}
+                      className="icon-button"
+                      title="Print message"
+                      onClick={() => window.print()}
+                      aria-label="Print message"
                     >
-                      <Flag size={17} fill={selected.is_important ? "currentColor" : "none"} />
+                      <Printer size={16} />
                     </button>
-                    {selected.folder === "trash" ? (
-                      <>
-                        <button
-                          className="icon-button"
-                          title="Restore to previous folder"
-                          onClick={() => void restoreSelected()}
-                          aria-label="Restore message"
-                          disabled={trashBusy}
-                        >
-                          <Undo2 size={17} />
-                        </button>
-                        <button
-                          className="icon-button danger-icon"
-                          title="Delete permanently"
-                          onClick={() => void permanentlyDeleteSelected()}
-                          aria-label="Delete message permanently"
-                          disabled={trashBusy}
-                        >
-                          <Trash2 size={17} />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          className="icon-button"
-                          title="Archive message"
-                          onClick={() => void mutateMessage({ folder: "archive" })}
-                          aria-label="Archive message"
-                        >
-                          <Archive size={17} />
-                        </button>
-                        <button
-                          className="icon-button"
-                          title="Move message to trash"
-                          onClick={() => void mutateMessage({ folder: "trash" })}
-                          aria-label="Delete message"
-                        >
-                          <Trash2 size={17} />
-                        </button>
-                      </>
-                    )}
-                   </div>}
-                 </div>
-                  {detailLoading && (
+                    <button
+                      className="icon-button"
+                      title="Open in new window"
+                      onClick={() => openInNewWindow(selected)}
+                      aria-label="Open in new window"
+                    >
+                      <ExternalLink size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {detailLoading && (
                   <div className="detail-loading" role="status" aria-live="polite">
                     <span className="detail-loading-dot" /> Updating message…
                   </div>
                 )}
+
                 {selected.folder === "trash" && (
                   <div className="trash-notice" role="status">
                     <Trash2 size={15} />
                     <span>This message is in Trash. Restore it to its previous folder or delete it permanently.</span>
                   </div>
                 )}
-                {selected.work_state && selected.work_state !== "none" && (
-                  <div className={`work-state-callout ${selected.follow_up_at && new Date(selected.follow_up_at).getTime() <= Date.now() ? "overdue" : ""}`}>
-                    <Briefcase size={15} />
-                    <div><strong>{workStateLabel(selected.work_state)}</strong><span>{workDueLabel(selected.follow_up_at)}{displayWorkNote(selected.work_note) ? ` · ${displayWorkNote(selected.work_note)}` : ""}</span></div>
-                    <button className="text-button" onClick={() => void mutateMessage({ workState: "none" })}>Clear</button>
-                  </div>
-                )}
-                  <div className="sender-line">
-                   {detailIdentity && <SenderAvatar name={detailIdentity.name} email={detailIdentity.email} avatarUrl={detailIdentity.avatarUrl} large />}
-                   <div className="sender-copy">
-                     <strong>{detailIdentity?.name}</strong>
-                     <small>{detailIdentity?.email}</small>
-                     <span>to {selected.to_addresses?.join(", ") || "your mailbox"}</span>
-                    {selected.unsubscribe_url && /^(https?:\/\/|mailto:)/i.test(selected.unsubscribe_url) && (
-                      <a className="unsubscribe-link" href={selected.unsubscribe_url} target="_blank" rel="noreferrer noopener">Unsubscribe</a>
-                    )}
+
+                <div className="outlook-banners-group">
+                  {selected.direction === "inbound" && selected.from_address && !mailboxes.some((mb) => selected.from_address.toLowerCase().endsWith(mb.address.toLowerCase().split("@")[1] || "")) && (
+                    <div className="outlook-banner outlook-banner-external">
+                      <div className="outlook-banner-content">
+                        <AlertTriangle size={15} color="#f7630c" />
+                        <span><strong>CAUTION:</strong> This email originated from outside your organization. Do not click links or open attachments unless you recognize the sender.</span>
+                      </div>
+                    </div>
+                  )}
+                  {selected.unsubscribe_url && /^(https?:\/\/|mailto:)/i.test(selected.unsubscribe_url) && (
+                    <div className="outlook-banner outlook-banner-privacy">
+                      <div className="outlook-banner-content">
+                        <span>Getting too much email? You can unsubscribe from this sender.</span>
+                      </div>
+                      <a className="outlook-banner-btn" href={selected.unsubscribe_url} target="_blank" rel="noreferrer noopener">
+                        Unsubscribe
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                <div className="sender-line">
+                  {detailIdentity && <SenderAvatar name={detailIdentity.name} email={detailIdentity.email} avatarUrl={detailIdentity.avatarUrl} large />}
+                  <div className="sender-copy">
+                    <strong>{detailIdentity?.name || selected.from_address}</strong>
+                    <div className="recipient-row">
+                      <span>To: {selected.to_addresses?.join(", ") || "you"}</span>
+                      <button
+                        className="details-chevron-btn"
+                        onClick={() => setShowMessageDetails((current) => !current)}
+                        title={showMessageDetails ? "Hide full message details" : "View full message details"}
+                        aria-expanded={showMessageDetails}
+                      >
+                        <ChevronDown size={13} className={showMessageDetails ? "rotated" : ""} />
+                      </button>
+                    </div>
                     {showMessageDetails && (
                       <dl className="sender-details">
-                        <div><dt>From</dt><dd>{detailIdentity?.email || "Not available"}</dd></div>
+                        <div><dt>From</dt><dd>{detailIdentity?.email || selected.from_address || "Not available"}</dd></div>
                         <div><dt>To</dt><dd>{selected.to_addresses?.join(", ") || "Not available"}</dd></div>
                         {selected.cc_addresses && selected.cc_addresses.length > 0 && <div><dt>CC</dt><dd>{selected.cc_addresses.join(", ")}</dd></div>}
                         {selected.bcc_addresses && selected.bcc_addresses.length > 0 && <div><dt>BCC</dt><dd>{selected.bcc_addresses.join(", ")}</dd></div>}
                         {selected.reply_to && <div><dt>Reply-To</dt><dd>{selected.reply_to}</dd></div>}
                         <div><dt>Date</dt><dd>{new Date(selected.received_at || selected.sent_at || selected.created_at).toLocaleString()}</dd></div>
                         <div><dt>Message ID</dt><dd>{selected.message_id_header || "Not available"}</dd></div>
-                       </dl>
-                     )}
-                   </div>
-                   <time className="sender-time" dateTime={selected.received_at || selected.sent_at || selected.created_at}>
-                     {formatDate(selected.received_at || selected.sent_at || selected.created_at)}
-                   </time>
-                   <div className="message-header-actions" aria-label="Quick message actions">
-                     <button className="message-header-action" onClick={() => openCompose(selectedReplySeed)} aria-label="Reply" title="Reply">
-                       <Reply size={16} />
-                     </button>
-                     <button className="message-header-action" onClick={() => openCompose(selectedReplyAllSeed)} aria-label="Reply all" title="Reply all">
-                       <Users size={16} />
-                     </button>
-                     <button className="message-header-action" onClick={() => openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined)} aria-label="Forward" title="Forward">
-                       <Forward size={16} />
-                     </button>
-                     <button className="message-header-action" onClick={() => setShowMessageDetails((current) => !current)} aria-expanded={showMessageDetails} aria-label={showMessageDetails ? "Hide message details" : "Show message details"} title={showMessageDetails ? "Hide details" : "Show details"}>
-                       <MoreHorizontal size={17} />
-                     </button>
-                   </div>
-                 </div>
-                <details className="sender-profile-card">
-                  <summary><Users size={14} /> Sender profile and contact history</summary>
-                  <div className="sender-profile-grid">
-                    <div><span className="eyebrow">CONTACT</span><strong>{selectedContact?.display_name || detailIdentity?.name || "Unknown sender"}</strong><small>{detailIdentity?.email}</small></div>
-                    <div><span className="eyebrow">HISTORY</span><strong>{messages.filter((item) => item.from_address.toLowerCase() === detailIdentity?.email.toLowerCase()).length} visible messages</strong><small>{selectedContact ? "Saved contact" : "Not saved as a contact"}</small></div>
+                      </dl>
+                    )}
                   </div>
-                </details>
-                {trustLensOpen && <div className="trust-lens">
-                  <button className="trust-lens-toggle" onClick={() => void toggleTrustLens()} aria-expanded={trustLensOpen}>
-                    <span className="trust-lens-title"><ShieldAlert size={15} /><span><strong>Trust Lens</strong><small> Authentication and sender evidence</small></span></span>
-                    <span>{trustLensBusy ? "Loading…" : trustLensOpen ? "Hide" : "Inspect"} <ChevronDown size={14} className={trustLensOpen ? "rotated" : ""} /></span>
-                  </button>
-                  {trustLensOpen && trustData && (() => {
-                    const auth = trustData.auth_results || {};
-                    const evidence = trustData.trust_evidence || {};
-                    const status = (key: "spf" | "dkim" | "dmarc" | "arc" | "tls") => String(trustData[`auth_${key}` as keyof TrustData] || auth[key] || "missing");
-                    const statusClass = (value: string) => value === "pass" ? "trust-status-pass" : value === "missing" || value === "none" ? "trust-status-missing" : "trust-status-fail";
-                    const hosts = Array.isArray(evidence.link_hosts) ? evidence.link_hosts as Array<{ host?: string; count?: number }> : [];
-                    const history = trustData.screening_history || [];
-                    return <div className="trust-lens-body">
-                      <p className="trust-lens-note">Advisory signals only. Authentication results describe what the receiving server observed; they do not guarantee that a message is safe.</p>
-                      <div className="trust-lens-grid">
-                        {(["spf", "dkim", "dmarc", "arc", "tls"] as const).map((key) => <div className="trust-lens-item" key={key}><strong>{key.toUpperCase()}</strong><span className={statusClass(status(key))}>{status(key)}</span></div>)}
+                  <time className="sender-time" dateTime={selected.received_at || selected.sent_at || selected.created_at}>
+                    {formatDate(selected.received_at || selected.sent_at || selected.created_at)}
+                  </time>
+                  <div className="message-header-actions" aria-label="Quick message actions" style={{ position: "relative" }}>
+                    <button
+                      className="message-header-action"
+                      onClick={() => setShowReactions((prev) => !prev)}
+                      aria-label="React"
+                      title="React to message"
+                    >
+                      <Smile size={16} />
+                    </button>
+                    {showReactions && (
+                      <div className="outlook-reaction-flyout">
+                        {["👍", "❤️", "👏", "😂", "😮", "🎉"].map((emoji) => (
+                          <button
+                            key={emoji}
+                            onClick={() => {
+                              setMessageReactions((prev) => ({ ...prev, [selected.id]: emoji }));
+                              setShowReactions(false);
+                            }}
+                            title={`React with ${emoji}`}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
                       </div>
-                      <div className="trust-lens-grid">
-                        <div className="trust-lens-item"><strong>Sender history</strong><span>{trustData.sender_first_seen ? "First seen sender" : "Seen before"}</span></div>
-                        <div className="trust-lens-item"><strong>Contact</strong><span>{trustData.known_contact ? "Known contact" : "Not in contacts"}</span></div>
-                        <div className="trust-lens-item"><strong>Reply-To</strong><span className={trustData.reply_to_mismatch ? "trust-status-fail" : "trust-status-pass"}>{trustData.reply_to_mismatch ? "Different address" : "Matches sender"}</span></div>
-                        <div className="trust-lens-item"><strong>Tracking pixels</strong><span>{trustData.tracking_pixel_count || 0} detected</span></div>
+                    )}
+                    <button className="message-header-action" onClick={() => openCompose(selectedReplySeed)} aria-label="Reply" title="Reply">
+                      <Reply size={16} />
+                    </button>
+                    <button className="message-header-action" onClick={() => openCompose(selectedReplyAllSeed)} aria-label="Reply all" title="Reply all">
+                      <Users size={16} />
+                    </button>
+                    <button className="message-header-action" onClick={() => openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined)} aria-label="Forward" title="Forward">
+                      <Forward size={16} />
+                    </button>
+                    <button
+                      className="message-header-action"
+                      onClick={() => setShowMoreActions((current) => !current)}
+                      aria-expanded={showMoreActions}
+                      aria-label="More actions"
+                      title="More actions"
+                    >
+                      <MoreHorizontal size={17} />
+                    </button>
+                    {showMoreActions && (
+                      <div className="action-menu" role="menu" style={{ right: 0, top: "100%", position: "absolute", zIndex: 120 }}>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); openCompose(selectedReplySeed); }}>
+                          <Reply size={15} /> Reply
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); openCompose(selectedReplyAllSeed); }}>
+                          <Users size={15} /> Reply all
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined); }}>
+                          <Forward size={15} /> Forward
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ isRead: false }); }}>
+                          <Eye size={15} /> Mark unread
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ isStarred: !selected.is_starred }); }}>
+                          <Star size={15} fill={selected.is_starred ? "currentColor" : "none"} /> {selected.is_starred ? "Unstar" : "Star"}
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ isPinned: !selected.is_pinned }); }}>
+                          <Pin size={15} fill={selected.is_pinned ? "currentColor" : "none"} /> {selected.is_pinned ? "Unpin" : "Pin"}
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ isFlagged: !selected.is_flagged }); }}>
+                          <Flag size={15} fill={selected.is_flagged ? "currentColor" : "none"} /> {selected.is_flagged ? "Unflag" : "Flag"}
+                        </button>
+                        {selected.folder !== "trash" && (
+                          <>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ folder: "archive" }); }}>
+                              <Archive size={15} /> Archive
+                            </button>
+                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void (async () => { if (await confirm({ title: "Move message to Trash?", message: "You can restore this message later.", confirmLabel: "Move to Trash", danger: true })) void mutateMessage({ folder: "trash" }); })(); }}>
+                              <Trash2 size={15} /> Delete
+                            </button>
+                          </>
+                        )}
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); window.print(); }}>
+                          <Printer size={15} /> Print
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); openInNewWindow(selected); }}>
+                          <ExternalLink size={15} /> Open in new window
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleTrustLens(); }}>
+                          <ShieldAlert size={15} /> Inspect trust details
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleDeliveryInspection(); }}>
+                          <History size={15} /> Delivery timeline
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void openRawSource(); }}>
+                          <Download size={15} /> View raw source
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void submitSpamFeedback(selected.folder === "spam" ? "not_spam" : "spam"); }}>
+                          <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Report spam"}
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void reportSelectedMessage("phishing"); }}>
+                          <AlertTriangle size={15} /> Report phishing
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void blockSelectedSender("address"); }}>
+                          <ShieldAlert size={15} /> Block sender
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void blockSelectedSender("domain"); }}>
+                          <ShieldAlert size={15} /> Block domain
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateThread({ isMuted: !selected.is_muted }); }}>
+                          <Bell size={15} /> {selected.is_muted ? "Unmute conversation" : "Mute conversation"}
+                        </button>
+                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateThread({ isIgnored: !selected.is_ignored }); }}>
+                          <Eye size={15} /> {selected.is_ignored ? "Stop ignoring thread" : "Ignore thread"}
+                        </button>
                       </div>
-                      <div className="trust-lens-section"><strong>Link hosts · {trustData.link_count || 0} links</strong>{hosts.length ? <div className="trust-host-list">{hosts.map((item) => <span className="trust-host" key={item.host}>{item.host}{item.count && item.count > 1 ? ` · ${item.count}` : ""}</span>)}</div> : <p className="trust-lens-note">No web links detected.</p>}</div>
-                      {history.length > 0 && <div className="trust-lens-section"><strong>Screening history</strong><p className="trust-lens-note">{history.slice(0, 3).map((item) => `${item.decision} · ${new Date(item.created_at).toLocaleString()}`).join("  |  ")}</p></div>}
-                    </div>;
-                  })()}
-                  {trustLensOpen && !trustData && trustLensBusy && <div className="trust-lens-body"><p className="trust-lens-note">Loading sender evidence…</p></div>}
-                </div>}
-                {deliveryInspectionOpen && <div className="delivery-inspection">
-                  <div className="delivery-inspection-head">
-                    <span><History size={15} /><strong>Delivery timeline</strong></span>
-                    <small>{deliveryInspectionBusy ? "Loading…" : selected.delivery_status || selected.status}</small>
+                    )}
                   </div>
-                  {deliveryInspection && <>
-                    <div className="delivery-summary-grid">
-                      <div><span>Provider</span><strong>{selected.provider || "Not assigned"}</strong></div>
-                      <div><span>Message size</span><strong>{selected.message_size_bytes ? formatBytes(selected.message_size_bytes) : "Not recorded"}</strong></div>
-                      <div><span>Tracking</span><strong>{selected.open_tracking_enabled || selected.click_tracking_enabled ? `${selected.open_tracking_enabled ? "opens" : ""}${selected.open_tracking_enabled && selected.click_tracking_enabled ? " + " : ""}${selected.click_tracking_enabled ? "clicks" : ""}` : "off"}</strong></div>
-                      <div><span>Provider ID</span><strong>{selected.provider_message_id || "Pending"}</strong></div>
-                    </div>
-                    {selected.delivery_error && <div className="delivery-error"><strong>{selected.delivery_error_code || "Delivery issue"}</strong><span>{selected.delivery_error}</span></div>}
-                    <div className="delivery-timeline-list">
-                      {(() => { const timeline: Array<Record<string, unknown> & { kind: string; at?: unknown }> = [...deliveryInspection.attempts.map((item) => ({ ...item, kind: "attempt", at: item.started_at || item.completed_at })), ...deliveryInspection.events.map((item) => ({ ...item, kind: "event", at: item.occurred_at || item.created_at }))]; return timeline.sort((a, b) => Date.parse(String(a.at || "")) - Date.parse(String(b.at || ""))).map((item, index) => <div className="delivery-timeline-item" key={`${String(item.id || item.event_id || item.at)}-${index}`}><span className="delivery-timeline-dot" /><div><strong>{String(item.kind === "attempt" ? item.status || "attempt" : item.event_type || "event")}</strong><small>{String(item.provider || selected.provider || "provider")} · {item.at ? new Date(String(item.at)).toLocaleString() : "time unavailable"}</small>{typeof item.error_message === "string" && <p>{item.error_message}</p>}{typeof item.payload === "object" && item.payload !== null && <p>{String((item.payload as Record<string, unknown>).reason || "")}</p>}</div></div>); })()}
-                      {!deliveryInspection.attempts.length && !deliveryInspection.events.length && <p className="delivery-empty">No provider events yet. Accepted means the provider took custody; delivery confirmation arrives through its webhook.</p>}
-                    </div>
-                    <details className="raw-inspection"><summary>Full headers and MIME parts</summary><div className="inspection-columns"><div><strong>Headers</strong>{(selected.raw_headers || []).map((header, index) => <code key={`${header.key}-${index}`}>{header.key}: {header.value}</code>)}{!(selected.raw_headers || []).length && <small>No stored headers.</small>}</div><div><strong>MIME parts</strong>{(selected.mime_parts || []).map((part, index) => <code key={index}>{JSON.stringify(part)}</code>)}{!(selected.mime_parts || []).length && <small>No MIME metadata.</small>}</div></div></details>
-                  </>}
-                </div>}
-                {labels.length > 0 && (
-                  <div className="detail-labels">
-                    <span className="eyebrow">LABELS</span>
-                    {labels.map((label) => (
-                      <button
-                        key={label.id}
-                        className="label-chip"
-                        onClick={() => void assignLabel(label.id)}
-                        style={{ borderColor: label.color, color: label.color }}
-                      >
-                        <Tag size={12} /> {label.name}
-                      </button>
-                    ))}
+                </div>
+
+                {messageReactions[selected.id] && (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#f3f2f1", border: "1px solid #edebe9", borderRadius: 12, padding: "2px 8px", fontSize: 13, marginTop: 4, alignSelf: "flex-start" }}>
+                    <span>{messageReactions[selected.id]}</span>
+                    <span style={{ fontSize: 11, color: "#616161" }}>1</span>
                   </div>
                 )}
+
+                {selected.attachments && selected.attachments.length > 0 && (
+                  <div className="outlook-attachment-well">
+                    <div className="outlook-attachment-head">
+                      <span>Attachments ({selected.attachments.length})</span>
+                      {selected.attachments.length > 1 && (
+                        <button className="outlook-download-all-btn" onClick={() => void downloadAllAttachments(selected.id)}>
+                          <Download size={13} /> Download all
+                        </button>
+                      )}
+                    </div>
+                    <div className="outlook-attachment-grid">
+                      {selected.attachments.map((attachment) => {
+                        const ext = attachment.filename.split(".").pop()?.toUpperCase() || "FILE";
+                        const badgeColor = ext === "PDF" ? "#d83b01" : ["DOC", "DOCX"].includes(ext) ? "#0078d4" : ["XLS", "XLSX", "CSV"].includes(ext) ? "#107c41" : ["PNG", "JPG", "JPEG", "GIF"].includes(ext) ? "#5c2d91" : "#605e5c";
+                        return (
+                          <div className="outlook-attachment-card" key={attachment.id}>
+                            <div className="outlook-file-badge" style={{ background: badgeColor }}>
+                              {ext.slice(0, 4)}
+                            </div>
+                            <div className="outlook-attachment-meta">
+                              <strong title={attachment.filename}>{attachment.filename}</strong>
+                              <small>{formatBytes(attachment.byte_size)}</small>
+                            </div>
+                            <div className="outlook-card-actions">
+                              {attachment.preview_state === "ready" && (
+                                <button title="Preview attachment" onClick={() => void previewAttachment(attachment.id)}>
+                                  <Eye size={14} />
+                                </button>
+                              )}
+                              <button title="Download attachment" onClick={() => void openAttachment(attachment.id)}>
+                                <Download size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="body-copy body-copy-rich">
                   <RichEmailBody
                     htmlBody={selected.html_body}
@@ -7071,32 +7132,11 @@ function MailboxApp({ session }: { session: Session }) {
                     inspectLink={inspectEmailLink}
                   />
                 </div>
-                {selected.attachments && selected.attachments.length > 0 && (
-                  <div className="attachments">
-                    <div className="attachments-head">
-                      <p className="eyebrow">ATTACHMENTS · {selected.attachments.length}</p>
-                      {selected.attachments.length > 1 && <button className="attachment-download-all" onClick={() => void downloadAllAttachments(selected.id)}><Download size={13} /> Download all</button>}
-                    </div>
-                    {selected.attachments.map((attachment) => (
-                      <div className="attachment-card" key={attachment.id}>
-                        <div className="attachment-card-main">
-                          <Paperclip size={14} />
-                          <span><strong>{attachment.filename}</strong><small>{formatBytes(attachment.byte_size)} · {attachment.detected_content_type || attachment.content_type}</small></span>
-                        </div>
-                        <div className="attachment-card-actions">
-                          {attachment.preview_state === "ready" && <button className="attachment-mini-action" onClick={() => void previewAttachment(attachment.id)}><Eye size={13} /> Preview</button>}
-                          <button className="attachment-mini-action" onClick={() => void openAttachment(attachment.id)}><Download size={13} /> Download</button>
-                        </div>
-                        <small className={`attachment-safety attachment-safety-${attachment.safety_status || "unknown"}`}><ShieldAlert size={12} /> {attachment.safety_status === "suspicious" ? "Review before opening" : "Malware scan unavailable; static checks only"}</small>
-                      </div>
-                    ))}
-                  </div>
-                )}
+
                 {threadMessages.length > 1 && (
                   <div className="conversation-section">
                     <div className="conversation-head">
-                      <p className="eyebrow">CONVERSATION</p>
-                      <div className="conversation-head-controls"><span>{threadMessages.length} messages</span><label>Order<select value={threadOrder} onChange={(event) => setThreadOrder(event.target.value as "newest" | "oldest")} aria-label="Conversation order"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label></div>
+                      <span>{threadMessages.length} messages in this conversation</span>
                     </div>
                     {!showAllThreadMessages && (
                       <button
@@ -7123,127 +7163,107 @@ function MailboxApp({ session }: { session: Session }) {
                     </div>
                   </div>
                 )}
-                <div className="detail-actions">
+
+                <div className="outlook-quick-reply-dock">
                   {selected.direction === "outbound" && ["queued", "scheduled"].includes(selected.status) && !selected.cancelled_at ? (
                     <button className="secondary-button danger-button" onClick={() => void cancelSelectedSend()}>
                       <Undo2 size={15} /> Cancel send
                     </button>
                   ) : selected.folder === "trash" ? (
-                    <>
+                    <div className="outlook-quick-reply-buttons">
                       <button
-                        className="primary-button"
+                        className="outlook-quick-reply-btn primary"
                         onClick={() => void restoreSelected()}
                         disabled={trashBusy}
                       >
                         <Undo2 size={15} /> Restore
                       </button>
                       <button
-                        className="secondary-button danger-button"
+                        className="outlook-quick-reply-btn"
                         onClick={() => void permanentlyDeleteSelected()}
                         disabled={trashBusy}
                       >
                         <Trash2 size={15} /> Delete forever
                       </button>
-                    </>
+                    </div>
                   ) : (
-                    <>
-                      <button
-                        className="primary-button"
-                        onClick={() => openCompose(selectedReplySeed)}
-                      >
-                        <PenLine size={15} /> Reply
+                    <div className="outlook-quick-reply-buttons">
+                      <button className="outlook-quick-reply-btn primary" onClick={() => openCompose(selectedReplySeed)}>
+                        <Reply size={15} /> Reply
                       </button>
-                      <button
-                        className="secondary-button detail-quick-action"
-                        onClick={() => openCompose(selectedReplyAllSeed)}
-                      >
+                      <button className="outlook-quick-reply-btn" onClick={() => openCompose(selectedReplyAllSeed)}>
                         <Users size={15} /> Reply all
                       </button>
-                      <div className="more-actions">
-                        <button
-                          className="secondary-button"
-                          aria-expanded={showMoreActions}
-                          aria-haspopup="menu"
-                          onClick={() => setShowMoreActions((current) => !current)}
-                        >
-                          <MoreHorizontal size={15} /> More
-                        </button>
-                        {showMoreActions && (
-                          <div className="action-menu" role="menu">
-                            <button role="menuitem" onClick={() => openCompose({ to: selected.to_addresses?.[0], subject: `Fwd: ${selected.subject}`, text: `\n\n— Forwarded message —\n${selected.text_body || selected.snippet}` })}>
-                              <Forward size={15} /> Forward
-                            </button>
-                            {selected.folder !== "trash" && <>
-                              <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ folder: "archive" }); }}>
-                                <Archive size={15} /> Archive
-                              </button>
-                              <button role="menuitem" onClick={() => { setShowMoreActions(false); void (async () => { if (await confirm({ title: "Move message to Trash?", message: "You can restore this message later.", confirmLabel: "Move to Trash", danger: true })) void mutateMessage({ folder: "trash" }); })(); }}>
-                                <Trash2 size={15} /> Delete
-                              </button>
-                            </>}
-                             <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleTrustLens(); }}>
-                               <ShieldAlert size={15} /> {trustLensOpen ? "Hide trust details" : "Inspect trust details"}
-                             </button>
-                             <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleDeliveryInspection(); }}>
-                               <History size={15} /> {deliveryInspectionOpen ? "Hide delivery timeline" : "Delivery timeline"}
-                             </button>
-                             <button role="menuitem" onClick={() => { setShowMoreActions(false); void openRawSource(); }}>
-                               <Download size={15} /> View raw source
-                             </button>
-                            <button role="menuitem" onClick={() => void mutateMessage({ isRead: false })}>
-                              <Eye size={15} /> Mark unread
-                            </button>
-                            <button role="menuitem" onClick={() => void submitSpamFeedback(selected.folder === "spam" ? "not_spam" : "spam")}>
-                              <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Spam"}
-                            </button>
-                            {selected.folder !== "spam" && <button role="menuitem" onClick={() => { setShowMoreActions(false); void reportSelectedMessage("spam"); }}>
-                              <ShieldAlert size={15} /> Report spam and move
-                            </button>}
-                            <button role="menuitem" onClick={() => void mutateMessage({ snoozedUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString() })}>
-                              <Clock3 size={15} /> Snooze 1h
-                            </button>
-                            <button role="menuitem" onClick={() => void mutateMessage({ isFlagged: !selected.is_flagged })}>
-                              <Flag size={15} /> {selected.is_flagged ? "Unflag" : "Flag"}
-                            </button>
-                            <button role="menuitem" onClick={() => void mutateMessage({ isImportant: !selected.is_important })}>
-                              <Flag size={15} /> {selected.is_important ? "Remove importance" : "Mark important"}
-                            </button>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateThread({ isMuted: !selected.is_muted }); }}>
-                              <Bell size={15} /> {selected.is_muted ? "Unmute conversation" : "Mute conversation"}
-                            </button>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateThread({ isIgnored: !selected.is_ignored }); }}>
-                              <Eye size={15} /> {selected.is_ignored ? "Stop ignoring thread" : "Ignore thread"}
-                            </button>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void blockSelectedSender("address"); }}>
-                              <ShieldAlert size={15} /> Block sender
-                            </button>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void blockSelectedSender("domain"); }}>
-                              <ShieldAlert size={15} /> Block domain
-                            </button>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void reportSelectedMessage("phishing"); }}>
-                              <AlertTriangle size={15} /> Report phishing
-                            </button>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleLegalHold(); }}>
-                              <ShieldAlert size={15} /> {selected.legal_hold ? "Remove legal hold" : "Place on legal hold"}
-                            </button>
-                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "reply_later" })}>
-                              <Clock3 size={15} /> Reply later
-                            </button>
-                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "waiting_on" })}>
-                              <Users size={15} /> Waiting on
-                            </button>
-                            <button role="menuitem" onClick={() => void mutateMessage({ workState: "i_owe" })}>
-                              <Briefcase size={15} /> I owe
-                            </button>
-                            {selected.work_state && selected.work_state !== "none" && <button role="menuitem" onClick={() => void mutateMessage({ workState: "none" })}>
-                              <Check size={15} /> Clear work state
-                            </button>}
-                          </div>
-                        )}
-                      </div>
-                    </>
+                      <button className="outlook-quick-reply-btn" onClick={() => openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined)}>
+                        <Forward size={15} /> Forward
+                      </button>
+                    </div>
                   )}
                 </div>
+
+                {trustLensOpen && (
+                  <div className="outlook-modal-overlay" onClick={() => setTrustLensOpen(false)} role="dialog" aria-modal="true" aria-labelledby="trust-lens-modal-title">
+                    <div className="outlook-modal-box" onClick={(e) => e.stopPropagation()}>
+                      <div className="outlook-modal-header">
+                        <h3 id="trust-lens-modal-title"><ShieldAlert size={18} color="#1f6b57" /> Trust Lens · Sender Authentication & Evidence</h3>
+                        <button className="icon-button" onClick={() => setTrustLensOpen(false)} aria-label="Close Trust Lens"><X size={18} /></button>
+                      </div>
+                      {trustData ? (() => {
+                        const auth = trustData.auth_results || {};
+                        const evidence = trustData.trust_evidence || {};
+                        const status = (key: "spf" | "dkim" | "dmarc" | "arc" | "tls") => String(trustData[`auth_${key}` as keyof TrustData] || auth[key] || "missing");
+                        const statusClass = (value: string) => value === "pass" ? "trust-status-pass" : value === "missing" || value === "none" ? "trust-status-missing" : "trust-status-fail";
+                        const hosts = Array.isArray(evidence.link_hosts) ? evidence.link_hosts as Array<{ host?: string; count?: number }> : [];
+                        const history = trustData.screening_history || [];
+                        return <div className="trust-lens-body">
+                          <p className="trust-lens-note">Advisory signals only. Authentication results describe what the receiving server observed; they do not guarantee that a message is safe.</p>
+                          <div className="trust-lens-grid">
+                            {(["spf", "dkim", "dmarc", "arc", "tls"] as const).map((key) => <div className="trust-lens-item" key={key}><strong>{key.toUpperCase()}</strong><span className={statusClass(status(key))}>{status(key)}</span></div>)}
+                          </div>
+                          <div className="trust-lens-grid">
+                            <div className="trust-lens-item"><strong>Sender history</strong><span>{trustData.sender_first_seen ? "First seen sender" : "Seen before"}</span></div>
+                            <div className="trust-lens-item"><strong>Contact</strong><span>{trustData.known_contact ? "Known contact" : "Not in contacts"}</span></div>
+                            <div className="trust-lens-item"><strong>Reply-To</strong><span className={trustData.reply_to_mismatch ? "trust-status-fail" : "trust-status-pass"}>{trustData.reply_to_mismatch ? "Different address" : "Matches sender"}</span></div>
+                            <div className="trust-lens-item"><strong>Tracking pixels</strong><span>{trustData.tracking_pixel_count || 0} detected</span></div>
+                          </div>
+                          <div className="trust-lens-section"><strong>Link hosts · {trustData.link_count || 0} links</strong>{hosts.length ? <div className="trust-host-list">{hosts.map((item) => <span className="trust-host" key={item.host}>{item.host}{item.count && item.count > 1 ? ` · ${item.count}` : ""}</span>)}</div> : <p className="trust-lens-note">No web links detected.</p>}</div>
+                          {history.length > 0 && <div className="trust-lens-section"><strong>Screening history</strong><p className="trust-lens-note">{history.slice(0, 3).map((item) => `${item.decision} · ${new Date(item.created_at).toLocaleString()}`).join("  |  ")}</p></div>}
+                        </div>;
+                      })() : (
+                        <div className="trust-lens-body"><p className="trust-lens-note">{trustLensBusy ? "Loading sender evidence…" : "No evidence available."}</p></div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {deliveryInspectionOpen && (
+                  <div className="outlook-modal-overlay" onClick={() => setDeliveryInspectionOpen(false)} role="dialog" aria-modal="true" aria-labelledby="delivery-modal-title">
+                    <div className="outlook-modal-box" onClick={(e) => e.stopPropagation()}>
+                      <div className="outlook-modal-header">
+                        <h3 id="delivery-modal-title"><History size={18} color="#1f6b57" /> Delivery Timeline & Inspection</h3>
+                        <button className="icon-button" onClick={() => setDeliveryInspectionOpen(false)} aria-label="Close Delivery Timeline"><X size={18} /></button>
+                      </div>
+                      {deliveryInspection ? (
+                        <>
+                          <div className="delivery-summary-grid">
+                            <div><span>Provider</span><strong>{selected.provider || "Not assigned"}</strong></div>
+                            <div><span>Message size</span><strong>{selected.message_size_bytes ? formatBytes(selected.message_size_bytes) : "Not recorded"}</strong></div>
+                            <div><span>Tracking</span><strong>{selected.open_tracking_enabled || selected.click_tracking_enabled ? `${selected.open_tracking_enabled ? "opens" : ""}${selected.open_tracking_enabled && selected.click_tracking_enabled ? " + " : ""}${selected.click_tracking_enabled ? "clicks" : ""}` : "off"}</strong></div>
+                            <div><span>Provider ID</span><strong>{selected.provider_message_id || "Pending"}</strong></div>
+                          </div>
+                          {selected.delivery_error && <div className="delivery-error"><strong>{selected.delivery_error_code || "Delivery issue"}</strong><span>{selected.delivery_error}</span></div>}
+                          <div className="delivery-timeline-list">
+                            {(() => { const timeline: Array<Record<string, unknown> & { kind: string; at?: unknown }> = [...deliveryInspection.attempts.map((item) => ({ ...item, kind: "attempt", at: item.started_at || item.completed_at })), ...deliveryInspection.events.map((item) => ({ ...item, kind: "event", at: item.occurred_at || item.created_at }))]; return timeline.sort((a, b) => Date.parse(String(a.at || "")) - Date.parse(String(b.at || ""))).map((item, index) => <div className="delivery-timeline-item" key={`${String(item.id || item.event_id || item.at)}-${index}`}><span className="delivery-timeline-dot" /><div><strong>{String(item.kind === "attempt" ? item.status || "attempt" : item.event_type || "event")}</strong><small>{String(item.provider || selected.provider || "provider")} · {item.at ? new Date(String(item.at)).toLocaleString() : "time unavailable"}</small>{typeof item.error_message === "string" && <p>{item.error_message}</p>}{typeof item.payload === "object" && item.payload !== null && <p>{String((item.payload as Record<string, unknown>).reason || "")}</p>}</div></div>); })()}
+                            {!deliveryInspection.attempts.length && !deliveryInspection.events.length && <p className="delivery-empty">No provider events yet. Accepted means the provider took custody; delivery confirmation arrives through its webhook.</p>}
+                          </div>
+                          <details className="raw-inspection"><summary>Full headers and MIME parts</summary><div className="inspection-columns"><div><strong>Headers</strong>{(selected.raw_headers || []).map((header, index) => <code key={`${header.key}-${index}`}>{header.key}: {header.value}</code>)}{!(selected.raw_headers || []).length && <small>No stored headers.</small>}</div><div><strong>MIME parts</strong>{(selected.mime_parts || []).map((part, index) => <code key={index}>{JSON.stringify(part)}</code>)}{!(selected.mime_parts || []).length && <small>No MIME metadata.</small>}</div></div></details>
+                        </>
+                      ) : (
+                        <p className="trust-lens-note">{deliveryInspectionBusy ? "Loading delivery timeline…" : "No delivery events available."}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </article>
             )}
           </section>

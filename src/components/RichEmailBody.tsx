@@ -2,23 +2,12 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import {
   EyeOff,
   ExternalLink,
-  FileDown,
-  Image as ImageIcon,
-  BookOpen,
   Languages,
   Link2,
-  Minus,
-  Moon,
-  Plus,
   Printer,
-  Search,
-  SlidersHorizontal,
   Quote,
-  ShieldAlert,
-  ShieldCheck,
-  Sun,
-  Volume2,
   Square,
+  Volume2,
   X,
 } from "lucide-react";
 import { inspectEmailHtml } from "../lib/email-renderer";
@@ -264,37 +253,19 @@ export default function RichEmailBody({
 
   return (
     <section className="rich-email-reader" aria-label="Message content">
-      <div className="rich-email-toolbar">
-        <details className="rich-email-toolbar-menu">
-          <summary><SlidersHorizontal size={13} /> View</summary>
-          <div className="rich-email-toolbar-popover">
-            <div className="rich-email-toolbar-group rich-email-reader-tools" role="group" aria-label="Reading tools">
-              <button onClick={() => setZoom((value) => Math.max(75, value - 10))} aria-label="Zoom out" title="Zoom out"><Minus size={13} /></button>
-              <span className="rich-email-zoom" aria-live="polite">{zoom}%</span>
-              <button onClick={() => setZoom((value) => Math.min(150, value + 10))} aria-label="Zoom in" title="Zoom in"><Plus size={13} /></button>
-              <button className={darkEmail ? "is-active" : ""} onClick={() => setDarkEmail((value) => !value)} aria-pressed={darkEmail} title="Dark background">{darkEmail ? <Sun size={13} /> : <Moon size={13} />}</button>
-              <button className={!responsive ? "is-active" : ""} onClick={() => setResponsive((value) => !value)} aria-pressed={!responsive} title="Original width">{responsive ? "Original" : "Fit"}</button>
-              <button className={findOpen ? "is-active" : ""} onClick={() => setFindOpen((value) => !value)} aria-pressed={findOpen} title="Find in message"><Search size={13} /> Find</button>
-              <button className={speaking ? "is-active" : ""} onClick={toggleReadAloud} aria-pressed={speaking} title="Read aloud">{speaking ? <Square size={13} /> : <Volume2 size={13} />} Read</button>
-              <button onClick={() => setImmersiveOpen(true)} title="Immersive reader"><BookOpen size={13} /> Focus</button>
-              <button onClick={printEmail} title="Print message"><Printer size={13} /> Print</button>
-              <button onClick={openInNewWindow} title="Open in new window"><ExternalLink size={13} /> Pop out</button>
-            </div>
+      {externalImageCount > 0 && !showRemoteImages && (
+        <div className="outlook-banner outlook-banner-privacy" role="status">
+          <div className="outlook-banner-content">
+            <EyeOff size={15} />
+            <span>To help protect your privacy, Postveil prevented automatic download of some images in this message.</span>
           </div>
-        </details>
-        {stats.linkCount > 0 && <span className="rich-email-security-strip"><Link2 size={13} /> {stats.linkCount} link{stats.linkCount === 1 ? "" : "s"} protected</span>}
-      </div>
-
-      {findOpen && <div className="rich-email-find" role="search" aria-label="Find in message"><Search size={14} /><input autoFocus value={findQuery} onChange={(event) => setFindQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); findNextMatch(); } }} placeholder="Find in this message" aria-label="Find in this message" /><span>{findQuery ? `${findMatchCount} match${findMatchCount === 1 ? "" : "es"}` : "Type to search"}</span><button onClick={findNextMatch} disabled={!findQuery.trim()}>Next</button><button onClick={() => { setFindOpen(false); setFindQuery(""); }} aria-label="Close message search"><X size={14} /></button></div>}
-
-      {externalImageCount > 0 && (
-        <div className="rich-email-content-warning" role="status">
-          <div><EyeOff size={15} /><span><strong>{showRemoteImages ? "External images use a privacy proxy" : "External images are blocked"}</strong><small>{showRemoteImages ? "The sender receives a request from Postveil, not your device." : "Inline images remain available. Remote images and invisible beacons stay off until you choose otherwise."}</small></span></div>
-          {!showRemoteImages && loadExternalImage && <button onClick={() => setShowRemoteImages(true)}><ImageIcon size={13} /> Load privately</button>}
+          {loadExternalImage && (
+            <button className="outlook-banner-btn" onClick={() => setShowRemoteImages(true)}>
+              Download images
+            </button>
+          )}
         </div>
       )}
-
-      {trackerCount > 0 && <div className="rich-email-tracker-note"><ShieldAlert size={14} /><span>Postveil removed likely tracking pixels. Images with meaningful dimensions are still available as inline graphics.</span></div>}
 
       <div className={`rich-email-surface ${darkEmail ? "rich-email-dark" : ""} ${responsive ? "rich-email-responsive" : "rich-email-original-width"}`} style={{ fontSize: `${zoom}%` }} onClick={(event) => void handleContentClick(event)} role="document" aria-label="Sanitized HTML email">
         <div className={showQuotes ? "rich-email-html" : "rich-email-html rich-email-quoted-collapsed"} dangerouslySetInnerHTML={{ __html: sanitizedHtml || "<p>No message body.</p>" }} />
@@ -303,7 +274,6 @@ export default function RichEmailBody({
       <div className="rich-email-footer-tools">
         <button onClick={() => setShowQuotes((value) => !value)} aria-pressed={showQuotes}><Quote size={13} /> {showQuotes ? "Hide quoted replies" : "Show quoted replies"}</button>
         <button onClick={() => setTranslationOpen((value) => !value)} aria-expanded={translationOpen}><Languages size={13} /> Translate</button>
-        <span className="rich-email-footer-note">Scripts, forms, frames, SVG, unsafe CSS, and active content are removed.</span>
       </div>
 
       {translationOpen && <div className="rich-email-translation-panel"><Languages size={15} /><div><strong>Message translation</strong><p>Translation stays opt-in so private messages are not sent to a third-party service automatically.</p><label htmlFor="translation-language">Language<select id="translation-language" value={translationLanguage} onChange={(event) => setTranslationLanguage(event.target.value)}><option value="browser">Use browser translation</option><option value="en">English</option><option value="fil">Filipino</option><option value="es">Spanish</option><option value="fr">French</option></select></label><small>{translationLanguage === "browser" ? "Use your browser’s Translate command to keep the message in this page." : "A translation provider must be configured by the deployment owner before translated text can be generated."}</small></div><button onClick={() => setTranslationOpen(false)} aria-label="Close translation panel"><X size={14} /></button></div>}
