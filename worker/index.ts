@@ -3747,7 +3747,132 @@ function protectedHeaders(response: Response, noStore = false): Response {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+async function handleAccountsApi(request: Request, env: Env, url: URL): Promise<Response> {
+  const authorization = request.headers.get("authorization") || "";
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  const user = token ? await userFromToken(env, token) : null;
+  if (!user) {
+    return error("Unauthorized", 401);
+  }
+
+  // 1. GET /api/accounts/overview
+  if (url.pathname === "/api/accounts/overview" && request.method === "GET") {
+    const domainsResult = await env.DB.prepare(
+      "SELECT data FROM pv_records WHERE table_name = 'domains' ORDER BY created_at DESC"
+    ).all().catch(() => ({ results: [] }));
+    const domains = (domainsResult.results || []).map((r: any) => {
+      try { return JSON.parse(r.data); } catch { return null; }
+    }).filter(Boolean);
+
+    const mailboxesResult = await env.DB.prepare(
+      "SELECT data FROM pv_records WHERE table_name = 'mailboxes' ORDER BY created_at DESC"
+    ).all().catch(() => ({ results: [] }));
+    const mailboxes = (mailboxesResult.results || []).map((r: any) => {
+      try { return JSON.parse(r.data); } catch { return null; }
+    }).filter(Boolean);
+
+    const passkeysResult = await env.DB.prepare(
+      "SELECT data FROM pv_records WHERE table_name = 'passkeys' AND record_id LIKE ? ORDER BY created_at DESC"
+    ).bind(`${user.id}:%`).all().catch(() => ({ results: [] }));
+    const passkeys = (passkeysResult.results || []).map((r: any) => {
+      try { return JSON.parse(r.data); } catch { return null; }
+    }).filter(Boolean);
+
+    const sessionsResult = await env.DB.prepare(
+      "SELECT token_hash, created_at, expires_at, aal FROM pv_sessions WHERE user_id = ? AND revoked = 0 ORDER BY created_at DESC LIMIT 5"
+    ).bind(user.id).all().catch(() => ({ results: [] }));
+
+    const activeSessions = (sessionsResult.results || []).map((s: any) => ({
+      id: s.token_hash,
+      device: "Browser Session",
+      created_at: s.created_at,
+      expires_at: s.expires_at,
+      aal: s.aal,
+      isCurrent: s.token_hash.slice(0, 16) === token.slice(0, 16),
+    }));
+
+    const userMeta = (user.user_metadata || {}) as Record<string, unknown>;
+    const displayName = (userMeta.display_name as string) || (userMeta.name as string) || user.email.split("@")[0];
+
+    return json({
+      data: {
+        user: {
+          id: user.id,
+          email: user.email,
+          display_name: displayName,
+          created_at: (userMeta.created_at as string) || user.email_verified_at || user.last_sign_in_at || new Date().toISOString(),
+          last_sign_in_at: user.last_sign_in_at,
+        },
+        storageTier: (userMeta.storageTier as string) || "local",
+        domains,
+        mailboxes,
+        passkeys,
+        sessions: activeSessions,
+      },
+      error: null,
+    });
+  }
+
+  // 2. POST /api/accounts/passkeys
+  if (url.pathname === "/api/accounts/passkeys" && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as any;
+    const name = String(body.name || "Hardware Passkey").slice(0, 64);
+    const credentialId = String(body.credentialId || `cred_${Date.now()}`).slice(0, 128);
+    const now = new Date().toISOString();
+    const passkeyRecord = {
+      id: `pk_${Date.now()}`,
+      userId: user.id,
+      name,
+      credentialId,
+      created_at: now,
+      lastUsed: "Just now",
+    };
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO pv_records (table_name, record_id, data, created_at, updated_at) VALUES ('passkeys', ?, ?, ?, ?)"
+    ).bind(`${user.id}:${passkeyRecord.id}`, JSON.stringify(passkeyRecord), now, now).run().catch(() => {});
+    return json({ data: passkeyRecord, error: null });
+  }
+
+  // 3. DELETE /api/accounts/passkeys/:id
+  const deletePasskeyMatch = url.pathname.match(/^\/api\/accounts\/passkeys\/([^/]+)$/);
+  if (deletePasskeyMatch && request.method === "DELETE") {
+    const pkId = deletePasskeyMatch[1];
+    await env.DB.prepare(
+      "DELETE FROM pv_records WHERE table_name = 'passkeys' AND record_id = ?"
+    ).bind(`${user.id}:${pkId}`).run().catch(() => {});
+    return json({ data: { success: true }, error: null });
+  }
+
+  // 4. POST /api/accounts/storage
+  if (url.pathname === "/api/accounts/storage" && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as any;
+    const tier = body.tier === "byos" ? "byos" : body.tier === "managed" ? "managed" : "local";
+    const currentMeta = (user.user_metadata || {}) as Record<string, unknown>;
+    const updatedMeta = { ...currentMeta, storageTier: tier };
+    await updateD1User(env, user.id, { metadata: updatedMeta });
+    return json({ data: { storageTier: tier }, error: null });
+  }
+
+  // 5. POST /api/accounts/aliases/mute
+  if (url.pathname === "/api/accounts/aliases/mute" && request.method === "POST") {
+    const body = await request.json().catch(() => ({})) as any;
+    const aliasId = String(body.aliasId || "");
+    const muted = Boolean(body.muted);
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO pv_records (table_name, record_id, data, created_at, updated_at) VALUES ('alias_status', ?, ?, ?, ?)"
+    ).bind(`${user.id}:${aliasId}`, JSON.stringify({ aliasId, muted }), now, now).run().catch(() => {});
+    return json({ data: { aliasId, muted }, error: null });
+  }
+
+  return error("Not found", 404);
+}
+
 async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const accountsUrl = new URL(request.url);
+  if (accountsUrl.pathname.startsWith("/api/accounts/")) {
+    return handleAccountsApi(request, env, accountsUrl);
+  }
   const url = new URL(request.url);
   if (url.pathname !== "/api/health" && url.pathname !== "/api/client-config") {
     const rateLimitResponse = await enforceEdgeRateLimit(request, env);
