@@ -74,6 +74,7 @@ import {
   RotateCcw,
   Search,
   Send,
+  Settings,
   Settings2,
   ShieldAlert,
   ShieldCheck,
@@ -2037,10 +2038,20 @@ function LegacyCompose({
             <span className={`save-dot${saving ? " is-saving" : ""}`} />
             {draftStatus()}
           </span>
-          <button className="primary-button" disabled={busy || uploading > 0}>
-            <Send size={15} />{" "}
-            {busy ? "Sending…" : scheduledAt ? "Schedule send" : "Send"}
-          </button>
+          <div className="compose-foot-actions">
+            <button
+              type="button"
+              className="secondary-button compose-discard-btn"
+              onClick={onClose}
+              title="Discard draft"
+            >
+              <Trash2 size={14} /> Discard
+            </button>
+            <button className="primary-button" disabled={busy || uploading > 0}>
+              <Send size={15} />{" "}
+              {busy ? "Sending…" : scheduledAt ? "Schedule send" : "Send"}
+            </button>
+          </div>
         </div>
       </form>
     </div>
@@ -2252,7 +2263,7 @@ function Compose({
       <div className="attachment-strip" aria-live="polite">{attachments.map((attachment) => <span className="attachment-chip" key={attachment.object_key}><Paperclip size={13} aria-hidden="true" /><span className="attachment-chip-copy"><strong>{attachment.filename}</strong><small>{formatBytes(attachment.byte_size)}</small></span><button type="button" className="attachment-remove" onClick={() => setAttachments((current) => current.filter((item) => item.object_key !== attachment.object_key))} aria-label={`Remove ${attachment.filename}`} title={`Remove ${attachment.filename}`}><X size={13} /></button></span>)}</div>
       {error && <div className="form-error compose-error">{error}</div>}
     </div>
-    <div className="compose-foot"><span className="compose-hint" aria-live="polite"><span className={`save-dot${saving ? " is-saving" : ""}`} />{draftStatus()}</span><button className="primary-button" disabled={busy || uploading > 0}><Send size={15} /> {busy ? "Sending…" : scheduledAt || delayMinutes !== "0" ? "Schedule send" : "Send"}</button></div>
+    <div className="compose-foot"><span className="compose-hint" aria-live="polite"><span className={`save-dot${saving ? " is-saving" : ""}`} />{draftStatus()}</span><div className="compose-foot-actions"><button type="button" className="secondary-button compose-discard-btn" onClick={onClose} title="Discard draft"><Trash2 size={14} /> Discard</button><button className="primary-button" disabled={busy || uploading > 0}><Send size={15} /> {busy ? "Sending…" : scheduledAt || delayMinutes !== "0" ? "Schedule send" : "Send"}</button></div></div>
   </form></div>;
 }
 
@@ -4592,8 +4603,9 @@ function MailboxApp({ session }: { session: Session }) {
   const [diagnosticsModalOpen, setDiagnosticsModalOpen] = useState(false);
   const [whatsNewModalOpen, setWhatsNewModalOpen] = useState(false);
   const [readingPanePosition, setReadingPanePosition] = useState<"right" | "bottom" | "off">("right");
-  const [folderPaneCollapsed, setFolderPaneCollapsed] = useState(false);
+  const [folderPaneCollapsed, setFolderPaneCollapsed] = useState(() => typeof window !== "undefined" && window.innerWidth <= 1024);
   const [inboxUnreadCount, setInboxUnreadCount] = useState<number>(0);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [normalizedQuery, setNormalizedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -6428,16 +6440,33 @@ function MailboxApp({ session }: { session: Session }) {
           aria-expanded={mobileNav}
           aria-controls="mailbox-navigation"
         >
-          <Menu size={19} />
+          <Menu size={20} />
         </button>
         <div className="mini-brand">
           <span>P</span> Postveil
         </div>
         <div className="mobile-topbar-actions">
           <button
+            className={`icon-button ${mobileSearchOpen ? "is-active" : ""}`}
+            onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
+            aria-label="Search mail"
+            title="Search mail"
+          >
+            <Search size={18} />
+          </button>
+          <button
+            className="icon-button"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Settings size={18} />
+          </button>
+          <button
             className="icon-button"
             onClick={() => void loadMessages()}
             aria-label="Refresh"
+            title="Refresh"
           >
             <RefreshCcw size={17} />
           </button>
@@ -6451,6 +6480,38 @@ function MailboxApp({ session }: { session: Session }) {
           </button>
         </div>
       </header>
+      {mobileSearchOpen && (
+        <div className="mobile-search-strip">
+          <Search size={15} color="#6b7280" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search mail..."
+            aria-label="Search mail query"
+            autoFocus
+          />
+          {query ? (
+            <button
+              type="button"
+              className="icon-button mobile-search-clear"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+            >
+              <X size={15} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="icon-button mobile-search-close"
+              onClick={() => setMobileSearchOpen(false)}
+              aria-label="Close search"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
+      )}
       {mobileNav && <button className="mobile-nav-backdrop" type="button" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
       <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""} ${folderPaneCollapsed ? "folder-pane-collapsed" : ""}`}>
         <div className="sidebar-top">
@@ -6609,6 +6670,16 @@ function MailboxApp({ session }: { session: Session }) {
             <span>Work</span>
             {workSummary.total > 0 && <em className="nav-count">{workSummary.total}</em>}
             {workSummary.overdue > 0 && <em className="nav-overdue">{workSummary.overdue} due</em>}
+          </button>
+          <button
+            className="folder-link"
+            onClick={() => {
+              setSettingsOpen(true);
+              setMobileNav(false);
+            }}
+          >
+            <Settings size={17} />
+            <span>Settings</span>
           </button>
         </nav>
         <div className="sidebar-spacer" />
