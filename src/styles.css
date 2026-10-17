@@ -4384,6 +4384,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   height: 32px !important;
   min-height: 32px !important;
   max-height: 32px !important;
+  width: auto !important;
   min-width: auto !important;
   padding: 0 8px !important;
   gap: 6px !important;
