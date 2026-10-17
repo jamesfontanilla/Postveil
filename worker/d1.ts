@@ -81,7 +81,18 @@ function matchFilter(row: Row, field: string, expression: string): boolean {
   const operator = dot === -1 ? "eq" : normalized.slice(0, dot);
   const operand = dot === -1 ? normalized : normalized.slice(dot + 1);
   let result = false;
-  if (operator === "eq") result = equalValue(value, operand);
+  if (operator === "wfts" || field === "search_vector") {
+    const rawTokens = operand.toLowerCase().replace(/["']/g, "").split(/\s+/).filter(Boolean);
+    const searchable = [
+      row.subject,
+      row.snippet,
+      row.from_name,
+      row.from_address,
+      Array.isArray(row.to_addresses) ? row.to_addresses.join(" ") : row.to_addresses,
+      row.text_body,
+    ].filter(Boolean).join(" ").toLowerCase();
+    result = rawTokens.length === 0 || rawTokens.every((token) => searchable.includes(token));
+  } else if (operator === "eq") result = equalValue(value, operand);
   else if (operator === "neq") result = !equalValue(value, operand);
   else if (operator === "in") result = splitList(operand).some((item) => equalValue(value, item));
   else if (operator === "ilike" || operator === "like") result = wildcardMatch(value, operand);

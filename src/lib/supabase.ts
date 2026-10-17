@@ -33,6 +33,9 @@ type RealtimeChannel = {
 
 const SESSION_KEY = "postveil.d1.session";
 let currentSession: Session | null = readSession();
+let lastSessionVerifiedAt = 0;
+let inFlightSessionPromise: Promise<AuthResponse<{ session: Session | null }>> | null = null;
+const SESSION_CACHE_TTL_MS = 30_000;
 const listeners = new Set<AuthListener>();
 
 function readSession(): Session | null {
@@ -46,6 +49,7 @@ function readSession(): Session | null {
 
 function writeSession(session: Session | null) {
   currentSession = session;
+  lastSessionVerifiedAt = session ? Date.now() : 0;
   try {
     if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
     else localStorage.removeItem(SESSION_KEY);
@@ -120,13 +124,29 @@ const auth = {
     if (!currentSession) {
       return { data: { session: null }, error: null };
     }
-    const result = await request<{ session: Session | null }>("/api/auth/session");
-    if (result.error) {
-      writeSession(null);
-      return { data: { session: null }, error: null };
+    const now = Date.now();
+    if (now - lastSessionVerifiedAt < SESSION_CACHE_TTL_MS && currentSession.access_token) {
+      return { data: { session: currentSession }, error: null };
     }
-    writeSession(result.data.session);
-    return result;
+    if (inFlightSessionPromise) {
+      return inFlightSessionPromise;
+    }
+    inFlightSessionPromise = (async () => {
+      try {
+        const result = await request<{ session: Session | null }>("/api/auth/session");
+        if (result.error) {
+          writeSession(null);
+          lastSessionVerifiedAt = 0;
+          return { data: { session: null }, error: null };
+        }
+        writeSession(result.data.session);
+        lastSessionVerifiedAt = Date.now();
+        return result;
+      } finally {
+        inFlightSessionPromise = null;
+      }
+    })();
+    return inFlightSessionPromise;
   },
   async signUp({ email, password, options }: { email: string; password: string; options?: JsonRecord }): Promise<AuthResponse<{ user: PostveilUser | null; session: Session | null }>> {
     const result = await request<{ user: PostveilUser; session: Session | null }>("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password, data: options?.data ?? {}, captchaToken: options?.captchaToken ?? null }) });

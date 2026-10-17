@@ -4593,6 +4593,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [whatsNewModalOpen, setWhatsNewModalOpen] = useState(false);
   const [readingPanePosition, setReadingPanePosition] = useState<"right" | "bottom" | "off">("right");
   const [folderPaneCollapsed, setFolderPaneCollapsed] = useState(false);
+  const [inboxUnreadCount, setInboxUnreadCount] = useState<number>(0);
   const [normalizedQuery, setNormalizedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -5052,6 +5053,11 @@ function MailboxApp({ session }: { session: Session }) {
     }, 160);
     return () => window.clearTimeout(timer);
   }, [query, searchFocused]);
+  useEffect(() => {
+    if (folder === "inbox" && filter === "all" && !query.trim()) {
+      setInboxUnreadCount(messages.filter((m) => !m.is_read).length);
+    }
+  }, [folder, filter, query, messages]);
   async function openMessage(message: Message) {
     const requestId = detailRequestRef.current + 1;
     detailRequestRef.current = requestId;
@@ -6027,6 +6033,9 @@ function MailboxApp({ session }: { session: Session }) {
                 setQuery("");
                 setFilter("all");
                 setSort("newest");
+                setReadingPanePosition("right");
+                setFolderPaneCollapsed(false);
+                void updateSettings({ density: "comfortable" });
                 void loadMessages();
               }}
               title="Reset view to default"
@@ -6477,7 +6486,7 @@ function MailboxApp({ session }: { session: Session }) {
           >
             <Inbox size={17} />
             <span>Inbox</span>
-            {unread > 0 && <em>{unread}</em>}
+            {inboxUnreadCount > 0 && <em>{inboxUnreadCount}</em>}
           </button>
           <button
             className={`folder-link ${view === "mail" && folder === "focused" ? "active" : ""}`}
