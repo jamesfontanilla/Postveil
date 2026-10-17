@@ -2629,6 +2629,7 @@ function SettingsPanel({
   onOpenMessage,
   loadRemoteImages,
   onLoadRemoteImagesChange,
+  initialTab,
 }: {
   session: Session;
   settings: AppSettings;
@@ -2642,6 +2643,16 @@ function SettingsPanel({
   onOpenMessage: (message: Message) => void;
   loadRemoteImages: boolean;
   onLoadRemoteImagesChange: (value: boolean) => void;
+  initialTab?:
+    | "appearance"
+    | "security"
+    | "organize"
+    | "contacts"
+    | "spam"
+    | "automation"
+    | "mailboxes"
+    | "integrations"
+    | "administration";
 }) {
   const { confirm, prompt } = useAppDialog();
   const [tab, setTab] = useState<
@@ -2654,7 +2665,7 @@ function SettingsPanel({
     | "mailboxes"
     | "integrations"
     | "administration"
-  >("appearance");
+  >(initialTab || "appearance");
   const [folderName, setFolderName] = useState("");
   const [folderColor, setFolderColor] = useState("#6f7d91");
   const [folderParentId, setFolderParentId] = useState("");
@@ -4523,6 +4534,17 @@ function MailboxApp({ session }: { session: Session }) {
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeSeed, setComposeSeed] = useState<ComposeSeed | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<
+    | "appearance"
+    | "security"
+    | "organize"
+    | "contacts"
+    | "spam"
+    | "automation"
+    | "mailboxes"
+    | "integrations"
+    | "administration"
+  >("appearance");
   const [mobileNav, setMobileNav] = useState(false);
   const [loadRemoteImages, setLoadRemoteImages] = useState(() => storedBooleanPreference(imagePreferenceKey, false));
   const [query, setQuery] = useState("");
@@ -6175,7 +6197,10 @@ function MailboxApp({ session }: { session: Session }) {
             {/* Account & Administration Commands */}
             <button
               className="mail-ribbon-command"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => {
+                setSettingsInitialTab("appearance");
+                setSettingsOpen(true);
+              }}
               title="Open mailbox settings"
             >
               <Settings2 size={16} color="#1f6b57" />
@@ -6183,7 +6208,10 @@ function MailboxApp({ session }: { session: Session }) {
             </button>
             <button
               className="mail-ribbon-command"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => {
+                setSettingsInitialTab("mailboxes");
+                setSettingsOpen(true);
+              }}
               title="Manage custom domains and DNS"
             >
               <Globe2 size={16} color="#1f6b57" />
@@ -6191,7 +6219,10 @@ function MailboxApp({ session }: { session: Session }) {
             </button>
             <button
               className="mail-ribbon-command"
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => {
+                setSettingsInitialTab("automation");
+                setSettingsOpen(true);
+              }}
               title="Inbox rules and automated filters"
             >
               <SlidersHorizontal size={16} color="#1f6b57" />
@@ -7256,6 +7287,7 @@ function MailboxApp({ session }: { session: Session }) {
           mailboxes={mailboxes}
           rules={rules}
           senderPolicies={senderPolicies}
+          initialTab={settingsInitialTab}
           onClose={() => setSettingsOpen(false)}
           onOpenMessage={(message) => void openMessage(message)}
           loadRemoteImages={loadRemoteImages}
