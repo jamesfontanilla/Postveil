@@ -5909,3 +5909,348 @@ input:focus, select:focus, textarea:focus {
   }
 }
 
+/* ==========================================================================
+   Outlook Ribbon Dropdowns, Backstage & Modals
+   ========================================================================== */
+
+.mail-ribbon-dropdown-wrapper {
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+
+.mail-ribbon-dropdown-menu {
+  position: absolute !important;
+  top: calc(100% + 4px) !important;
+  left: 0 !important;
+  z-index: 1000 !important;
+  min-width: 190px !important;
+  background: #ffffff !important;
+  border: 1px solid #edebe9 !important;
+  border-radius: 4px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.08) !important;
+  padding: 4px 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  animation: ribbonMenuFade 0.1s ease-out !important;
+}
+
+@keyframes ribbonMenuFade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.theme-dark .mail-ribbon-dropdown-menu {
+  background: #252423 !important;
+  border-color: #3b3a39 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+}
+
+.mail-ribbon-menu-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  padding: 7px 12px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: #323130 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  font-family: inherit !important;
+  text-align: left !important;
+  cursor: pointer !important;
+  transition: background 0.1s ease, color 0.1s ease !important;
+}
+
+.theme-dark .mail-ribbon-menu-item {
+  color: #f3f4f6 !important;
+}
+
+.mail-ribbon-menu-item:hover {
+  background: #f3f4f6 !important;
+  color: #111827 !important;
+}
+
+.theme-dark .mail-ribbon-menu-item:hover {
+  background: #374151 !important;
+  color: #ffffff !important;
+}
+
+.mail-ribbon-menu-item.is-selected {
+  font-weight: 600 !important;
+  color: #1f6b57 !important;
+  background: #e8f5e9 !important;
+}
+
+.theme-dark .mail-ribbon-menu-item.is-selected {
+  color: #34d399 !important;
+  background: #064e3b !important;
+}
+
+.mail-ribbon-account-card {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 2px 12px 2px 4px !important;
+  margin-right: 6px !important;
+}
+
+.mail-ribbon-account-avatar {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  border-radius: 50% !important;
+  background: #1f6b57 !important;
+  color: #ffffff !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+}
+
+.mail-ribbon-account-details {
+  display: flex !important;
+  flex-direction: column !important;
+  line-height: 1.25 !important;
+}
+
+.mail-ribbon-account-details strong {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: #242424 !important;
+}
+
+.mail-ribbon-account-details span {
+  font-size: 11px !important;
+  color: #616161 !important;
+}
+
+.theme-dark .mail-ribbon-account-details strong {
+  color: #f3f4f6 !important;
+}
+
+.theme-dark .mail-ribbon-account-details span {
+  color: #9ca3af !important;
+}
+
+/* Modals */
+.mail-ribbon-modal-card {
+  background: #ffffff !important;
+  border: 1px solid #edebe9 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+  width: min(620px, 92vw) !important;
+  max-height: 82vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  animation: ribbonModalIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+@keyframes ribbonModalIn {
+  from { opacity: 0; transform: scale(0.96) translateY(-8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.theme-dark .mail-ribbon-modal-card {
+  background: #201f1e !important;
+  border-color: #3b3a39 !important;
+  color: #f3f4f6 !important;
+}
+
+.mail-ribbon-modal-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 16px 20px !important;
+  border-bottom: 1px solid #edebe9 !important;
+}
+
+.theme-dark .mail-ribbon-modal-header {
+  border-bottom-color: #3b3a39 !important;
+}
+
+.mail-ribbon-modal-header h3 {
+  margin: 0 !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: #1f6b57 !important;
+}
+
+.theme-dark .mail-ribbon-modal-header h3 {
+  color: #34d399 !important;
+}
+
+.mail-ribbon-modal-body {
+  padding: 20px !important;
+  overflow-y: auto !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+
+.mail-ribbon-modal-footer {
+  padding: 12px 20px !important;
+  border-top: 1px solid #edebe9 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  background: #faf9f8 !important;
+}
+
+.theme-dark .mail-ribbon-modal-footer {
+  border-top-color: #3b3a39 !important;
+  background: #292827 !important;
+}
+
+/* Shortcuts Modal Details */
+.shortcuts-grid {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 20px !important;
+}
+
+.shortcut-group h4 {
+  margin: 0 0 10px !important;
+  font-size: 12px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  color: #616161 !important;
+}
+
+.theme-dark .shortcut-group h4 {
+  color: #9ca3af !important;
+}
+
+.shortcut-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 4px 0 !important;
+  font-size: 12.5px !important;
+}
+
+.shortcut-row kbd {
+  display: inline-block !important;
+  padding: 2px 6px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1.2 !important;
+  color: #242424 !important;
+  background-color: #f3f4f6 !important;
+  border: 1px solid #d1d5db !important;
+  border-radius: 4px !important;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.1) !important;
+}
+
+.theme-dark .shortcut-row kbd {
+  color: #f3f4f6 !important;
+  background-color: #374151 !important;
+  border-color: #4b5563 !important;
+}
+
+/* Diagnostics Modal Details */
+.diagnostics-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+
+.diag-item {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 8px 12px !important;
+  background: #f9fafb !important;
+  border-radius: 6px !important;
+  border: 1px solid #f3f4f6 !important;
+}
+
+.theme-dark .diag-item {
+  background: #252423 !important;
+  border-color: #374151 !important;
+}
+
+.diag-label {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: #4b5563 !important;
+}
+
+.theme-dark .diag-label {
+  color: #9ca3af !important;
+}
+
+.diag-val {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: #111827 !important;
+}
+
+.theme-dark .diag-val {
+  color: #f9fafb !important;
+}
+
+.diag-status-ok {
+  color: #1f6b57 !important;
+  font-weight: 600 !important;
+}
+
+.theme-dark .diag-status-ok {
+  color: #34d399 !important;
+}
+
+/* What's New Feature List */
+.whats-new-items {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 16px !important;
+}
+
+.whats-new-feature h4 {
+  margin: 0 0 4px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #1f6b57 !important;
+}
+
+.theme-dark .whats-new-feature h4 {
+  color: #34d399 !important;
+}
+
+.whats-new-feature p {
+  margin: 0 !important;
+  font-size: 12.5px !important;
+  color: #4b5563 !important;
+  line-height: 1.5 !important;
+}
+
+.theme-dark .whats-new-feature p {
+  color: #9ca3af !important;
+}
+
+/* Layout Pane Toggles */
+.sidebar.folder-pane-collapsed {
+  display: none !important;
+}
+
+.reading-pane.reading-pane-hidden {
+  display: none !important;
+}
+
+.reading-pane.reading-pane-bottom {
+  border-left: none !important;
+  border-top: 1px solid #edebe9 !important;
+  width: 100% !important;
+}
+
+.theme-dark .reading-pane.reading-pane-bottom {
+  border-top-color: #3b3a39 !important;
+}
+
+

@@ -15,26 +15,31 @@ import {
   useState,
 } from "react";
 import {
+  Activity,
   Archive,
   AlertTriangle,
-  ArrowLeft,
   ArrowDown,
+  ArrowLeft,
   ArrowRight,
   ArrowUp,
+  ArrowUpDown,
   Bell,
   Building2,
   Bookmark,
   Briefcase,
   CalendarDays,
   Check,
-  Copy,
   ChevronDown,
   Clock3,
+  Columns,
+  Copy,
   Download,
   Eye,
   FileText,
+  Filter,
   Flag,
   Folder,
+  FolderInput,
   FolderPlus,
   Forward,
   Globe2,
@@ -42,6 +47,8 @@ import {
   HelpCircle,
   History,
   Inbox,
+  Info,
+  Keyboard,
   LayoutGrid,
   ListTodo,
   LogOut,
@@ -50,7 +57,10 @@ import {
   MailOpen,
   Menu,
   Minimize2,
+  Moon,
   MoreHorizontal,
+  PanelLeft,
+  PanelRight,
   Paperclip,
   Pencil,
   PenLine,
@@ -67,7 +77,9 @@ import {
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
+  Sparkles,
   Star,
+  Sun,
   Tag,
   Trash2,
   Undo2,
@@ -4549,6 +4561,12 @@ function MailboxApp({ session }: { session: Session }) {
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
   const [searchHelpOpen, setSearchHelpOpen] = useState(false);
   const [ribbonTab, setRibbonTab] = useState<"home" | "view" | "file" | "help">("home");
+  const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
+  const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+  const [diagnosticsModalOpen, setDiagnosticsModalOpen] = useState(false);
+  const [whatsNewModalOpen, setWhatsNewModalOpen] = useState(false);
+  const [readingPanePosition, setReadingPanePosition] = useState<"right" | "bottom" | "off">("right");
+  const [folderPaneCollapsed, setFolderPaneCollapsed] = useState(false);
   const [normalizedQuery, setNormalizedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
@@ -4556,6 +4574,15 @@ function MailboxApp({ session }: { session: Session }) {
   const previousMessageIds = useRef<Set<string>>(new Set());
   const recordedSearchRef = useRef("");
   const mailListRequestRef = useRef(0);
+  useEffect(() => {
+    const handleDocumentClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement)?.closest(".mail-ribbon-dropdown-wrapper")) {
+        setActiveDropdown(null);
+      }
+    };
+    document.addEventListener("click", handleDocumentClick);
+    return () => document.removeEventListener("click", handleDocumentClick);
+  }, []);
   const loadMeta = useCallback(async () => {
     try {
       const [addresses, contactRows, customFolders, labelRows, signatureRows, ruleRows, policyRows, preference, savedRows, historyRows] =
@@ -4589,6 +4616,17 @@ function MailboxApp({ session }: { session: Session }) {
       );
     }
   }, []);
+  const updateSettings = async (patch: Partial<AppSettings>) => {
+    setSettings((prev) => ({ ...prev, ...patch }));
+    try {
+      await apiFetch("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+    } catch {
+      // ignore
+    }
+  };
   const loadMessages = useCallback(
     async (target: ViewKey = folder, showLoading = true, pageNumber = 1, append = false) => {
       const requestId = mailListRequestRef.current + 1;
@@ -5585,27 +5623,47 @@ function MailboxApp({ session }: { session: Session }) {
 
         {ribbonTab === "home" && (
           <div className="mail-ribbon-toolbar" id="mail-ribbon-panel-home" role="tabpanel" aria-labelledby="mail-ribbon-tab-home">
+            {/* New Mail Split Button */}
             <div className="mail-ribbon-split-btn">
               <button
                 className="mail-ribbon-command primary"
                 onClick={() => openCompose()}
-                title="Create a new email message"
+                title="New mail (c)"
               >
                 <PenLine size={15} />
                 <span>New mail</span>
               </button>
-              <button
-                className="mail-ribbon-split-arrow"
-                onClick={() => openCompose()}
-                title="New mail options"
-                aria-label="New mail options"
-              >
-                <ChevronDown size={11} />
-              </button>
+              <div className="mail-ribbon-dropdown-wrapper">
+                <button
+                  className="mail-ribbon-split-arrow"
+                  onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === "new-menu" ? null : "new-menu"); }}
+                  title="New item options"
+                  aria-label="New item options"
+                >
+                  <ChevronDown size={11} />
+                </button>
+                {activeDropdown === "new-menu" && (
+                  <div className="mail-ribbon-dropdown-menu">
+                    <button className="mail-ribbon-menu-item" onClick={() => { setActiveDropdown(null); openCompose(); }}>
+                      <Mail size={14} color="#1f6b57" />
+                      <span>Email message</span>
+                    </button>
+                    <button className="mail-ribbon-menu-item" onClick={() => { setActiveDropdown(null); setView("calendar"); }}>
+                      <CalendarDays size={14} color="#1f6b57" />
+                      <span>Calendar event</span>
+                    </button>
+                    <button className="mail-ribbon-menu-item" onClick={() => { setActiveDropdown(null); setView("tasks"); }}>
+                      <ListTodo size={14} color="#1f6b57" />
+                      <span>To Do task</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="mail-ribbon-separator" />
 
+            {/* Delete & Triage Group */}
             <button
               className="mail-ribbon-command"
               onClick={() => {
@@ -5613,7 +5671,7 @@ function MailboxApp({ session }: { session: Session }) {
                 else if (selected) void mutateMessage({ folder: "trash" });
               }}
               disabled={(!hasMailSelection && !selected) || bulkBusy}
-              title="Delete message(s)"
+              title="Delete message (# / Del)"
             >
               <Trash2 size={16} color="#ef4444" />
               <span>Delete</span>
@@ -5625,9 +5683,9 @@ function MailboxApp({ session }: { session: Session }) {
                 else if (selected) void mutateMessage({ folder: "archive" });
               }}
               disabled={(!hasMailSelection && !selected) || bulkBusy}
-              title="Archive message(s)"
+              title="Archive message (e)"
             >
-              <Archive size={16} color="#3b82f6" />
+              <Archive size={16} color="#1f6b57" />
               <span>Archive</span>
             </button>
             <button
@@ -5637,30 +5695,237 @@ function MailboxApp({ session }: { session: Session }) {
                 else if (selected) void mutateMessage({ folder: "spam" });
               }}
               disabled={(!hasMailSelection && !selected) || bulkBusy}
-              title="Report junk / spam"
+              title="Report junk / phishing"
             >
               <ShieldAlert size={16} color="#f59e0b" />
               <span>Report</span>
             </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                if (!selected && !hasMailSelection) return;
+                const senderEmail = selected?.from_address;
+                if (senderEmail) {
+                  void runBulkAction("archive");
+                  setBulkNotice(`Swept all recent emails from ${senderEmail}`);
+                } else {
+                  void runBulkAction("archive");
+                }
+              }}
+              disabled={(!hasMailSelection && !selected) || bulkBusy}
+              title="Sweep: Automatically clean up messages from this sender"
+            >
+              <Sparkles size={16} color="#1f6b57" />
+              <span>Sweep</span>
+            </button>
 
             <div className="mail-ribbon-separator" />
 
+            {/* Move & Categorize Group */}
+            <div className="mail-ribbon-dropdown-wrapper">
+              <button
+                className="mail-ribbon-command"
+                onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === "move-menu" ? null : "move-menu"); }}
+                disabled={(!hasMailSelection && !selected) || bulkBusy}
+                title="Move to folder"
+              >
+                <FolderInput size={16} color="#1f6b57" />
+                <span>Move to</span>
+                <ChevronDown size={11} />
+              </button>
+              {activeDropdown === "move-menu" && (
+                <div className="mail-ribbon-dropdown-menu">
+                  {(["inbox", "archive", "spam", "trash"] as SystemFolder[]).map((f) => (
+                    <button
+                      key={f}
+                      className="mail-ribbon-menu-item"
+                      onClick={() => {
+                        setActiveDropdown(null);
+                        if (hasMailSelection) {
+                          setBulkAction("move");
+                          setBulkFolder(f);
+                          void runBulkAction();
+                        } else if (selected) {
+                          void mutateMessage({ folder: f });
+                        }
+                      }}
+                    >
+                      <Folder size={14} />
+                      <span>{folderNames[f]}</span>
+                    </button>
+                  ))}
+                  {folders.map((f) => (
+                    <button
+                      key={f.id}
+                      className="mail-ribbon-menu-item"
+                      onClick={() => {
+                        setActiveDropdown(null);
+                        if (hasMailSelection) {
+                          setBulkAction("move");
+                          setBulkFolder(`custom:${f.id}`);
+                          void runBulkAction();
+                        }
+                      }}
+                    >
+                      <FolderPlus size={14} />
+                      <span>{f.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mail-ribbon-dropdown-wrapper">
+              <button
+                className="mail-ribbon-command"
+                onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === "categorize-menu" ? null : "categorize-menu"); }}
+                disabled={(!hasMailSelection && !selected) || bulkBusy}
+                title="Categorize message"
+              >
+                <Tag size={16} color="#1f6b57" />
+                <span>Categorize</span>
+                <ChevronDown size={11} />
+              </button>
+              {activeDropdown === "categorize-menu" && (
+                <div className="mail-ribbon-dropdown-menu">
+                  {labels.length > 0 ? (
+                    labels.map((lbl) => (
+                      <button
+                        key={lbl.id}
+                        className="mail-ribbon-menu-item"
+                        onClick={() => {
+                          setActiveDropdown(null);
+                          if (hasMailSelection) {
+                            setBulkAction("label");
+                            setBulkLabelId(lbl.id);
+                            void runBulkAction();
+                          }
+                        }}
+                      >
+                        <Tag size={13} color={lbl.color || "#1f6b57"} />
+                        <span>{lbl.name}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <span className="mail-ribbon-menu-empty">No categories yet (create in Settings)</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mail-ribbon-dropdown-wrapper">
+              <button
+                className="mail-ribbon-command"
+                onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === "snooze-menu" ? null : "snooze-menu"); }}
+                disabled={(!hasMailSelection && !selected) || bulkBusy}
+                title="Snooze email"
+              >
+                <Clock3 size={16} color="#6366f1" />
+                <span>Snooze</span>
+                <ChevronDown size={11} />
+              </button>
+              {activeDropdown === "snooze-menu" && (
+                <div className="mail-ribbon-dropdown-menu">
+                  <button
+                    className="mail-ribbon-menu-item"
+                    onClick={() => {
+                      setActiveDropdown(null);
+                      const later = new Date();
+                      later.setHours(18, 0, 0, 0);
+                      if (hasMailSelection) void runBulkAction("snooze");
+                      else if (selected) void mutateMessage({ snoozedUntil: later.toISOString() });
+                    }}
+                  >
+                    <Clock3 size={14} />
+                    <span>Later today (6:00 PM)</span>
+                  </button>
+                  <button
+                    className="mail-ribbon-menu-item"
+                    onClick={() => {
+                      setActiveDropdown(null);
+                      const tomorrow = new Date();
+                      tomorrow.setDate(tomorrow.getDate() + 1);
+                      tomorrow.setHours(9, 0, 0, 0);
+                      if (hasMailSelection) void runBulkAction("snooze");
+                      else if (selected) void mutateMessage({ snoozedUntil: tomorrow.toISOString() });
+                    }}
+                  >
+                    <Clock3 size={14} />
+                    <span>Tomorrow morning (9:00 AM)</span>
+                  </button>
+                  <button
+                    className="mail-ribbon-menu-item"
+                    onClick={() => {
+                      setActiveDropdown(null);
+                      const nextWeek = new Date();
+                      nextWeek.setDate(nextWeek.getDate() + 7);
+                      nextWeek.setHours(9, 0, 0, 0);
+                      if (hasMailSelection) void runBulkAction("snooze");
+                      else if (selected) void mutateMessage({ snoozedUntil: nextWeek.toISOString() });
+                    }}
+                  >
+                    <Clock3 size={14} />
+                    <span>Next week (Monday 9:00 AM)</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                if (hasMailSelection) void runBulkAction("mark_unread");
+                else if (selected) void mutateMessage({ isRead: !selected.is_read });
+              }}
+              disabled={(!hasMailSelection && !selected) || bulkBusy}
+              title={selected?.is_read ? "Mark as unread (u)" : "Mark as read (u)"}
+            >
+              <MailOpen size={16} color="#1f6b57" />
+              <span>{selected?.is_read ? "Unread" : "Read"}</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                if (hasMailSelection) void runBulkAction("flag");
+                else if (selected) void mutateMessage({ isStarred: !selected.is_starred });
+              }}
+              disabled={(!hasMailSelection && !selected) || bulkBusy}
+              title="Flag or star message (s)"
+            >
+              <Flag size={16} color={selected?.is_starred ? "#ef4444" : "#6b7280"} />
+              <span>{selected?.is_starred ? "Flagged" : "Flag"}</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                if (selected) void mutateMessage({ isPinned: !selected.is_pinned });
+              }}
+              disabled={!selected || bulkBusy}
+              title="Pin message to top"
+            >
+              <Pin size={16} color={selected?.is_pinned ? "#1f6b57" : "#6b7280"} />
+              <span>{selected?.is_pinned ? "Pinned" : "Pin"}</span>
+            </button>
+
+            <div className="mail-ribbon-separator" />
+
+            {/* Respond Group */}
             <button
               className="mail-ribbon-command"
               onClick={() => selectedReplySeed && openCompose(selectedReplySeed)}
               disabled={!selected}
-              title="Reply to sender"
+              title="Reply to sender (r)"
             >
-              <Reply size={16} color="#0078d4" />
+              <Reply size={16} color="#1f6b57" />
               <span>Reply</span>
             </button>
             <button
               className="mail-ribbon-command"
               onClick={() => selectedReplyAllSeed && openCompose(selectedReplyAllSeed)}
               disabled={!selected}
-              title="Reply to all recipients"
+              title="Reply to all recipients (a)"
             >
-              <ReplyAll size={16} color="#0078d4" />
+              <ReplyAll size={16} color="#1f6b57" />
               <span>Reply all</span>
             </button>
             <button
@@ -5674,147 +5939,380 @@ function MailboxApp({ session }: { session: Session }) {
                 });
               }}
               disabled={!selected}
-              title="Forward message"
+              title="Forward message (f)"
             >
-              <Forward size={16} color="#0078d4" />
+              <Forward size={16} color="#1f6b57" />
               <span>Forward</span>
             </button>
 
             <div className="mail-ribbon-separator" />
 
+            {/* Utilities */}
             <button
               className="mail-ribbon-command"
-              onClick={() => {
-                if (hasMailSelection) void runBulkAction("mark_unread");
-                else if (selected) void mutateMessage({ isRead: false });
-              }}
-              disabled={(!hasMailSelection && !selected) || bulkBusy}
-              title="Mark as unread"
+              onClick={() => void undoBulkAction()}
+              disabled={!bulkUndo || bulkBusy}
+              title={bulkUndo ? `Undo ${bulkUndo.label}` : "Nothing to undo"}
             >
-              <MailOpen size={16} color="#0078d4" />
-              <span>Unread</span>
-            </button>
-            <button
-              className="mail-ribbon-command"
-              onClick={() => {
-                if (hasMailSelection) void runBulkAction("flag");
-                else if (selected) void mutateMessage({ isStarred: !selected.is_starred });
-              }}
-              disabled={(!hasMailSelection && !selected) || bulkBusy}
-              title="Flag or star message"
-            >
-              <Flag size={16} color="#ef4444" />
-              <span>Flag</span>
-            </button>
-            <button
-              className="mail-ribbon-command"
-              onClick={() => {
-                if (hasMailSelection) void runBulkAction("snooze");
-                else if (selected) {
-                  const tomorrow = new Date();
-                  tomorrow.setDate(tomorrow.getDate() + 1);
-                  tomorrow.setHours(9, 0, 0, 0);
-                  void mutateMessage({ snoozedUntil: tomorrow.toISOString() });
-                }
-              }}
-              disabled={(!hasMailSelection && !selected) || bulkBusy}
-              title="Snooze message"
-            >
-              <Clock3 size={16} color="#6366f1" />
-              <span>Snooze</span>
+              <Undo2 size={16} color="#6b7280" />
+              <span>Undo</span>
             </button>
             <button
               className="mail-ribbon-command"
               onClick={() => window.print()}
-              title="Print view or message"
+              title="Print message (Ctrl+P)"
             >
               <Printer size={16} color="#4b5563" />
               <span>Print</span>
             </button>
             <button
               className="mail-ribbon-command"
-              onClick={() => void undoBulkAction()}
-              disabled={!bulkUndo || bulkBusy}
-              title={bulkUndo ? "Undo last bulk action" : "Nothing to undo"}
+              onClick={() => void loadMessages()}
+              title="Sync mailbox"
             >
-              <Undo2 size={16} color="#6b7280" />
-              <span>Undo</span>
+              <RefreshCcw size={16} color="#1f6b57" />
+              <span>Sync</span>
             </button>
-
-            <div className="mail-ribbon-separator" />
-
-            <div className="mail-ribbon-group mail-ribbon-more-group" aria-label="More mail actions">
-              <span className="mail-ribbon-group-label">More</span>
-              <select value={bulkAction} onChange={(event) => setBulkAction(event.target.value)} disabled={!hasMailSelection || bulkBusy} aria-label="More mail actions">
-                <option value="archive">Archive</option>
-                <option value="move">Move to…</option>
-                <option value="mark_read">Mark read</option>
-                <option value="mark_unread">Mark unread</option>
-                <option value="star">Star</option>
-                <option value="unstar">Unstar</option>
-                <option value="important">Mark important</option>
-                <option value="not_important">Remove importance</option>
-                <option value="mute">Mute conversations</option>
-                <option value="unmute">Unmute conversations</option>
-                <option value="ignore">Ignore threads</option>
-                <option value="unignore">Stop ignoring threads</option>
-                <option value="priority">Set priority</option>
-                {labels.length > 0 && <option value="label">Add label…</option>}
-                <option value="reminder">Remind me tomorrow</option>
-                <option value="reply_later">Reply later</option>
-                <option value="waiting_on">Waiting on</option>
-                <option value="i_owe">I owe</option>
-                <option value="create_task">Create task</option>
-                <option value="export">Export JSON</option>
-                <option value="spam">Move to Spam</option>
-                <option value="trash">Move to Trash</option>
-              </select>
-              {bulkAction === "move" && <select value={bulkFolder} onChange={(event) => setBulkFolder(event.target.value)} disabled={!hasMailSelection || bulkBusy} aria-label="Move selected messages to">{(["inbox", "sent", "drafts", "archive", "trash", "spam", "quarantine"] as SystemFolder[]).map((item) => <option key={item} value={item}>{folderNames[item]}</option>)}{folders.map((item) => <option key={item.id} value={`custom:${item.id}`}>{item.name}</option>)}</select>}
-              {bulkAction === "priority" && <select value={bulkPriority} onChange={(event) => setBulkPriority(event.target.value)} disabled={!hasMailSelection || bulkBusy} aria-label="Set message priority"><option value="0">Normal</option><option value="1">Important</option><option value="2">High</option></select>}
-              {bulkAction === "label" && <select value={bulkLabelId} onChange={(event) => setBulkLabelId(event.target.value)} disabled={!hasMailSelection || bulkBusy} aria-label="Add message label"><option value="">Choose label</option>{labels.map((label) => <option key={label.id} value={label.id}>{label.name}</option>)}</select>}
-              <button className="mail-ribbon-command apply" onClick={() => void runBulkAction()} disabled={!hasMailSelection || bulkBusy}>{bulkBusy ? "Applying…" : "Apply"}</button>
-            </div>
           </div>
         )}
 
         {ribbonTab === "view" && (
           <div className="mail-ribbon-toolbar mail-ribbon-view-panel" id="mail-ribbon-panel-view" role="tabpanel" aria-labelledby="mail-ribbon-tab-view">
-            <div className="mail-ribbon-panel-intro"><Eye size={16} /><span>View options</span><small>Change how you scan this mailbox.</small></div>
-            <div className="mail-ribbon-group" aria-label="Sort messages">
-              <span className="mail-ribbon-group-label">Sort</span>
-              <select value={sort} onChange={(event) => { clearListSelection(); setSort(event.target.value); }} aria-label="Sort messages">
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-              </select>
+            {/* View settings */}
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setSettingsOpen(true)}
+              title="Open view settings"
+            >
+              <Settings2 size={16} color="#1f6b57" />
+              <span>View settings</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                clearListSelection();
+                setQuery("");
+                setFilter("all");
+                setSort("newest");
+                void loadMessages();
+              }}
+              title="Reset view to default"
+            >
+              <RotateCcw size={16} color="#6b7280" />
+              <span>Reset view</span>
+            </button>
+
+            <div className="mail-ribbon-separator" />
+
+            {/* Layout Group */}
+            <div className="mail-ribbon-dropdown-wrapper">
+              <button
+                className="mail-ribbon-command"
+                onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === "reading-pane-menu" ? null : "reading-pane-menu"); }}
+                title="Configure reading pane layout"
+              >
+                <Columns size={16} color="#1f6b57" />
+                <span>Reading pane: {readingPanePosition === "right" ? "Right" : readingPanePosition === "bottom" ? "Bottom" : "Off"}</span>
+                <ChevronDown size={11} />
+              </button>
+              {activeDropdown === "reading-pane-menu" && (
+                <div className="mail-ribbon-dropdown-menu">
+                  <button
+                    className={`mail-ribbon-menu-item ${readingPanePosition === "right" ? "is-selected" : ""}`}
+                    onClick={() => { setReadingPanePosition("right"); setActiveDropdown(null); }}
+                  >
+                    <PanelRight size={14} />
+                    <span>Show on the right</span>
+                  </button>
+                  <button
+                    className={`mail-ribbon-menu-item ${readingPanePosition === "bottom" ? "is-selected" : ""}`}
+                    onClick={() => { setReadingPanePosition("bottom"); setActiveDropdown(null); }}
+                  >
+                    <Columns size={14} />
+                    <span>Show at the bottom</span>
+                  </button>
+                  <button
+                    className={`mail-ribbon-menu-item ${readingPanePosition === "off" ? "is-selected" : ""}`}
+                    onClick={() => { setReadingPanePosition("off"); setActiveDropdown(null); }}
+                  >
+                    <Eye size={14} />
+                    <span>Hide (list only)</span>
+                  </button>
+                </div>
+              )}
             </div>
+
+            <button
+              className={`mail-ribbon-command ${folderPaneCollapsed ? "is-active" : ""}`}
+              onClick={() => setFolderPaneCollapsed(!folderPaneCollapsed)}
+              title={folderPaneCollapsed ? "Expand folder pane" : "Collapse folder pane"}
+            >
+              <PanelLeft size={16} color="#1f6b57" />
+              <span>Folder pane</span>
+            </button>
+
+            <button
+              className={`mail-ribbon-command ${filter === "all" ? "" : "is-active"}`}
+              onClick={() => setFilter(filter === "all" ? "unread" : "all")}
+              title="Toggle Focused vs Unread mailbox view"
+            >
+              <Inbox size={16} color="#1f6b57" />
+              <span>Focused inbox</span>
+            </button>
+
+            <div className="mail-ribbon-separator" />
+
+            {/* Density Group */}
+            <div className="mail-ribbon-dropdown-wrapper">
+              <button
+                className="mail-ribbon-command"
+                onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === "density-menu" ? null : "density-menu"); }}
+                title="Message list display density"
+              >
+                <LayoutGrid size={16} color="#1f6b57" />
+                <span>Density: {settings.density || "comfortable"}</span>
+                <ChevronDown size={11} />
+              </button>
+              {activeDropdown === "density-menu" && (
+                <div className="mail-ribbon-dropdown-menu">
+                  <button
+                    className={`mail-ribbon-menu-item ${settings.density === "comfortable" ? "is-selected" : ""}`}
+                    onClick={() => { void updateSettings({ density: "comfortable" }); setActiveDropdown(null); }}
+                  >
+                    <span>Comfortable</span>
+                  </button>
+                  <button
+                    className={`mail-ribbon-menu-item ${settings.density === "compact" ? "is-selected" : ""}`}
+                    onClick={() => { void updateSettings({ density: "compact" }); setActiveDropdown(null); }}
+                  >
+                    <span>Compact</span>
+                  </button>
+                  <button
+                    className={`mail-ribbon-menu-item ${settings.density === "spacious" ? "is-selected" : ""}`}
+                    onClick={() => { void updateSettings({ density: "spacious" }); setActiveDropdown(null); }}
+                  >
+                    <span>Spacious</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Sort */}
+            <div className="mail-ribbon-dropdown-wrapper">
+              <button
+                className="mail-ribbon-command"
+                onClick={(e) => { e.stopPropagation(); setActiveDropdown(activeDropdown === "sort-menu" ? null : "sort-menu"); }}
+                title="Sort messages"
+              >
+                <ArrowUpDown size={16} color="#1f6b57" />
+                <span>{sort === "newest" ? "Newest on top" : "Oldest on top"}</span>
+                <ChevronDown size={11} />
+              </button>
+              {activeDropdown === "sort-menu" && (
+                <div className="mail-ribbon-dropdown-menu">
+                  <button className="mail-ribbon-menu-item" onClick={() => { setSort("newest"); setActiveDropdown(null); }}>
+                    <span>Newest on top</span>
+                  </button>
+                  <button className="mail-ribbon-menu-item" onClick={() => { setSort("oldest"); setActiveDropdown(null); }}>
+                    <span>Oldest on top</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Filter */}
             <div className="mail-ribbon-group" aria-label="Filter messages">
               <span className="mail-ribbon-group-label">Show</span>
-              {[{ value: "all", label: "All mail" }, { value: "unread", label: "Unread" }, { value: "starred", label: "Starred" }, { value: "attachments", label: "Attachments" }].map((item) => (
-                <button key={item.value} type="button" className={`mail-ribbon-command mail-ribbon-filter ${filter === item.value ? "is-active" : ""}`} onClick={() => { clearListSelection(); setFilter(item.value); }} aria-pressed={filter === item.value}>{item.label}</button>
+              {([
+                { value: "all", label: "All" },
+                { value: "unread", label: "Unread" },
+                { value: "starred", label: "Flagged" },
+                { value: "attachments", label: "Files" },
+              ] as const).map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={`mail-ribbon-command mail-ribbon-filter ${filter === item.value ? "is-active" : ""}`}
+                  onClick={() => { clearListSelection(); setFilter(item.value); }}
+                >
+                  {item.label}
+                </button>
               ))}
             </div>
+
+            <div className="mail-ribbon-separator" />
+
+            {/* Dark mode */}
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                const nextTheme = settings.theme === "dark" ? "light" : "dark";
+                void updateSettings({ theme: nextTheme });
+              }}
+              title="Toggle Light / Dark mode"
+            >
+              {settings.theme === "dark" ? <Sun size={16} color="#f59e0b" /> : <Moon size={16} color="#1f6b57" />}
+              <span>{settings.theme === "dark" ? "Light mode" : "Dark mode"}</span>
+            </button>
           </div>
         )}
 
         {ribbonTab === "file" && (
           <div className="mail-ribbon-toolbar mail-ribbon-file-panel" id="mail-ribbon-panel-file" role="tabpanel" aria-labelledby="mail-ribbon-tab-file">
-            <div className="mail-ribbon-panel-intro"><Mail size={16} /><span>Postveil account</span><small>Workspace controls and account actions.</small></div>
-            <div className="mail-ribbon-group" aria-label="Account settings">
-              <span className="mail-ribbon-group-label">Account</span>
-              <button type="button" className="mail-ribbon-command" onClick={() => setSettingsOpen(true)} title="Open settings"><Settings2 size={15} /><span>Settings</span></button>
-              <button type="button" className="mail-ribbon-command" onClick={() => void requireSupabase().auth.signOut()} title="Sign out"><LogOut size={15} /><span>Sign out</span></button>
+            {/* Account info card */}
+            <div className="mail-ribbon-account-card">
+              <div className="mail-ribbon-account-avatar">
+                {(session.user.email || "P").slice(0, 1).toUpperCase()}
+              </div>
+              <div className="mail-ribbon-account-details">
+                <strong>{session.user.email}</strong>
+                <span>Postveil Sovereign Edge · AWS SES (ap-southeast-1)</span>
+              </div>
             </div>
-            <div className="mail-ribbon-group mail-ribbon-info-group" aria-label="About Postveil">
-              <span className="mail-ribbon-group-label">About</span>
-              <span className="mail-ribbon-info-copy"><strong>Private mail</strong><small>Delivery and safety tools stay in the workspace.</small></span>
-            </div>
+
+            <div className="mail-ribbon-separator" />
+
+            {/* Account & Administration Commands */}
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setSettingsOpen(true)}
+              title="Open mailbox settings"
+            >
+              <Settings2 size={16} color="#1f6b57" />
+              <span>Account settings</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setSettingsOpen(true)}
+              title="Manage custom domains and DNS"
+            >
+              <Globe2 size={16} color="#1f6b57" />
+              <span>Custom domains</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setSettingsOpen(true)}
+              title="Inbox rules and automated filters"
+            >
+              <SlidersHorizontal size={16} color="#1f6b57" />
+              <span>Rules & alerts</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setDiagnosticsModalOpen(true)}
+              title="Inspect storage & edge metrics"
+            >
+              <HardDrive size={16} color="#1f6b57" />
+              <span>Storage & quota</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => void runBulkAction("export")}
+              disabled={!hasMailSelection || bulkBusy}
+              title="Export selected messages as JSON"
+            >
+              <Download size={16} color="#1f6b57" />
+              <span>Export mail</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => window.print()}
+              title="Print view or messages"
+            >
+              <Printer size={16} color="#4b5563" />
+              <span>Print</span>
+            </button>
+            <button
+              className="mail-ribbon-command danger"
+              onClick={() => void requireSupabase().auth.signOut()}
+              title="Sign out of Postveil"
+            >
+              <LogOut size={16} color="#ef4444" />
+              <span>Sign out</span>
+            </button>
           </div>
         )}
 
         {ribbonTab === "help" && (
           <div className="mail-ribbon-toolbar mail-ribbon-help-panel" id="mail-ribbon-panel-help" role="tabpanel" aria-labelledby="mail-ribbon-tab-help">
-            <div className="mail-ribbon-panel-intro"><HelpCircle size={16} /><span>Quick help</span><small>Select messages to unlock actions. Use the search guide to find mail by sender, folder, date, or attachment.</small></div>
-            <button type="button" className="mail-ribbon-command apply" onClick={() => { setRibbonTab("home"); setSearchFocused(true); setSearchHelpOpen(true); }}>Open search syntax</button>
+            {/* Help & Learning */}
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                setRibbonTab("home");
+                setSearchFocused(true);
+                setSearchHelpOpen(true);
+              }}
+              title="Open search syntax and help guide"
+            >
+              <HelpCircle size={16} color="#1f6b57" />
+              <span>Help guide</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setShortcutsModalOpen(true)}
+              title="Keyboard shortcuts cheat sheet"
+            >
+              <Keyboard size={16} color="#1f6b57" />
+              <span>Keyboard shortcuts</span>
+            </button>
+
+            <div className="mail-ribbon-separator" />
+
+            {/* Diagnostics & Health */}
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setDiagnosticsModalOpen(true)}
+              title="View live connection diagnostics"
+            >
+              <Activity size={16} color="#1f6b57" />
+              <span>System diagnostics</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                if ("serviceWorker" in navigator) {
+                  void navigator.serviceWorker.getRegistrations().then((regs) => {
+                    for (const r of regs) void r.update();
+                  });
+                }
+                window.location.reload();
+              }}
+              title="Check for updates and reload latest assets"
+            >
+              <RefreshCcw size={16} color="#1f6b57" />
+              <span>Check for updates</span>
+            </button>
+
+            <div className="mail-ribbon-separator" />
+
+            {/* Product & Feedback */}
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setWhatsNewModalOpen(true)}
+              title="See what's new in Postveil"
+            >
+              <Sparkles size={16} color="#1f6b57" />
+              <span>What's new</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => {
+                window.open("https://github.com/jamesfontanilla/Postveil/issues", "_blank");
+              }}
+              title="Submit feedback or report an issue"
+            >
+              <Send size={16} color="#1f6b57" />
+              <span>Feedback</span>
+            </button>
+            <button
+              className="mail-ribbon-command"
+              onClick={() => setDiagnosticsModalOpen(true)}
+              title="About Postveil sovereign mail client"
+            >
+              <Info size={16} color="#1f6b57" />
+              <span>About Postveil</span>
+            </button>
           </div>
         )}
       </div>
@@ -5903,7 +6401,7 @@ function MailboxApp({ session }: { session: Session }) {
         </div>
       </header>
       {mobileNav && <button className="mobile-nav-backdrop" type="button" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
-      <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""}`}>
+      <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""} ${folderPaneCollapsed ? "folder-pane-collapsed" : ""}`}>
         <div className="sidebar-top">
           <div className="brand-lockup">
             <BrandMark small />
@@ -6292,7 +6790,7 @@ function MailboxApp({ session }: { session: Session }) {
               </button>
             )}
           </section>
-          <section className="reading-pane">
+          <section className={`reading-pane ${readingPanePosition === "bottom" ? "reading-pane-bottom" : readingPanePosition === "off" ? "reading-pane-hidden" : ""}`}>
             {!selected ? (
               <div className="reading-empty">
                 <div className="empty-glyph large">
@@ -6766,6 +7264,139 @@ function MailboxApp({ session }: { session: Session }) {
             void loadMeta();
           }}
         />
+      )}
+
+      {shortcutsModalOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" onClick={() => setShortcutsModalOpen(false)}>
+          <div className="mail-ribbon-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mail-ribbon-modal-header">
+              <h3 id="shortcuts-title"><Keyboard size={18} /> Keyboard shortcuts</h3>
+              <button className="icon-button" type="button" onClick={() => setShortcutsModalOpen(false)} aria-label="Close dialog"><X size={16} /></button>
+            </div>
+            <div className="mail-ribbon-modal-body">
+              <div className="shortcuts-grid">
+                <div className="shortcut-group">
+                  <h4>Actions</h4>
+                  <div className="shortcut-row"><kbd>C</kbd><span>Compose new email</span></div>
+                  <div className="shortcut-row"><kbd>E</kbd><span>Archive selected message</span></div>
+                  <div className="shortcut-row"><kbd>#</kbd> / <kbd>Del</kbd><span>Delete message to trash</span></div>
+                  <div className="shortcut-row"><kbd>U</kbd><span>Mark as read / unread</span></div>
+                  <div className="shortcut-row"><kbd>S</kbd><span>Star / Flag message</span></div>
+                  <div className="shortcut-row"><kbd>R</kbd><span>Reply</span></div>
+                  <div className="shortcut-row"><kbd>A</kbd><span>Reply All</span></div>
+                  <div className="shortcut-row"><kbd>F</kbd><span>Forward message</span></div>
+                </div>
+                <div className="shortcut-group">
+                  <h4>Navigation</h4>
+                  <div className="shortcut-row"><kbd>/</kbd><span>Focus search bar</span></div>
+                  <div className="shortcut-row"><kbd>J</kbd> / <kbd>↓</kbd><span>Next message in list</span></div>
+                  <div className="shortcut-row"><kbd>K</kbd> / <kbd>↑</kbd><span>Previous message</span></div>
+                  <div className="shortcut-row"><kbd>Enter</kbd><span>Open message detail</span></div>
+                  <div className="shortcut-row"><kbd>G</kbd> then <kbd>I</kbd><span>Go to Inbox</span></div>
+                  <div className="shortcut-row"><kbd>G</kbd> then <kbd>S</kbd><span>Go to Sent</span></div>
+                  <div className="shortcut-row"><kbd>Esc</kbd><span>Close dialog or pane</span></div>
+                </div>
+              </div>
+            </div>
+            <div className="mail-ribbon-modal-footer">
+              <button className="primary-button" type="button" onClick={() => setShortcutsModalOpen(false)}>Got it</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {diagnosticsModalOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="diag-title" onClick={() => setDiagnosticsModalOpen(false)}>
+          <div className="mail-ribbon-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mail-ribbon-modal-header">
+              <h3 id="diag-title"><Activity size={18} /> System Diagnostics & Health</h3>
+              <button className="icon-button" type="button" onClick={() => setDiagnosticsModalOpen(false)} aria-label="Close dialog"><X size={16} /></button>
+            </div>
+            <div className="mail-ribbon-modal-body">
+              <div className="diagnostics-list">
+                <div className="diag-item">
+                  <div className="diag-label">Client Version</div>
+                  <div className="diag-val">Postveil v0.1.0 Sovereign Edition</div>
+                </div>
+                <div className="diag-item">
+                  <div className="diag-label">Active Session</div>
+                  <div className="diag-val">{session.user.email}</div>
+                </div>
+                <div className="diag-item">
+                  <div className="diag-label">Edge Inbound Gateway</div>
+                  <div className="diag-val diag-status-ok">● AWS SES (ap-southeast-1) via Cloudflare Worker</div>
+                </div>
+                <div className="diag-item">
+                  <div className="diag-label">SES Inbound Receipt Rule</div>
+                  <div className="diag-val"><code>postveil-inbound-rule</code> (Universal Inbound)</div>
+                </div>
+                <div className="diag-item">
+                  <div className="diag-label">Database Subsystem</div>
+                  <div className="diag-val diag-status-ok">● Cloudflare D1 (postveil-prod, sub-4ms read latency)</div>
+                </div>
+                <div className="diag-item">
+                  <div className="diag-label">Security & Screening</div>
+                  <div className="diag-val">SPF / DKIM / DMARC Strict · Zero Security Bans</div>
+                </div>
+                <div className="diag-item">
+                  <div className="diag-label">Storage Lake</div>
+                  <div className="diag-val">S3 Mailbox Object Lake (Multi-tenant partition)</div>
+                </div>
+              </div>
+            </div>
+            <div className="mail-ribbon-modal-footer">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => {
+                  if ("caches" in window) {
+                    void caches.keys().then((names) => {
+                      for (const name of names) void caches.delete(name);
+                    });
+                  }
+                  window.location.reload();
+                }}
+              >
+                Clear Cache & Reload
+              </button>
+              <button className="primary-button" type="button" onClick={() => setDiagnosticsModalOpen(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {whatsNewModalOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="whats-new-title" onClick={() => setWhatsNewModalOpen(false)}>
+          <div className="mail-ribbon-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="mail-ribbon-modal-header">
+              <h3 id="whats-new-title"><Sparkles size={18} /> What's New in Postveil</h3>
+              <button className="icon-button" type="button" onClick={() => setWhatsNewModalOpen(false)} aria-label="Close dialog"><X size={16} /></button>
+            </div>
+            <div className="mail-ribbon-modal-body">
+              <div className="whats-new-items">
+                <div className="whats-new-feature">
+                  <h4>✨ Microsoft Outlook Simplified Ribbon Toolbar</h4>
+                  <p>Authentic, responsive Simplified Ribbon navigation featuring <strong>Home</strong>, <strong>View</strong>, <strong>File</strong>, and <strong>Help</strong> tabs with quick actions, segmented dropdowns, folder routing, density toggles, and reading pane controls.</p>
+                </div>
+                <div className="whats-new-feature">
+                  <h4>🌲 Postveil Signature Green & Schibsted Grotesk</h4>
+                  <p>Restored Postveil's iconic brand identity with emerald green (<code>#1f6b57</code>) styling, crisp typography, and uncluttered desktop focus.</p>
+                </div>
+                <div className="whats-new-feature">
+                  <h4>🌐 Universal Inbound Architecture</h4>
+                  <p>Zero-configuration universal AWS SES receipt rule (<code>postveil-inbound-rule</code>) routing email for all custom user domains directly to Cloudflare edge workers.</p>
+                </div>
+                <div className="whats-new-feature">
+                  <h4>⚡ Sub-4ms Edge Performance</h4>
+                  <p>Ultra-lean D1 SQL indexing, optimized PWA service worker caching headers, and lightning-fast full-text search.</p>
+                </div>
+              </div>
+            </div>
+            <div className="mail-ribbon-modal-footer">
+              <button className="primary-button" type="button" onClick={() => setWhatsNewModalOpen(false)}>Explore Ribbon</button>
+            </div>
+          </div>
+        </div>
       )}
         </main>
       </div>
