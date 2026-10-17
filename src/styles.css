@@ -4488,11 +4488,17 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   min-width: 190px !important;
   max-width: 240px !important;
   flex-shrink: 0 !important;
-  padding: 10px 8px max(14px, env(safe-area-inset-bottom, 14px)) !important;
+  padding: 10px 10px max(14px, env(safe-area-inset-bottom, 14px)) !important;
   border-right: 1px solid #e5e7eb !important;
   background: #fbfbfb !important;
   overflow-y: auto !important;
+  scrollbar-width: none !important;
   font-size: 12px !important;
+}
+.sidebar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 .sidebar-top {
   display: none !important;
@@ -4538,16 +4544,21 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   align-items: center !important;
   gap: 10px !important;
   min-width: 0 !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
   margin-top: auto !important;
   margin-bottom: 6px !important;
-  padding: 8px 12px !important;
-  border-radius: 6px !important;
-  background: transparent !important;
-  border: none !important;
-  transition: background 0.12s ease !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding: 8px 10px !important;
+  border-radius: 8px !important;
+  background: #f3f4f6 !important;
+  border: 1px solid #e5e7eb !important;
+  transition: background 0.15s ease, border-color 0.15s ease !important;
 }
 .account-chip:hover {
-  background: #f3f4f6 !important;
+  background: #eceef2 !important;
+  border-color: #d1d5db !important;
 }
 .account-chip .avatar {
   width: 30px !important;
@@ -4558,10 +4569,15 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   font-weight: 700 !important;
   font-size: 12px !important;
   flex-shrink: 0 !important;
+  display: grid !important;
+  place-items: center !important;
 }
 .account-chip .account-text {
   min-width: 0 !important;
   flex: 1 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
 }
 .account-chip .account-text strong {
   display: block !important;
@@ -4603,11 +4619,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   border-color: rgba(220, 38, 38, 0.2) !important;
 }
 .theme-dark .account-chip {
-  background: transparent !important;
-  border: none !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 .theme-dark .account-chip:hover {
-  background: rgba(255, 255, 255, 0.06) !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
 }
 .theme-dark .account-chip .account-text strong {
   color: #f3f4f6 !important;
