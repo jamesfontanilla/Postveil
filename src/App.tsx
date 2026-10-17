@@ -6513,7 +6513,7 @@ function MailboxApp({ session }: { session: Session }) {
         </div>
       )}
       {mobileNav && <button className="mobile-nav-backdrop" type="button" onClick={() => setMobileNav(false)} aria-label="Close navigation" />}
-      <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""} ${folderPaneCollapsed ? "folder-pane-collapsed" : ""}`}>
+      <aside id="mailbox-navigation" className={`sidebar ${mobileNav ? "mobile-visible" : ""} ${folderPaneCollapsed && !mobileNav ? "folder-pane-collapsed" : ""}`}>
         <div className="sidebar-top">
           <div className="brand-lockup">
             <BrandMark small />
