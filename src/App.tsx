@@ -30,6 +30,7 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronRight,
   Clock3,
   Columns,
   Copy,
@@ -4576,6 +4577,7 @@ function MailboxApp({ session }: { session: Session }) {
   const [deliveryInspectionOpen, setDeliveryInspectionOpen] = useState(false);
   const [deliveryInspectionBusy, setDeliveryInspectionBusy] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
+  const [moreSubmenu, setMoreSubmenu] = useState<"security" | "view" | null>(null);
   const [showReactions, setShowReactions] = useState(false);
   const [messageReactions, setMessageReactions] = useState<Record<string, string>>({});
   const [trashBusy, setTrashBusy] = useState(false);
@@ -4771,6 +4773,7 @@ function MailboxApp({ session }: { session: Session }) {
     setDeliveryInspectionOpen(false);
     setDeliveryInspection(null);
     setShowMoreActions(false);
+    setMoreSubmenu(null);
   }
   function updateRemoteImagePreference(value: boolean) {
     setLoadRemoteImages(value);
@@ -5089,6 +5092,7 @@ function MailboxApp({ session }: { session: Session }) {
     setDeliveryInspectionOpen(false);
     setDeliveryInspection(null);
     setShowMoreActions(false);
+    setMoreSubmenu(null);
     try {
       const detail = await apiFetch<Message>(`/api/mail/${message.id}`);
       if (detailRequestRef.current !== requestId) return;
@@ -5215,6 +5219,7 @@ function MailboxApp({ session }: { session: Session }) {
     setTrustLensOpen(false);
     setTrustData(null);
     setShowMoreActions(false);
+    setMoreSubmenu(null);
   }
   async function restoreSelected() {
     if (!selected || selected.folder !== "trash") return;
@@ -7013,7 +7018,19 @@ function MailboxApp({ session }: { session: Session }) {
                 <div className="sender-line">
                   {detailIdentity && <SenderAvatar name={detailIdentity.name} email={detailIdentity.email} avatarUrl={detailIdentity.avatarUrl} large />}
                   <div className="sender-copy">
-                    <strong>{detailIdentity?.name || selected.from_address}</strong>
+                    <div className="sender-title-row">
+                      <strong>{detailIdentity?.name || selected.from_address}</strong>
+                      <button
+                        type="button"
+                        className="sender-trust-badge"
+                        onClick={() => void toggleTrustLens()}
+                        title="Trust & Privacy: Inspect sender verification (SPF, DKIM, DMARC) and tracker protection"
+                        aria-label="Inspect Trust and Privacy details"
+                      >
+                        <ShieldCheck size={13} className="trust-badge-icon" />
+                        <span>Trust &amp; Privacy</span>
+                      </button>
+                    </div>
                     <div className="recipient-row">
                       <span>To: {selected.to_addresses?.join(", ") || "you"}</span>
                       <button
@@ -7076,7 +7093,10 @@ function MailboxApp({ session }: { session: Session }) {
                     </button>
                     <button
                       className="message-header-action"
-                      onClick={() => setShowMoreActions((current) => !current)}
+                      onClick={() => {
+                        setShowMoreActions((current) => !current);
+                        setMoreSubmenu(null);
+                      }}
                       aria-expanded={showMoreActions}
                       aria-label="More actions"
                       title="More actions"
@@ -7084,72 +7104,179 @@ function MailboxApp({ session }: { session: Session }) {
                       <MoreHorizontal size={17} />
                     </button>
                     {showMoreActions && (
-                      <div className="action-menu" role="menu" style={{ right: 0, top: "100%", position: "absolute", zIndex: 120 }}>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); openCompose(selectedReplySeed); }}>
-                          <Reply size={15} /> Reply
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); openCompose(selectedReplyAllSeed); }}>
-                          <Users size={15} /> Reply all
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); openCompose(selectedReplySeed ? { ...selectedReplySeed, subject: selectedReplySeed.subject.startsWith("Fwd:") ? selectedReplySeed.subject : `Fwd: ${selectedReplySeed.subject}`, to: selected.from_address, cc: "" } : undefined); }}>
-                          <Forward size={15} /> Forward
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ isRead: false }); }}>
-                          <Eye size={15} /> Mark unread
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ isStarred: !selected.is_starred }); }}>
-                          <Star size={15} fill={selected.is_starred ? "currentColor" : "none"} /> {selected.is_starred ? "Unstar" : "Star"}
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ isPinned: !selected.is_pinned }); }}>
-                          <Pin size={15} fill={selected.is_pinned ? "currentColor" : "none"} /> {selected.is_pinned ? "Unpin" : "Pin"}
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ isFlagged: !selected.is_flagged }); }}>
-                          <Flag size={15} fill={selected.is_flagged ? "currentColor" : "none"} /> {selected.is_flagged ? "Unflag" : "Flag"}
-                        </button>
-                        {selected.folder !== "trash" && (
-                          <>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateMessage({ folder: "archive" }); }}>
-                              <Archive size={15} /> Archive
+                      <>
+                        <div
+                          className="fluent-menu-backdrop"
+                          onClick={() => {
+                            setShowMoreActions(false);
+                            setMoreSubmenu(null);
+                          }}
+                        />
+                        <div className="fluent-menu" role="menu">
+                          <button
+                            role="menuitem"
+                            className="fluent-menu-item"
+                            onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void mutateMessage({ isRead: !selected.is_read }); }}
+                          >
+                            <Eye size={15} /> <span>{selected.is_read ? "Mark unread" : "Mark as read"}</span>
+                          </button>
+                          <button
+                            role="menuitem"
+                            className="fluent-menu-item"
+                            onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void mutateMessage({ isFlagged: !selected.is_flagged }); }}
+                          >
+                            <Flag size={15} fill={selected.is_flagged ? "currentColor" : "none"} /> <span>{selected.is_flagged ? "Unflag" : "Flag"}</span>
+                          </button>
+                          <button
+                            role="menuitem"
+                            className="fluent-menu-item"
+                            onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void mutateMessage({ isPinned: !selected.is_pinned }); }}
+                          >
+                            <Pin size={15} fill={selected.is_pinned ? "currentColor" : "none"} /> <span>{selected.is_pinned ? "Unpin" : "Pin"}</span>
+                          </button>
+                          {selected.folder !== "trash" && (
+                            <>
+                              <button
+                                role="menuitem"
+                                className="fluent-menu-item"
+                                onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void mutateMessage({ folder: "archive" }); }}
+                              >
+                                <Archive size={15} /> <span>Archive</span>
+                              </button>
+                              <button
+                                role="menuitem"
+                                className="fluent-menu-item danger"
+                                onClick={() => {
+                                  setShowMoreActions(false);
+                                  setMoreSubmenu(null);
+                                  void (async () => {
+                                    if (await confirm({ title: "Move message to Trash?", message: "You can restore this message later.", confirmLabel: "Move to Trash", danger: true })) {
+                                      void mutateMessage({ folder: "trash" });
+                                    }
+                                  })();
+                                }}
+                              >
+                                <Trash2 size={15} /> <span>Delete</span>
+                              </button>
+                            </>
+                          )}
+                          <button
+                            role="menuitem"
+                            className="fluent-menu-item"
+                            onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); window.print(); }}
+                          >
+                            <Printer size={15} /> <span>Print</span>
+                          </button>
+
+                          <div className="fluent-menu-divider" />
+
+                          {/* Security options flyout submenu */}
+                          <div
+                            className="fluent-submenu-wrap"
+                            onMouseEnter={() => setMoreSubmenu("security")}
+                            onMouseLeave={() => setMoreSubmenu((curr) => (curr === "security" ? null : curr))}
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className={`fluent-menu-item fluent-submenu-trigger${moreSubmenu === "security" ? " active" : ""}`}
+                              onClick={() => setMoreSubmenu((curr) => (curr === "security" ? null : "security"))}
+                              aria-expanded={moreSubmenu === "security"}
+                            >
+                              <span className="fluent-menu-item-content">
+                                <ShieldAlert size={15} /> <span>Security options</span>
+                              </span>
+                              <ChevronRight size={14} className="chevron-right" />
                             </button>
-                            <button role="menuitem" onClick={() => { setShowMoreActions(false); void (async () => { if (await confirm({ title: "Move message to Trash?", message: "You can restore this message later.", confirmLabel: "Move to Trash", danger: true })) void mutateMessage({ folder: "trash" }); })(); }}>
-                              <Trash2 size={15} /> Delete
+                            {moreSubmenu === "security" && (
+                              <div className="fluent-submenu" role="menu">
+                                <button
+                                  role="menuitem"
+                                  className="fluent-menu-item"
+                                  onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void blockSelectedSender("address"); }}
+                                >
+                                  <ShieldAlert size={15} /> <span>Block sender</span>
+                                </button>
+                                <button
+                                  role="menuitem"
+                                  className="fluent-menu-item"
+                                  onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void blockSelectedSender("domain"); }}
+                                >
+                                  <ShieldAlert size={15} /> <span>Block domain</span>
+                                </button>
+                                <div className="fluent-menu-divider" />
+                                <button
+                                  role="menuitem"
+                                  className="fluent-menu-item"
+                                  onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void submitSpamFeedback(selected.folder === "spam" ? "not_spam" : "spam"); }}
+                                >
+                                  <ShieldAlert size={15} /> <span>{selected.folder === "spam" ? "Not junk" : "Report junk"}</span>
+                                </button>
+                                <button
+                                  role="menuitem"
+                                  className="fluent-menu-item"
+                                  onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void reportSelectedMessage("phishing"); }}
+                                >
+                                  <AlertTriangle size={15} /> <span>Report phishing</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* View flyout submenu */}
+                          <div
+                            className="fluent-submenu-wrap"
+                            onMouseEnter={() => setMoreSubmenu("view")}
+                            onMouseLeave={() => setMoreSubmenu((curr) => (curr === "view" ? null : curr))}
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className={`fluent-menu-item fluent-submenu-trigger${moreSubmenu === "view" ? " active" : ""}`}
+                              onClick={() => setMoreSubmenu((curr) => (curr === "view" ? null : "view"))}
+                              aria-expanded={moreSubmenu === "view"}
+                            >
+                              <span className="fluent-menu-item-content">
+                                <FileText size={15} /> <span>View</span>
+                              </span>
+                              <ChevronRight size={14} className="chevron-right" />
                             </button>
-                          </>
-                        )}
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); window.print(); }}>
-                          <Printer size={15} /> Print
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); openInNewWindow(selected); }}>
-                          <ExternalLink size={15} /> Open in new window
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleTrustLens(); }}>
-                          <ShieldAlert size={15} /> Inspect trust details
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void toggleDeliveryInspection(); }}>
-                          <History size={15} /> Delivery timeline
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void openRawSource(); }}>
-                          <Download size={15} /> View raw source
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void submitSpamFeedback(selected.folder === "spam" ? "not_spam" : "spam"); }}>
-                          <ShieldAlert size={15} /> {selected.folder === "spam" ? "Not spam" : "Report spam"}
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void reportSelectedMessage("phishing"); }}>
-                          <AlertTriangle size={15} /> Report phishing
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void blockSelectedSender("address"); }}>
-                          <ShieldAlert size={15} /> Block sender
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void blockSelectedSender("domain"); }}>
-                          <ShieldAlert size={15} /> Block domain
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateThread({ isMuted: !selected.is_muted }); }}>
-                          <Bell size={15} /> {selected.is_muted ? "Unmute conversation" : "Mute conversation"}
-                        </button>
-                        <button role="menuitem" onClick={() => { setShowMoreActions(false); void mutateThread({ isIgnored: !selected.is_ignored }); }}>
-                          <Eye size={15} /> {selected.is_ignored ? "Stop ignoring thread" : "Ignore thread"}
-                        </button>
-                      </div>
+                            {moreSubmenu === "view" && (
+                              <div className="fluent-submenu" role="menu">
+                                <button
+                                  role="menuitem"
+                                  className="fluent-menu-item"
+                                  onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); void openRawSource(); }}
+                                >
+                                  <Download size={15} /> <span>View raw source</span>
+                                </button>
+                                <button
+                                  role="menuitem"
+                                  className="fluent-menu-item"
+                                  onClick={() => { setShowMoreActions(false); setMoreSubmenu(null); openInNewWindow(selected); }}
+                                >
+                                  <ExternalLink size={15} /> <span>Open in new window</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="fluent-menu-divider" />
+
+                          {/* Conversation actions */}
+                          <button
+                            role="menuitem"
+                            className="fluent-menu-item"
+                            onClick={() => {
+                              setShowMoreActions(false);
+                              setMoreSubmenu(null);
+                              void mutateThread({ isIgnored: !selected.is_ignored, isMuted: !selected.is_muted });
+                            }}
+                          >
+                            <Bell size={15} /> <span>{selected.is_ignored ? "Stop ignoring conversation" : "Ignore conversation"}</span>
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
                 </div>

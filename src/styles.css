@@ -6935,5 +6935,207 @@ input:focus, select:focus, textarea:focus {
   background: #175444;
 }
 
+/* ==========================================================================
+   Fluent UI Reading Pane More Actions Menu & Sender Trust Badge
+   ========================================================================== */
+
+.sender-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sender-trust-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: color-mix(in srgb, #1f6b57 10%, #ffffff);
+  color: #1f6b57;
+  border: 1px solid color-mix(in srgb, #1f6b57 28%, #e1dfdd);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+  user-select: none;
+}
+
+.sender-trust-badge:hover,
+.sender-trust-badge:focus-visible {
+  background: color-mix(in srgb, #1f6b57 18%, #ffffff);
+  border-color: #1f6b57;
+  box-shadow: 0 1px 4px rgba(31, 107, 87, 0.18);
+  outline: none;
+}
+
+.sender-trust-badge .trust-badge-icon {
+  color: #1f6b57;
+  flex-shrink: 0;
+}
+
+.theme-dark .sender-trust-badge {
+  background: color-mix(in srgb, #1f6b57 20%, #201f1e);
+  color: #48b897;
+  border-color: color-mix(in srgb, #1f6b57 40%, #323130);
+}
+
+.theme-dark .sender-trust-badge:hover {
+  background: color-mix(in srgb, #1f6b57 30%, #201f1e);
+  border-color: #48b897;
+}
+
+.theme-dark .sender-trust-badge .trust-badge-icon {
+  color: #48b897;
+}
+
+.fluent-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 119;
+}
+
+.fluent-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 120;
+  min-width: 210px;
+  background: #ffffff;
+  border: 1px solid #edebe9;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.08);
+  padding: 5px 0;
+  margin-top: 4px;
+}
+
+.theme-dark .fluent-menu {
+  background: #252423;
+  border-color: #3b3a39;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.fluent-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #323130;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  position: relative;
+  user-select: none;
+  font-family: inherit;
+}
+
+.theme-dark .fluent-menu-item {
+  color: #f3f2f1;
+}
+
+.fluent-menu-item:hover,
+.fluent-menu-item:focus-visible,
+.fluent-menu-item.active {
+  background: #f3f2f1;
+  color: #201f1e;
+  outline: none;
+}
+
+.theme-dark .fluent-menu-item:hover,
+.theme-dark .fluent-menu-item:focus-visible,
+.theme-dark .fluent-menu-item.active {
+  background: #323130;
+  color: #ffffff;
+}
+
+.fluent-menu-item.danger {
+  color: #d13438;
+}
+
+.fluent-menu-item.danger:hover,
+.fluent-menu-item.danger:focus-visible {
+  background: #fdf3f4;
+  color: #a80000;
+}
+
+.theme-dark .fluent-menu-item.danger:hover {
+  background: #442726;
+  color: #f1707b;
+}
+
+.fluent-menu-item-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fluent-menu-divider {
+  height: 1px;
+  background: #edebe9;
+  margin: 4px 0;
+}
+
+.theme-dark .fluent-menu-divider {
+  background: #3b3a39;
+}
+
+.fluent-submenu-wrap {
+  position: relative;
+}
+
+.fluent-submenu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fluent-submenu-trigger .chevron-right {
+  margin-left: auto;
+  opacity: 0.65;
+}
+
+.fluent-submenu {
+  position: absolute;
+  right: 100%;
+  top: -5px;
+  margin-right: 4px;
+  min-width: 195px;
+  background: #ffffff;
+  border: 1px solid #edebe9;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  padding: 5px 0;
+  z-index: 125;
+}
+
+.theme-dark .fluent-submenu {
+  background: #252423;
+  border-color: #3b3a39;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+@media (max-width: 600px) {
+  .fluent-submenu {
+    position: static;
+    margin: 3px 8px;
+    border-left: 2px solid #1f6b57;
+    box-shadow: none;
+    background: #faf9f8;
+    border-radius: 4px;
+  }
+  .theme-dark .fluent-submenu {
+    background: #2d2c2b;
+    border-left-color: #48b897;
+  }
+}
+
+
 
 
