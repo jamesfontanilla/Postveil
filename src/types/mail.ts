@@ -479,3 +479,5 @@ export const starterComposeLibrary: ComposeLibraryItem[] = [
   { id: "starter-thanks", kind: "canned", name: "Thanks for reaching out", text_body: "Thanks for reaching out — I’ve received your message and will get back to you shortly." },
   { id: "starter-signoff", kind: "snippet", name: "Professional sign-off", text_body: "Best regards,\nJames" },
 ];
+
+export type JsonSettings = Record<string, unknown>;
