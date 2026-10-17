@@ -64,7 +64,7 @@ store with normalized D1 tables and add organization-scoped indexes.
 Set these as Cloudflare Worker variables or secrets. Variables identify the deployment; secrets contain credentials.
 
 ```text
-INBOUND_SHARED_SECRET
+SES_INBOUND_LAMBDA_SECRET
 INTERNAL_TEST_TOKEN
 OUTLOOK_FORWARD_TO (optional)
 AWS_ACCESS_KEY_ID (optional, SES)
