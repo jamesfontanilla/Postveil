@@ -8,84 +8,66 @@ import {
   Calendar,
   PenTool,
   Box,
-  Shield,
   Key,
-  FolderLock,
-  ExternalLink,
+  Shield,
+  Layers,
 } from "lucide-react";
+import { SOVEREIGN_PILLARS, type PillarDetails } from "./PillarPreviewModal";
 
-interface WaffleLauncherProps {
+export interface WaffleLauncherProps {
   isOpen: boolean;
   onClose: () => void;
-  onSwitchToMail: () => void;
+  onSwitchToMail?: () => void;
+  onSwitchToAccounts?: () => void;
+  onSwitchToCalendar?: () => void;
+  onSelectPillar?: (pillar: PillarDetails) => void;
+  anchorOrigin?: "left" | "right";
 }
 
 export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
   isOpen,
   onClose,
   onSwitchToMail,
+  onSwitchToAccounts,
+  onSwitchToCalendar,
+  onSelectPillar,
+  anchorOrigin = "right",
 }) => {
   if (!isOpen) return null;
 
   const apps = [
+    {
+      id: "account",
+      name: "Account",
+      icon: Shield,
+      bg: "#e8f5e9",
+      color: "#0f5132",
+      badge: "Sovereign Hub",
+      isLive: true,
+      onClick: () => {
+        onClose();
+        if (onSwitchToAccounts) {
+          onSwitchToAccounts();
+        } else {
+          window.location.href = "https://accounts.postveil.jamesfontanilla.com/";
+        }
+      },
+    },
     {
       id: "mail",
       name: "P-Mail",
       icon: Mail,
       bg: "#e8f5e9",
       color: "#0f5132",
-      badge: "Active",
+      badge: "Live",
+      isLive: true,
       onClick: () => {
-        onSwitchToMail();
         onClose();
-      },
-    },
-    {
-      id: "docs",
-      name: "P-Docs",
-      icon: FileText,
-      bg: "#e3f2fd",
-      color: "#0d47a1",
-      badge: "Local",
-      onClick: () => {
-        alert("P-Docs: Local-first collaborative living documents (Pillar 5).");
-        onClose();
-      },
-    },
-    {
-      id: "sheets",
-      name: "P-Sheets",
-      icon: Table,
-      bg: "#e8f5e9",
-      color: "#1b5e20",
-      badge: "WASM",
-      onClick: () => {
-        alert("P-Sheets: 120 FPS WebAssembly calculation grid (Pillar 6).");
-        onClose();
-      },
-    },
-    {
-      id: "drive",
-      name: "P-Drive",
-      icon: HardDrive,
-      bg: "#fff8e1",
-      color: "#f57f17",
-      badge: "BYOS",
-      onClick: () => {
-        alert("P-Drive: Decoupled sovereign file vault mounted on Google Drive/R2 (Pillar 10).");
-        onClose();
-      },
-    },
-    {
-      id: "meet",
-      name: "P-Meet",
-      icon: Video,
-      bg: "#ede7f6",
-      color: "#4a148c",
-      badge: "P2P",
-      onClick: () => {
-        alert("P-Meet: Serverless edge WebRTC video conferencing with zero install (Pillar 3).");
-        onClose();
+        if (onSwitchToMail) {
+          onSwitchToMail();
+        } else {
+          window.location.href = "https://postveil.jamesfontanilla.com/";
+        }
       },
     },
     {
@@ -94,22 +76,15 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
       icon: Calendar,
       bg: "#fce4ec",
       color: "#880e4f",
-      badge: "RFC 5545",
+      badge: "Built-in",
+      isLive: true,
       onClick: () => {
-        alert("P-Calendar: High-density schedule grid & public booking links (Pillar 2).");
         onClose();
-      },
-    },
-    {
-      id: "draw",
-      name: "P-Draw",
-      icon: PenTool,
-      bg: "#fff3e0",
-      color: "#e65100",
-      badge: "Vector",
-      onClick: () => {
-        alert("P-Draw: Infinite collaborative thinking & architecture whiteboard (Pillar 8).");
-        onClose();
+        if (onSwitchToCalendar) {
+          onSwitchToCalendar();
+        } else if (onSwitchToMail) {
+          onSwitchToMail();
+        }
       },
     },
     {
@@ -119,21 +94,75 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
       bg: "#e0f2f1",
       color: "#004d40",
       badge: "WebGPU",
+      isLive: false,
       onClick: () => {
-        alert("P-CAD: Sovereign 3D parametric CAD engine running on local silicon (WASM B-Rep).");
         onClose();
+        onSelectPillar?.(SOVEREIGN_PILLARS.cad);
       },
     },
     {
-      id: "vault",
-      name: "P-Pass",
-      icon: Key,
-      bg: "#efebe9",
-      color: "#3e2723",
-      badge: "Passkeys",
+      id: "docs",
+      name: "P-Docs",
+      icon: FileText,
+      bg: "#e3f2fd",
+      color: "#0d47a1",
+      badge: "Local",
+      isLive: false,
       onClick: () => {
-        alert("P-Pass: WebAuthn hardware passkey & credential vault (Pillar 18).");
         onClose();
+        onSelectPillar?.(SOVEREIGN_PILLARS.docs);
+      },
+    },
+    {
+      id: "sheets",
+      name: "P-Sheets",
+      icon: Table,
+      bg: "#e8f5e9",
+      color: "#1b5e20",
+      badge: "WASM",
+      isLive: false,
+      onClick: () => {
+        onClose();
+        onSelectPillar?.(SOVEREIGN_PILLARS.sheets);
+      },
+    },
+    {
+      id: "drive",
+      name: "P-Drive",
+      icon: HardDrive,
+      bg: "#fff8e1",
+      color: "#f57f17",
+      badge: "BYOS",
+      isLive: false,
+      onClick: () => {
+        onClose();
+        onSelectPillar?.(SOVEREIGN_PILLARS.drive);
+      },
+    },
+    {
+      id: "meet",
+      name: "P-Meet",
+      icon: Video,
+      bg: "#ede7f6",
+      color: "#4a148c",
+      badge: "P2P",
+      isLive: false,
+      onClick: () => {
+        onClose();
+        onSelectPillar?.(SOVEREIGN_PILLARS.meet);
+      },
+    },
+    {
+      id: "draw",
+      name: "P-Draw",
+      icon: PenTool,
+      bg: "#fff3e0",
+      color: "#e65100",
+      badge: "Vector",
+      isLive: false,
+      onClick: () => {
+        onClose();
+        onSelectPillar?.(SOVEREIGN_PILLARS.draw);
       },
     },
   ];
@@ -148,7 +177,32 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
         }}
         onClick={onClose}
       />
-      <div className="pv-acc-waffle-popover" role="dialog" aria-label="Postveil Apps">
+      <div
+        className="pv-acc-waffle-popover"
+        role="dialog"
+        aria-label="Postveil Sovereign Apps"
+        style={anchorOrigin === "left" ? { left: "0px", right: "auto" } : { right: "0px", left: "auto" }}
+      >
+        <div
+          style={{
+            gridColumn: "1 / -1",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0 4px 6px",
+            borderBottom: "1px solid #f1f5f9",
+            marginBottom: "4px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 700, color: "#0f5132", letterSpacing: "0.02em" }}>
+            <Layers size={14} />
+            POSTVEIL SOVEREIGN SUITE
+          </div>
+          <span style={{ fontSize: "11px", fontWeight: 600, color: "#16a34a", backgroundColor: "#f0fdf4", padding: "1px 6px", borderRadius: "8px" }}>
+            P-Mail Live
+          </span>
+        </div>
+
         {apps.map((app) => {
           const Icon = app.icon;
           return (
@@ -156,7 +210,8 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
               key={app.id}
               className="pv-acc-waffle-app"
               onClick={app.onClick}
-              style={{ background: "none", border: "none" }}
+              style={{ background: "none", border: "none", position: "relative" }}
+              title={app.name}
             >
               <div
                 className="pv-acc-waffle-app-icon"
@@ -165,6 +220,21 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
                 <Icon size={24} />
               </div>
               <span className="pv-acc-waffle-app-name">{app.name}</span>
+              {app.isLive && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "8px",
+                    right: "12px",
+                    width: "7px",
+                    height: "7px",
+                    borderRadius: "50%",
+                    backgroundColor: "#16a34a",
+                    boxShadow: "0 0 0 2px #ffffff",
+                  }}
+                  title="Operational Now"
+                />
+              )}
             </button>
           );
         })}

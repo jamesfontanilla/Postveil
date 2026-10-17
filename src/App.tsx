@@ -100,6 +100,9 @@ import BrandMark from "./components/BrandMark";
 import PublicHome from "./components/auth/PublicHome";
 import AccountsHub from "./components/accounts/AccountsHub";
 import OAuthConsentCard from "./components/accounts/OAuthConsentCard";
+import "./components/accounts/AccountsStyles.css";
+import { WaffleLauncher } from "./components/accounts/WaffleLauncher";
+import { PillarPreviewModal, SOVEREIGN_PILLARS, type PillarDetails } from "./components/accounts/PillarPreviewModal";
 import PasswordResetScreen from "./components/auth/PasswordResetScreen";
 import AuthScreen from "./components/auth/AuthScreen";
 import { MfaSetupRequiredScreen, MfaChallengeScreen } from "./components/auth/MfaScreens";
@@ -283,6 +286,9 @@ function MailboxApp({ session }: { session: Session }) {
     | "administration"
   >("appearance");
   const [mobileNav, setMobileNav] = useState(false);
+  const [isWaffleOpen, setIsWaffleOpen] = useState(false);
+  const [userPopoverOpen, setUserPopoverOpen] = useState(false);
+  const [selectedPillar, setSelectedPillar] = useState<PillarDetails | null>(null);
   const [loadRemoteImages, setLoadRemoteImages] = useState(() => storedBooleanPreference(imagePreferenceKey, false));
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -1247,15 +1253,50 @@ function MailboxApp({ session }: { session: Session }) {
     >
       <header className="outlook-global-header" data-purpose="outlook-global-header">
         <div className="outlook-header-left">
-          <button
-            className="outlook-header-btn waffle-btn"
-            title="App Launcher"
-            onClick={() => setView(view === "mail" ? "calendar" : "mail")}
-            aria-label="App Launcher"
+          <div style={{ position: "relative" }}>
+            <button
+              className="outlook-header-btn waffle-btn"
+              title="Postveil Sovereign Suite"
+              onClick={() => {
+                setIsWaffleOpen(!isWaffleOpen);
+                setUserPopoverOpen(false);
+              }}
+              aria-label="Postveil Sovereign Apps"
+            >
+              <LayoutGrid size={18} />
+            </button>
+            <WaffleLauncher
+              isOpen={isWaffleOpen}
+              onClose={() => setIsWaffleOpen(false)}
+              anchorOrigin="left"
+              onSwitchToMail={() => {
+                setView("mail");
+                setFolder("inbox");
+                setIsWaffleOpen(false);
+              }}
+              onSwitchToAccounts={() => {
+                setView("accounts");
+                setIsWaffleOpen(false);
+              }}
+              onSwitchToCalendar={() => {
+                setView("calendar");
+                setIsWaffleOpen(false);
+              }}
+              onSelectPillar={(pillar) => {
+                setSelectedPillar(pillar);
+                setIsWaffleOpen(false);
+              }}
+            />
+          </div>
+          <div
+            className="outlook-header-brand"
+            onClick={() => {
+              setView("mail");
+              setFolder("inbox");
+            }}
+            style={{ cursor: "pointer" }}
+            title="Postveil Mail"
           >
-            <LayoutGrid size={18} />
-          </button>
-          <div className="outlook-header-brand">
             <BrandMark small />
             <span className="outlook-brand-name">Postveil</span>
           </div>
@@ -1351,14 +1392,86 @@ function MailboxApp({ session }: { session: Session }) {
           >
             <HelpCircle size={16} />
           </button>
-          <div
-            className="outlook-user-avatar"
-            onClick={() => setSettingsOpen(true)}
-            title={session.user.email || "Account profile"}
-            role="button"
-            tabIndex={0}
-          >
-            {(session.user.email || "J").slice(0, 1).toUpperCase()}
+          <div style={{ position: "relative" }}>
+            <div
+              className="outlook-user-avatar"
+              onClick={() => {
+                setUserPopoverOpen(!userPopoverOpen);
+                setIsWaffleOpen(false);
+              }}
+              title={session.user.email || "Account profile"}
+              role="button"
+              tabIndex={0}
+              style={{ cursor: "pointer" }}
+            >
+              {(session.user.email || "J").slice(0, 1).toUpperCase()}
+            </div>
+            {userPopoverOpen && (
+              <>
+                <div
+                  style={{ position: "fixed", inset: 0, zIndex: 190 }}
+                  onClick={() => setUserPopoverOpen(false)}
+                />
+                <div className="pv-acc-user-popover" style={{ top: "48px", right: "0px" }}>
+                  <div className="pv-acc-user-popover-avatar">
+                    {(session.user.email || "J").slice(0, 1).toUpperCase()}
+                  </div>
+                  <div style={{ fontSize: "17px", fontWeight: 600, color: "var(--pv-acc-text-primary, #1f1f1f)" }}>
+                    {displayName(session.user.email || "James")}
+                  </div>
+                  <div style={{ fontSize: "13px", color: "var(--pv-acc-text-secondary, #575e59)", marginTop: "2px" }}>
+                    {session.user.email}
+                  </div>
+
+                  <button
+                    className="pv-acc-btn-manage"
+                    onClick={() => {
+                      setUserPopoverOpen(false);
+                      setView("accounts");
+                    }}
+                    style={{ textDecoration: "none", cursor: "pointer", display: "inline-flex", alignItems: "center" }}
+                  >
+                    <ShieldCheck size={16} style={{ marginRight: 8, color: "#0f5132" }} />
+                    Manage your Postveil Account
+                  </button>
+
+                  <div style={{ width: "100%", height: "1px", backgroundColor: "#e2e8f0", margin: "8px 0" }} />
+
+                  <button
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: "10px",
+                      border: "none",
+                      background: "none",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      fontSize: "14px",
+                      color: "#334155",
+                      fontWeight: 500,
+                    }}
+                    onClick={() => {
+                      setUserPopoverOpen(false);
+                      setSettingsOpen(true);
+                    }}
+                  >
+                    <Settings2 size={16} />
+                    Settings & Mailboxes
+                  </button>
+
+                  <button
+                    className="pv-acc-btn-signout"
+                    style={{ marginTop: "12px" }}
+                    onClick={() => void requireSupabase().auth.signOut()}
+                  >
+                    <LogOut size={16} />
+                    Sign out of Postveil
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -3197,6 +3310,15 @@ function MailboxApp({ session }: { session: Session }) {
       <DiagnosticsModal open={diagnosticsModalOpen} onClose={() => setDiagnosticsModalOpen(false)} userEmail={session.user.email} />
 
       <WhatsNewModal open={whatsNewModalOpen} onClose={() => setWhatsNewModalOpen(false)} />
+
+      <PillarPreviewModal
+        pillar={selectedPillar}
+        onClose={() => setSelectedPillar(null)}
+        onExploreMail={() => {
+          setView("mail");
+          setFolder("inbox");
+        }}
+      />
         </main>
       </div>
     </div>

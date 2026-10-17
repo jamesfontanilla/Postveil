@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import "./AccountsStyles.css";
 import { WaffleLauncher } from "./WaffleLauncher";
+import { PillarPreviewModal, SOVEREIGN_PILLARS, type PillarDetails } from "./PillarPreviewModal";
 import BrandMark from "../BrandMark";
 import { apiFetch } from "../../lib/api";
 
@@ -56,6 +57,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
   const [copiedKey, setCopiedKey] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [selectedPillar, setSelectedPillar] = useState<PillarDetails | null>(null);
 
   // Real data state
   const [userData, setUserData] = useState({
@@ -316,6 +318,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
               isOpen={isWaffleOpen}
               onClose={() => setIsWaffleOpen(false)}
               onSwitchToMail={onBackToMail}
+              onSelectPillar={setSelectedPillar}
             />
           </div>
 
@@ -540,7 +543,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
 
                   <div
                     className="pv-acc-card-row pos-middle"
-                    onClick={() => alert("P-CAD: Sovereign 3D parametric CAD engine running on local silicon.")}
+                    onClick={() => setSelectedPillar(SOVEREIGN_PILLARS.cad)}
                   >
                     <div className="pv-acc-card-leading">
                       <HardDrive size={22} color="#0d47a1" />
@@ -1046,6 +1049,12 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
           </div>
         </main>
       </div>
+
+      <PillarPreviewModal
+        pillar={selectedPillar}
+        onClose={() => setSelectedPillar(null)}
+        onExploreMail={onBackToMail}
+      />
     </div>
   );
 };
