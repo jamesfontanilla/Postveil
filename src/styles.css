@@ -540,7 +540,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); backgro
 .rich-email-content-warning small { color: var(--muted); font-size: 10px; }
 .rich-email-content-warning button { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 4px; background: var(--surface); color: var(--accent); padding: 6px 8px; font-size: 10px; font-weight: 800; cursor: pointer; }
 .rich-email-content-warning button:hover { border-color: var(--accent); }
-.rich-email-surface { width: 100%; min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #17221f; padding: clamp(15px, 3vw, 27px); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.rich-email-surface { width: 100%; min-width: 0; overflow-x: auto; overflow-y: visible; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #17221f; padding: clamp(15px, 3vw, 27px); overscroll-behavior: auto; -webkit-overflow-scrolling: touch; }
 .rich-email-surface.rich-email-dark { background: #111916; color: #e7eee9; }
 .rich-email-surface.rich-email-dark .rich-email-html { color: #e7eee9; }
 .rich-email-surface.rich-email-dark .rich-email-html :where(h1, h2, h3, h4, h5, h6, strong, b) { color: #f2f6f3; }
@@ -6362,6 +6362,12 @@ input:focus, select:focus, textarea:focus {
   overflow-y: auto !important;
   display: flex !important;
   flex-direction: column !important;
+  outline: none !important;
+}
+
+.reading-pane:focus,
+.reading-pane:focus-visible {
+  outline: none !important;
 }
 
 .theme-dark .reading-pane {
@@ -6826,6 +6832,9 @@ input:focus, select:focus, textarea:focus {
   padding: 16px 0 32px 0 !important;
   background: transparent !important;
   box-sizing: border-box !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+  overscroll-behavior: auto !important;
 }
 
 .rich-email-html {

@@ -6917,7 +6917,11 @@ function MailboxApp({ session }: { session: Session }) {
               </button>
             )}
           </section>
-          <section className={`reading-pane ${readingPanePosition === "bottom" ? "reading-pane-bottom" : readingPanePosition === "off" ? "reading-pane-hidden" : ""}`}>
+          <section
+            className={`reading-pane ${readingPanePosition === "bottom" ? "reading-pane-bottom" : readingPanePosition === "off" ? "reading-pane-hidden" : ""}`}
+            tabIndex={0}
+            aria-label="Reading pane"
+          >
             {!selected ? (
               <div className="reading-empty">
                 <div className="empty-glyph large">
