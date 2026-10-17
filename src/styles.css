@@ -4540,14 +4540,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   min-width: 0 !important;
   margin-top: auto !important;
   margin-bottom: 6px !important;
-  padding: 8px 10px !important;
-  border-radius: 8px !important;
-  background: #f3f4f6 !important;
-  border: 1px solid #e5e7eb !important;
-  transition: background 0.15s ease, border-color 0.15s ease !important;
+  padding: 8px 12px !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  border: none !important;
+  transition: background 0.12s ease !important;
 }
 .account-chip:hover {
-  background: #eceef2 !important;
+  background: #f3f4f6 !important;
 }
 .account-chip .avatar {
   width: 30px !important;
@@ -4603,11 +4603,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
   border-color: rgba(220, 38, 38, 0.2) !important;
 }
 .theme-dark .account-chip {
-  background: rgba(255, 255, 255, 0.04) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: transparent !important;
+  border: none !important;
 }
 .theme-dark .account-chip:hover {
-  background: rgba(255, 255, 255, 0.07) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
 }
 .theme-dark .account-chip .account-text strong {
   color: #f3f4f6 !important;
