@@ -119,6 +119,10 @@ import {
 import { AppDialogProvider, useAppDialog } from "./context/AppDialogContext";
 import Compose from "./components/modals/ComposeModal";
 import SettingsPanel from "./components/modals/SettingsModal";
+import TrustLensModal from "./components/modals/TrustLensModal";
+import KeyboardShortcutsModal from "./components/modals/KeyboardShortcutsModal";
+import DiagnosticsModal from "./components/modals/DiagnosticsModal";
+import WhatsNewModal from "./components/modals/WhatsNewModal";
 
 import {
   type SystemFolder,
@@ -3279,40 +3283,12 @@ function MailboxApp({ session }: { session: Session }) {
                   )}
                 </div>
 
-                {trustLensOpen && (
-                  <div className="outlook-modal-overlay" onClick={() => setTrustLensOpen(false)} role="dialog" aria-modal="true" aria-labelledby="trust-lens-modal-title">
-                    <div className="outlook-modal-box" onClick={(e) => e.stopPropagation()}>
-                      <div className="outlook-modal-header">
-                        <h3 id="trust-lens-modal-title"><ShieldAlert size={18} color="#1f6b57" /> Trust Lens · Sender Authentication & Evidence</h3>
-                        <button className="icon-button" onClick={() => setTrustLensOpen(false)} aria-label="Close Trust Lens"><X size={18} /></button>
-                      </div>
-                      {trustData ? (() => {
-                        const auth = trustData.auth_results || {};
-                        const evidence = trustData.trust_evidence || {};
-                        const status = (key: "spf" | "dkim" | "dmarc" | "arc" | "tls") => String(trustData[`auth_${key}` as keyof TrustData] || auth[key] || "missing");
-                        const statusClass = (value: string) => value === "pass" ? "trust-status-pass" : value === "missing" || value === "none" ? "trust-status-missing" : "trust-status-fail";
-                        const hosts = Array.isArray(evidence.link_hosts) ? evidence.link_hosts as Array<{ host?: string; count?: number }> : [];
-                        const history = trustData.screening_history || [];
-                        return <div className="trust-lens-body">
-                          <p className="trust-lens-note">Advisory signals only. Authentication results describe what the receiving server observed; they do not guarantee that a message is safe.</p>
-                          <div className="trust-lens-grid">
-                            {(["spf", "dkim", "dmarc", "arc", "tls"] as const).map((key) => <div className="trust-lens-item" key={key}><strong>{key.toUpperCase()}</strong><span className={statusClass(status(key))}>{status(key)}</span></div>)}
-                          </div>
-                          <div className="trust-lens-grid">
-                            <div className="trust-lens-item"><strong>Sender history</strong><span>{trustData.sender_first_seen ? "First seen sender" : "Seen before"}</span></div>
-                            <div className="trust-lens-item"><strong>Contact</strong><span>{trustData.known_contact ? "Known contact" : "Not in contacts"}</span></div>
-                            <div className="trust-lens-item"><strong>Reply-To</strong><span className={trustData.reply_to_mismatch ? "trust-status-fail" : "trust-status-pass"}>{trustData.reply_to_mismatch ? "Different address" : "Matches sender"}</span></div>
-                            <div className="trust-lens-item"><strong>Tracking pixels</strong><span>{trustData.tracking_pixel_count || 0} detected</span></div>
-                          </div>
-                          <div className="trust-lens-section"><strong>Link hosts · {trustData.link_count || 0} links</strong>{hosts.length ? <div className="trust-host-list">{hosts.map((item) => <span className="trust-host" key={item.host}>{item.host}{item.count && item.count > 1 ? ` · ${item.count}` : ""}</span>)}</div> : <p className="trust-lens-note">No web links detected.</p>}</div>
-                          {history.length > 0 && <div className="trust-lens-section"><strong>Screening history</strong><p className="trust-lens-note">{history.slice(0, 3).map((item) => `${item.decision} · ${new Date(item.created_at).toLocaleString()}`).join("  |  ")}</p></div>}
-                        </div>;
-                      })() : (
-                        <div className="trust-lens-body"><p className="trust-lens-note">{trustLensBusy ? "Loading sender evidence…" : "No evidence available."}</p></div>
-                      )}
-                    </div>
-                  </div>
-                )}
+                <TrustLensModal
+                  open={trustLensOpen}
+                  onClose={() => setTrustLensOpen(false)}
+                  trustData={trustData}
+                  busy={trustLensBusy}
+                />
 
               </article>
             )}
@@ -3368,138 +3344,11 @@ function MailboxApp({ session }: { session: Session }) {
         />
       )}
 
-      {shortcutsModalOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" onClick={() => setShortcutsModalOpen(false)}>
-          <div className="mail-ribbon-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="mail-ribbon-modal-header">
-              <h3 id="shortcuts-title"><Keyboard size={18} /> Keyboard shortcuts</h3>
-              <button className="icon-button" type="button" onClick={() => setShortcutsModalOpen(false)} aria-label="Close dialog"><X size={16} /></button>
-            </div>
-            <div className="mail-ribbon-modal-body">
-              <div className="shortcuts-grid">
-                <div className="shortcut-group">
-                  <h4>Actions</h4>
-                  <div className="shortcut-row"><kbd>C</kbd><span>Compose new email</span></div>
-                  <div className="shortcut-row"><kbd>E</kbd><span>Archive selected message</span></div>
-                  <div className="shortcut-row"><kbd>#</kbd> / <kbd>Del</kbd><span>Delete message to trash</span></div>
-                  <div className="shortcut-row"><kbd>U</kbd><span>Mark as read / unread</span></div>
-                  <div className="shortcut-row"><kbd>S</kbd><span>Star / Flag message</span></div>
-                  <div className="shortcut-row"><kbd>R</kbd><span>Reply</span></div>
-                  <div className="shortcut-row"><kbd>A</kbd><span>Reply All</span></div>
-                  <div className="shortcut-row"><kbd>F</kbd><span>Forward message</span></div>
-                </div>
-                <div className="shortcut-group">
-                  <h4>Navigation</h4>
-                  <div className="shortcut-row"><kbd>/</kbd><span>Focus search bar</span></div>
-                  <div className="shortcut-row"><kbd>J</kbd> / <kbd>↓</kbd><span>Next message in list</span></div>
-                  <div className="shortcut-row"><kbd>K</kbd> / <kbd>↑</kbd><span>Previous message</span></div>
-                  <div className="shortcut-row"><kbd>Enter</kbd><span>Open message detail</span></div>
-                  <div className="shortcut-row"><kbd>G</kbd> then <kbd>I</kbd><span>Go to Inbox</span></div>
-                  <div className="shortcut-row"><kbd>G</kbd> then <kbd>S</kbd><span>Go to Sent</span></div>
-                  <div className="shortcut-row"><kbd>Esc</kbd><span>Close dialog or pane</span></div>
-                </div>
-              </div>
-            </div>
-            <div className="mail-ribbon-modal-footer">
-              <button className="primary-button" type="button" onClick={() => setShortcutsModalOpen(false)}>Got it</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <KeyboardShortcutsModal open={shortcutsModalOpen} onClose={() => setShortcutsModalOpen(false)} />
 
-      {diagnosticsModalOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="diag-title" onClick={() => setDiagnosticsModalOpen(false)}>
-          <div className="mail-ribbon-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="mail-ribbon-modal-header">
-              <h3 id="diag-title"><Activity size={18} /> System Diagnostics & Health</h3>
-              <button className="icon-button" type="button" onClick={() => setDiagnosticsModalOpen(false)} aria-label="Close dialog"><X size={16} /></button>
-            </div>
-            <div className="mail-ribbon-modal-body">
-              <div className="diagnostics-list">
-                <div className="diag-item">
-                  <div className="diag-label">Client Version</div>
-                  <div className="diag-val">Postveil v0.1.0 Sovereign Edition</div>
-                </div>
-                <div className="diag-item">
-                  <div className="diag-label">Active Session</div>
-                  <div className="diag-val">{session.user.email}</div>
-                </div>
-                <div className="diag-item">
-                  <div className="diag-label">Edge Inbound Gateway</div>
-                  <div className="diag-val diag-status-ok">● AWS SES (ap-southeast-1) via Cloudflare Worker</div>
-                </div>
-                <div className="diag-item">
-                  <div className="diag-label">SES Inbound Receipt Rule</div>
-                  <div className="diag-val"><code>postveil-inbound-rule</code> (Universal Inbound)</div>
-                </div>
-                <div className="diag-item">
-                  <div className="diag-label">Database Subsystem</div>
-                  <div className="diag-val diag-status-ok">● Cloudflare D1 (postveil-prod, sub-4ms read latency)</div>
-                </div>
-                <div className="diag-item">
-                  <div className="diag-label">Security & Screening</div>
-                  <div className="diag-val">SPF / DKIM / DMARC Strict · Zero Security Bans</div>
-                </div>
-                <div className="diag-item">
-                  <div className="diag-label">Storage Lake</div>
-                  <div className="diag-val">S3 Mailbox Object Lake (Multi-tenant partition)</div>
-                </div>
-              </div>
-            </div>
-            <div className="mail-ribbon-modal-footer">
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => {
-                  if ("caches" in window) {
-                    void caches.keys().then((names) => {
-                      for (const name of names) void caches.delete(name);
-                    });
-                  }
-                  window.location.reload();
-                }}
-              >
-                Clear Cache & Reload
-              </button>
-              <button className="primary-button" type="button" onClick={() => setDiagnosticsModalOpen(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DiagnosticsModal open={diagnosticsModalOpen} onClose={() => setDiagnosticsModalOpen(false)} userEmail={session.user.email} />
 
-      {whatsNewModalOpen && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="whats-new-title" onClick={() => setWhatsNewModalOpen(false)}>
-          <div className="mail-ribbon-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="mail-ribbon-modal-header">
-              <h3 id="whats-new-title"><Sparkles size={18} /> What's New in Postveil</h3>
-              <button className="icon-button" type="button" onClick={() => setWhatsNewModalOpen(false)} aria-label="Close dialog"><X size={16} /></button>
-            </div>
-            <div className="mail-ribbon-modal-body">
-              <div className="whats-new-items">
-                <div className="whats-new-feature">
-                  <h4>✨ Microsoft Outlook Simplified Ribbon Toolbar</h4>
-                  <p>Authentic, responsive Simplified Ribbon navigation featuring <strong>Home</strong>, <strong>View</strong>, <strong>File</strong>, and <strong>Help</strong> tabs with quick actions, segmented dropdowns, folder routing, density toggles, and reading pane controls.</p>
-                </div>
-                <div className="whats-new-feature">
-                  <h4>🌲 Postveil Signature Green & Schibsted Grotesk</h4>
-                  <p>Restored Postveil's iconic brand identity with emerald green (<code>#1f6b57</code>) styling, crisp typography, and uncluttered desktop focus.</p>
-                </div>
-                <div className="whats-new-feature">
-                  <h4>🌐 Universal Inbound Architecture</h4>
-                  <p>Zero-configuration universal AWS SES receipt rule (<code>postveil-inbound-rule</code>) routing email for all custom user domains directly to Cloudflare edge workers.</p>
-                </div>
-                <div className="whats-new-feature">
-                  <h4>⚡ Sub-4ms Edge Performance</h4>
-                  <p>Ultra-lean D1 SQL indexing, optimized PWA service worker caching headers, and lightning-fast full-text search.</p>
-                </div>
-              </div>
-            </div>
-            <div className="mail-ribbon-modal-footer">
-              <button className="primary-button" type="button" onClick={() => setWhatsNewModalOpen(false)}>Explore Ribbon</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <WhatsNewModal open={whatsNewModalOpen} onClose={() => setWhatsNewModalOpen(false)} />
         </main>
       </div>
     </div>
