@@ -67,8 +67,8 @@ export class DocumentEngine {
     this.doc.metadata.updatedAt = new Date().toISOString();
   }
 
-  public updateBlockContent(id: string, content: string) {
-    const tr = this.state.tr().updateContent(id, content);
+  public updateBlockContent(id: string, content: string, html?: string) {
+    const tr = this.state.tr().updateContent(id, content, html);
     this.state = this.state.apply(tr);
     this.doc.blocks = this.state.toDocBlocks();
     this.recalculateStats();
@@ -104,7 +104,7 @@ export class DocumentEngine {
     this.dispatch(tr);
   }
 
-  public splitBlock(currentId: string, currentContent: string, newContent: string, newType: BlockType = "paragraph"): DocBlock {
+  public splitBlock(currentId: string, currentContent: string, newContent: string, newType: BlockType = "paragraph", currentHtml?: string): DocBlock {
     const newBlock: DocBlock = {
       id: `b_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       type: newType,
@@ -113,7 +113,7 @@ export class DocumentEngine {
 
     const node = new SovereignNode(newBlock);
     const tr = this.state.tr()
-      .updateContent(currentId, currentContent)
+      .updateContent(currentId, currentContent, currentHtml)
       .insertNode(currentId, node);
 
     this.dispatch(tr);

@@ -118,39 +118,49 @@ export const htmlCodec: DocumentCodec = {
     const isPdfMode = options?.format === "pdf";
     const bodyHtml: string[] = [];
 
+    const renderInline = (block: import("../types").DocBlock) => {
+      if (block.html) {
+        return DOMPurify.sanitize(block.html, {
+          ALLOWED_TAGS: ["font", "span", "b", "i", "u", "s", "strong", "em", "a", "sub", "sup", "mark", "code"],
+          ALLOWED_ATTR: ["color", "style", "href", "target", "rel", "class"],
+        });
+      }
+      return escapeHtml(block.content || "");
+    };
+
     for (const block of doc.blocks) {
       switch (block.type) {
         case "heading": {
           const level = block.level || 1;
-          bodyHtml.push(`<h${level}>${escapeHtml(block.content || "")}</h${level}>`);
+          bodyHtml.push(`<h${level}>${renderInline(block)}</h${level}>`);
           break;
         }
         case "paragraph": {
-          bodyHtml.push(`<p>${escapeHtml(block.content || "")}</p>`);
+          bodyHtml.push(`<p>${renderInline(block)}</p>`);
           break;
         }
         case "bulletList": {
-          bodyHtml.push(`<ul><li>${escapeHtml(block.content || "")}</li></ul>`);
+          bodyHtml.push(`<ul><li>${renderInline(block)}</li></ul>`);
           break;
         }
         case "orderedList": {
-          bodyHtml.push(`<ol><li>${escapeHtml(block.content || "")}</li></ol>`);
+          bodyHtml.push(`<ol><li>${renderInline(block)}</li></ol>`);
           break;
         }
         case "taskList": {
           bodyHtml.push(
-            `<div class="task-item"><input type="checkbox" ${block.checked ? "checked" : ""} disabled /> <span>${escapeHtml(block.content || "")}</span></div>`
+            `<div class="task-item"><input type="checkbox" ${block.checked ? "checked" : ""} disabled /> <span>${renderInline(block)}</span></div>`
           );
           break;
         }
         case "blockquote": {
-          bodyHtml.push(`<blockquote>${escapeHtml(block.content || "")}</blockquote>`);
+          bodyHtml.push(`<blockquote>${renderInline(block)}</blockquote>`);
           break;
         }
         case "callout": {
           const variant = block.calloutVariant || "note";
           bodyHtml.push(
-            `<div class="callout callout-${variant}"><div class="callout-title">${escapeHtml(block.calloutTitle || variant.toUpperCase())}</div><p>${escapeHtml(block.content || "")}</p></div>`
+            `<div class="callout callout-${variant}"><div class="callout-title">${escapeHtml(block.calloutTitle || variant.toUpperCase())}</div><p>${renderInline(block)}</p></div>`
           );
           break;
         }

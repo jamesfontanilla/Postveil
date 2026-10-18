@@ -167,14 +167,7 @@ export const docxCodec: DocumentCodec = {
           <w:color w:val="${color}"/>
         </w:rPr>
       </w:pPr>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-          <w:sz w:val="${sz}"/>
-          <w:color w:val="${color}"/>
-        </w:rPr>
-        <w:t>${escapeXml(block.content || "")}</w:t>
-      </w:r>
+      ${htmlToDocxRuns(block.html || block.content || "", { isBold: true, defaultColor: color, sz })}
     </w:p>`);
           break;
         }
@@ -185,9 +178,7 @@ export const docxCodec: DocumentCodec = {
       <w:pPr>
         <w:spacing w:after="160" w:line="276" w:lineRule="auto"/>
       </w:pPr>
-      <w:r>
-        <w:t xml:space="preserve">${escapeXml(block.content || "")}</w:t>
-      </w:r>
+      ${htmlToDocxRuns(block.html || block.content || "")}
     </w:p>`);
           break;
         }
@@ -202,13 +193,7 @@ export const docxCodec: DocumentCodec = {
         <w:ind w:left="360"/>
         <w:spacing w:before="120" w:after="160"/>
       </w:pPr>
-      <w:r>
-        <w:rPr>
-          <w:i/>
-          <w:color w:val="475569"/>
-        </w:rPr>
-        <w:t xml:space="preserve">${escapeXml(block.content || "")}</w:t>
-      </w:r>
+      ${htmlToDocxRuns(block.html || block.content || "", { isItalic: true, defaultColor: "475569" })}
     </w:p>`);
           break;
         }
@@ -225,9 +210,7 @@ export const docxCodec: DocumentCodec = {
         <w:rPr><w:b/></w:rPr>
         <w:t>${block.type === "taskList" ? (block.checked ? "[x] " : "[ ] ") : "• "}</w:t>
       </w:r>
-      <w:r>
-        <w:t xml:space="preserve">${escapeXml(block.content || "")}</w:t>
-      </w:r>
+      ${htmlToDocxRuns(block.html || block.content || "")}
     </w:p>`);
           break;
         }
@@ -365,3 +348,152 @@ function escapeXml(str: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
 }
+
+interface RunOptions {
+  isBold?: boolean;
+  isItalic?: boolean;
+  isUnderline?: boolean;
+  defaultColor?: string;
+  sz?: string;
+}
+
+function hexNormalize(colorStr?: string | null): string | null {
+  if (!colorStr) return null;
+  const c = colorStr.trim().toLowerCase();
+  if (c.startsWith("#")) {
+    const raw = c.replace("#", "");
+    if (raw.length === 3) {
+      return raw.split("").map((ch) => ch + ch).join("").toUpperCase();
+    }
+    return raw.toUpperCase();
+  }
+  const rgbMatch = c.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (rgbMatch) {
+    const r = parseInt(rgbMatch[1], 10).toString(16).padStart(2, "0");
+    const g = parseInt(rgbMatch[2], 10).toString(16).padStart(2, "0");
+    const b = parseInt(rgbMatch[3], 10).toString(16).padStart(2, "0");
+    return `${r}${g}${b}`.toUpperCase();
+  }
+  return null;
+}
+
+function mapHighlightToWord(colorStr?: string | null): string | null {
+  if (!colorStr) return null;
+  const hex = hexNormalize(colorStr);
+  if (!hex) return null;
+  // Map common hex colors to Word openxml highlight presets:
+  // black, blue, cyan, darkBlue, darkCyan, darkGray, darkGreen, darkMagenta, darkRed, darkYellow, green, lightGray, magenta, red, white, yellow
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+
+  if (r > 200 && g > 200 && b < 100) return "yellow";
+  if (g > 200 && r < 120 && b < 120) return "green";
+  if (b > 200 && r < 120 && g > 150) return "cyan";
+  if (b > 200 && r < 120) return "blue";
+  if (r > 200 && b > 200 && g < 120) return "magenta";
+  if (r > 200 && g < 100 && b < 100) return "red";
+  if (r > 180 && g > 180 && b > 180) return "lightGray";
+  return "yellow"; // default fallback for highlights
+}
+
+function htmlToDocxRuns(htmlOrText: string, options: RunOptions = {}): string {
+  if (!htmlOrText.includes("<") && !htmlOrText.includes("&")) {
+    return `
+      <w:r>
+        ${options.isBold || options.isItalic || options.defaultColor || options.sz ? `
+        <w:rPr>
+          ${options.isBold ? "<w:b/>" : ""}
+          ${options.isItalic ? "<w:i/>" : ""}
+          ${options.defaultColor ? `<w:color w:val="${options.defaultColor}"/>` : ""}
+          ${options.sz ? `<w:sz w:val="${options.sz}"/>` : ""}
+        </w:rPr>` : ""}
+        <w:t xml:space="preserve">${escapeXml(htmlOrText)}</w:t>
+      </w:r>`;
+  }
+
+  // Parse HTML DOM
+  if (typeof DOMParser !== "undefined") {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div>${htmlOrText}</div>`, "text/html");
+      const runs: string[] = [];
+
+      const walk = (
+        node: Node,
+        ctx: { bold: boolean; italic: boolean; underline: boolean; color?: string; highlight?: string }
+      ) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const text = node.textContent || "";
+          if (!text) return;
+          const bold = ctx.bold || Boolean(options.isBold);
+          const italic = ctx.italic || Boolean(options.isItalic);
+          const underline = ctx.underline || Boolean(options.isUnderline);
+          const color = ctx.color || options.defaultColor;
+          const highlight = ctx.highlight;
+
+          runs.push(`
+      <w:r>
+        <w:rPr>
+          ${bold ? "<w:b/>" : ""}
+          ${italic ? "<w:i/>" : ""}
+          ${underline ? '<w:u w:val="single"/>' : ""}
+          ${color ? `<w:color w:val="${color}"/>` : ""}
+          ${highlight ? `<w:highlight w:val="${highlight}"/>` : ""}
+          ${options.sz ? `<w:sz w:val="${options.sz}"/>` : ""}
+        </w:rPr>
+        <w:t xml:space="preserve">${escapeXml(text)}</w:t>
+      </w:r>`);
+          return;
+        }
+
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const el = node as HTMLElement;
+          const tag = el.tagName.toLowerCase();
+          const nextCtx = { ...ctx };
+
+          if (tag === "b" || tag === "strong") nextCtx.bold = true;
+          if (tag === "i" || tag === "em") nextCtx.italic = true;
+          if (tag === "u") nextCtx.underline = true;
+
+          // Check font color
+          if (tag === "font" && el.getAttribute("color")) {
+            const hex = hexNormalize(el.getAttribute("color"));
+            if (hex) nextCtx.color = hex;
+          }
+
+          // Check style color and background-color
+          if (el.style.color) {
+            const hex = hexNormalize(el.style.color);
+            if (hex) nextCtx.color = hex;
+          }
+          if (el.style.backgroundColor) {
+            const hl = mapHighlightToWord(el.style.backgroundColor);
+            if (hl) nextCtx.highlight = hl;
+          }
+
+          for (let i = 0; i < el.childNodes.length; i++) {
+            walk(el.childNodes[i], nextCtx);
+          }
+        }
+      };
+
+      walk(doc.body.firstChild || doc.body, {
+        bold: Boolean(options.isBold),
+        italic: Boolean(options.isItalic),
+        underline: Boolean(options.isUnderline),
+        color: options.defaultColor,
+      });
+
+      if (runs.length > 0) return runs.join("");
+    } catch {
+      // Fallback to plain text run
+    }
+  }
+
+  return `
+    <w:r>
+      <w:t xml:space="preserve">${escapeXml(htmlOrText.replace(/<[^>]*>/g, ""))}</w:t>
+    </w:r>`;
+}
+

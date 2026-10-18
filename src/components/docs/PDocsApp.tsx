@@ -244,8 +244,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     setDoc({ ...engineRef.current.getDocument() });
   };
 
-  const handleUpdateBlockContent = (id: string, content: string) => {
-    engineRef.current.updateBlockContent(id, content);
+  const handleUpdateBlockContent = (id: string, content: string, html?: string) => {
+    engineRef.current.updateBlockContent(id, content, html);
     setDoc({ ...engineRef.current.getDocument() });
   };
 

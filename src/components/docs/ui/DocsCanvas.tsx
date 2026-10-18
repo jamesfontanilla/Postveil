@@ -49,11 +49,11 @@ interface DocsCanvasProps {
   viewMode: "paginated" | "continuous" | "markdown";
   showRuler?: boolean;
   onMarginsChange?: (margins: DocMargins) => void;
-  onUpdateBlockContent: (blockId: string, content: string) => void;
+  onUpdateBlockContent: (blockId: string, content: string, html?: string) => void;
   onToggleTask: (blockId: string) => void;
   onInsertBlockAfter: (afterId: string, type: BlockType) => void;
   onDeleteBlock: (blockId: string) => void;
-  onSplitBlock?: (currentId: string, currentContent: string, newContent: string, newType?: BlockType) => void;
+  onSplitBlock?: (currentId: string, currentContent: string, newContent: string, newType?: BlockType, currentHtml?: string) => void;
   onUpdateTableRows?: (blockId: string, rows: TableRow[]) => void;
   onUpdateCallout?: (blockId: string, variant?: CalloutVariant, title?: string) => void;
   onUpdateMathLatex?: (blockId: string, latex: string) => void;
@@ -885,7 +885,7 @@ interface RenderBlockParams {
   block: DocBlock;
   allBlocks: DocBlock[];
   footnotes?: import("../types").FootnoteItem[];
-  onUpdate: (id: string, text: string) => void;
+  onUpdate: (id: string, text: string, html?: string) => void;
   onToggleTask: (id: string) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   onPaste?: (e: React.ClipboardEvent) => void;
@@ -925,13 +925,14 @@ function renderBlock({
             contentEditable
             suppressContentEditableWarning
             className={`pdocs-block-content ${cls}`}
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             data-placeholder="Heading..."
             style={{ flex: 1 }}
+            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
-            {block.content}
+            {block.html ? undefined : block.content}
           </div>
           {blockFootnotes.map((fn) => (
             <sup
@@ -964,13 +965,14 @@ function renderBlock({
             contentEditable
             suppressContentEditableWarning
             className="pdocs-block-content pdocs-paragraph"
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             data-placeholder="Type '/' or paste text/math/code from chatbot..."
             style={{ flex: 1 }}
+            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
-            {block.content}
+            {block.html ? undefined : block.content}
           </div>
           {blockFootnotes.map((fn) => (
             <sup
@@ -1012,10 +1014,11 @@ function renderBlock({
             contentEditable
             suppressContentEditableWarning
             className="pdocs-block-content"
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
+            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
-            {block.content}
+            {block.html ? undefined : block.content}
           </div>
         </div>
       );
@@ -1029,10 +1032,11 @@ function renderBlock({
             contentEditable
             suppressContentEditableWarning
             className="pdocs-block-content"
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
+            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
-            {block.content}
+            {block.html ? undefined : block.content}
           </div>
         </div>
       );
@@ -1048,10 +1052,11 @@ function renderBlock({
             contentEditable
             suppressContentEditableWarning
             className="pdocs-block-content"
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
+            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
-            {block.content}
+            {block.html ? undefined : block.content}
           </div>
         </div>
       );
@@ -1064,10 +1069,11 @@ function renderBlock({
             contentEditable
             suppressContentEditableWarning
             className="pdocs-block-content"
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
+            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
-            {block.content}
+            {block.html ? undefined : block.content}
           </div>
         </div>
       );
@@ -1117,10 +1123,11 @@ function renderBlock({
             contentEditable
             suppressContentEditableWarning
             className="pdocs-block-content"
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
+            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
-            {block.content}
+            {block.html ? undefined : block.content}
           </div>
         </div>
       );

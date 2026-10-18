@@ -150,11 +150,13 @@ export class SovereignNode {
   readonly imageAlign?: "left" | "center" | "right";
   readonly tocStyle?: "dotted" | "links";
   readonly spans: InlineSpan[];
+  readonly html?: string;
 
   constructor(block: DocBlock) {
     this.id = block.id;
     this.type = block.type;
     this.content = block.content || "";
+    this.html = block.html;
     this.level = block.level;
     this.checked = block.checked;
     this.language = block.language;
@@ -175,6 +177,7 @@ export class SovereignNode {
       id: this.id,
       type: this.type,
       content: this.content,
+      html: this.html,
       level: this.level,
       checked: this.checked,
       language: this.language,
@@ -198,10 +201,11 @@ export class SovereignNode {
     });
   }
 
-  public withContent(newContent: string): SovereignNode {
+  public withContent(newContent: string, newHtml?: string): SovereignNode {
     return new SovereignNode({
       ...this.toDocBlock(),
       content: newContent,
+      html: newHtml !== undefined ? newHtml : this.html,
       latex: this.type === "mathBlock" ? newContent : this.latex,
       spans: [{ text: newContent }],
     });

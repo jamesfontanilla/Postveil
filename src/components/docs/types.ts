@@ -30,7 +30,7 @@ export type BlockType =
 export type CalloutVariant = "note" | "tip" | "info" | "warning" | "danger";
 
 export interface InlineMark {
-  type: "bold" | "italic" | "underline" | "strike" | "code" | "highlight" | "link" | "sub" | "sup" | "font";
+  type: "bold" | "italic" | "underline" | "strike" | "code" | "color" | "highlight" | "link" | "sub" | "sup" | "font";
   value?: string;
 }
 
@@ -54,6 +54,7 @@ export interface DocBlock {
   id: string;
   type: BlockType;
   content?: string;
+  html?: string; // Rich styled HTML content preserving inline text colors, highlights, marks
   level?: 1 | 2 | 3 | 4 | 5 | 6; // For headings
   spans?: InlineSpan[]; // For rich inline marks
   checked?: boolean; // For task items

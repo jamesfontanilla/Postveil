@@ -22,20 +22,28 @@ export abstract class SovereignStep {
  * Update Node Content Step
  */
 export class UpdateContentStep extends SovereignStep {
-  constructor(public readonly nodeId: string, public readonly newContent: string) {
+  constructor(
+    public readonly nodeId: string,
+    public readonly newContent: string,
+    public readonly newHtml?: string
+  ) {
     super();
   }
 
   apply(doc: SovereignDocTree): StepResult {
     const node = doc.findNode(this.nodeId);
     if (!node) return { doc, failed: `Node ${this.nodeId} not found` };
-    const updated = node.withContent(this.newContent);
+    const updated = node.withContent(this.newContent, this.newHtml);
     return { doc: doc.replaceNode(this.nodeId, updated) };
   }
 
   invert(prevDoc: SovereignDocTree): SovereignStep {
     const prevNode = prevDoc.findNode(this.nodeId);
-    return new UpdateContentStep(this.nodeId, prevNode ? prevNode.content : "");
+    return new UpdateContentStep(
+      this.nodeId,
+      prevNode ? prevNode.content : "",
+      prevNode ? prevNode.html : undefined
+    );
   }
 }
 
@@ -158,8 +166,8 @@ export class SovereignTransaction {
   /**
    * Updates content of a node
    */
-  public updateContent(nodeId: string, content: string): this {
-    return this.step(new UpdateContentStep(nodeId, content));
+  public updateContent(nodeId: string, content: string, html?: string): this {
+    return this.step(new UpdateContentStep(nodeId, content, html));
   }
 
   /**
