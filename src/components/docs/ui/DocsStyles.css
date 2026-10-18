@@ -851,23 +851,44 @@
   }
 }
 
+.pdocs-view-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  background-color: #f1f5f9;
+  border-radius: 10px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
 @media (max-width: 768px) {
   .pdocs-header {
-    padding: 0 10px;
-    gap: 8px;
+    padding: 0 8px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow: hidden;
   }
   .pdocs-header-left {
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
-    flex-shrink: 1;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+  .pdocs-logo-brand span {
+    display: none;
   }
   .pdocs-title-wrapper {
     min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
   }
   .pdocs-title-input {
-    font-size: 14px;
-    max-width: 180px;
+    font-size: 13px;
+    min-width: 60px;
+    max-width: 140px;
     width: 100%;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .pdocs-menubar {
     display: none;
@@ -876,16 +897,18 @@
     display: none;
   }
   .pdocs-header-right {
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
+    flex-wrap: nowrap;
+    align-items: center;
   }
   .pdocs-btn-text {
     display: none;
   }
   .pdocs-header-btn-import,
   .pdocs-header-btn-export {
-    padding: 0 10px !important;
-    height: 32px !important;
+    padding: 0 8px !important;
+    height: 30px !important;
   }
   .pdocs-view-mode-label {
     display: none;
@@ -893,9 +916,23 @@
   .pdocs-view-mode-icon {
     display: inline-block;
   }
+  .pdocs-view-toggle-group {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    padding: 2px !important;
+    gap: 1px !important;
+    flex-shrink: 0 !important;
+  }
   .pdocs-view-toggle-group .pdocs-tool-btn {
-    padding: 0 6px !important;
-    height: 28px !important;
+    padding: 0 5px !important;
+    height: 26px !important;
+    width: 26px !important;
+    min-width: 26px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
   }
 
   /* Markdown Split View Stacking on Mobile */
