@@ -46,7 +46,7 @@ interface AccountsHubProps {
 type TabKey = "home" | "personal" | "security" | "apps" | "storage" | "domains";
 
 export const AccountsHub: React.FC<AccountsHubProps> = ({
-  currentUserEmail = "james@jamesfontanilla.com",
+  currentUserEmail = "james@postveil.me",
   currentUserName = "James Fontanilla",
   onBackToMail,
   onSwitchToDocs,
@@ -269,7 +269,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
             {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
           <a
-            href="https://accounts.postveil.jamesfontanilla.com/"
+            href="https://accounts.postveil.me/"
             className="pv-acc-brand"
             onClick={(e) => {
               e.preventDefault();
@@ -356,11 +356,11 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                   </div>
 
                   <a
-                    href="https://postveil.jamesfontanilla.com/"
+                    href="https://postveil.me/"
                     className="pv-acc-btn-manage"
                     style={{ textDecoration: "none" }}
                     onClick={(e) => {
-                      if (window.location.hostname === "postveil.jamesfontanilla.com") {
+                      if (window.location.hostname === "postveil.me" || window.location.hostname === "postveil.jamesfontanilla.com") {
                         e.preventDefault();
                         setIsUserMenuOpen(false);
                         onBackToMail();
@@ -406,11 +406,11 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
 
           <div style={{ marginTop: "auto", paddingTop: 16 }}>
             <a
-              href="https://postveil.jamesfontanilla.com/"
+              href="https://postveil.me/"
               className="pv-acc-nav-item"
               style={{ color: "var(--pv-acc-primary)", textDecoration: "none" }}
               onClick={(e) => {
-                if (window.location.hostname === "postveil.jamesfontanilla.com") {
+                if (window.location.hostname === "postveil.me" || window.location.hostname === "postveil.jamesfontanilla.com") {
                   e.preventDefault();
                   onBackToMail();
                 }

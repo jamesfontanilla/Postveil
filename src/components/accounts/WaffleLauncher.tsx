@@ -51,7 +51,7 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
         if (onSwitchToAccounts) {
           onSwitchToAccounts();
         } else {
-          window.location.href = "https://accounts.postveil.jamesfontanilla.com/";
+          window.location.href = "https://accounts.postveil.me/";
         }
       },
     },
@@ -68,7 +68,7 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
         if (onSwitchToMail) {
           onSwitchToMail();
         } else {
-          window.location.href = "https://postveil.jamesfontanilla.com/";
+          window.location.href = "https://postveil.me/";
         }
       },
     },
@@ -115,7 +115,7 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
         if (onSwitchToDocs) {
           onSwitchToDocs();
         } else {
-          window.location.href = "https://docs.postveil.jamesfontanilla.com/";
+          window.location.href = "https://docs.postveil.me/";
         }
       },
     },

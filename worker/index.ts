@@ -2745,7 +2745,7 @@ async function defaultFromAddress(env: Env, ownerId?: string): Promise<string> {
     );
     if (rows[0]?.address) return rows[0].address;
   }
-  return env.DEFAULT_FROM_EMAIL || "james@jamesfontanilla.com";
+  return env.DEFAULT_FROM_EMAIL || "james@postveil.me";
 }
 
 async function generateRecoveryLink(env: Env, email: string, redirectTo: string): Promise<string> {
@@ -5242,7 +5242,7 @@ export default {
     if (url.pathname.startsWith("/share/") || url.pathname.startsWith("/api/share/")) { try { return protectedHeaders(await handleConfidentialRoute(request, env)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Message could not be opened", 500); } }
     if (url.pathname.startsWith("/api/")) { try { return protectedHeaders(await api(request, env, ctx)); } catch (requestError) { return error(requestError instanceof Error ? requestError.message : "Internal server error", 500); } }
     if (url.hostname.startsWith("docs.") && url.pathname.startsWith("/brand/pillars/")) {
-      return new Response("Not found on docs subdomain. Logos are deployed on postveil.jamesfontanilla.com/brand/pillars/", {
+      return new Response("Not found on docs subdomain. Logos are deployed on postveil.me/brand/pillars/", {
         status: 404,
         headers: { "Content-Type": "text/plain" },
       });

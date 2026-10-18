@@ -31,10 +31,10 @@ crons = ["* * * * *"]
 [vars]
 # Postveil's isolated deployment configuration. Provider credentials remain
 # Worker secrets and are never committed to this repository.
-APP_DOMAIN = "postveil.jamesfontanilla.com"
+APP_DOMAIN = "postveil.me"
 ALLOWED_SENDER_DOMAINS = "*"
-DEFAULT_FROM_EMAIL = "postmaster@jamesfontanilla.com"
-SYSTEM_FROM_EMAIL = "noreply@postveil.jamesfontanilla.com"
+DEFAULT_FROM_EMAIL = "postmaster@postveil.me"
+SYSTEM_FROM_EMAIL = "noreply@postveil.me"
 INBOUND_MX_TARGETS = "inbound-smtp.ap-southeast-1.amazonaws.com"
 ATTACHMENTS_ENABLED = "true"
 AWS_SES_REGION = "ap-southeast-1"
@@ -53,6 +53,18 @@ CLOUDFLARE_OAUTH_TOKEN_AUTH_METHOD = "client_secret_basic"
 CLOUDFLARE_EMAIL_WORKER_NAME = "postveil"
 
 [[routes]]
+pattern = "postveil.me"
+custom_domain = true
+
+[[routes]]
+pattern = "accounts.postveil.me"
+custom_domain = true
+
+[[routes]]
+pattern = "docs.postveil.me"
+custom_domain = true
+
+[[routes]]
 pattern = "postveil.jamesfontanilla.com"
 custom_domain = true
 
@@ -63,4 +75,5 @@ custom_domain = true
 [[routes]]
 pattern = "docs.postveil.jamesfontanilla.com"
 custom_domain = true
+
 
