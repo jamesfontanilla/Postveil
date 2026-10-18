@@ -809,70 +809,21 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
 
       <div className="pdocs-tool-separator" />
 
-      {/* Paper Size Selector */}
-      <select
-        className="pdocs-select"
-        value={paperSize}
-        onChange={(e) => onPaperSetupChange?.(e.target.value as PaperSize, orientation)}
-        title="Paper Size"
-      >
-        <option value="A4">A4 (210 × 297mm)</option>
-        <option value="Letter">US Letter (8.5 × 11")</option>
-        <option value="Legal">US Legal (8.5 × 14")</option>
-        <option value="A3">A3 (297 × 420mm)</option>
-        <option value="A5">A5 (148 × 210mm)</option>
-        <option value="Tabloid">Tabloid (11 × 17")</option>
-      </select>
-
-      {/* Orientation Toggle */}
-      <button
-        className={`pdocs-tool-btn ${orientation === "landscape" ? "active" : ""}`}
-        onClick={() =>
-          onPaperSetupChange?.(paperSize, orientation === "portrait" ? "landscape" : "portrait")
-        }
-        title={`Orientation: ${orientation} (click to toggle)`}
-        style={{
-          backgroundColor: orientation === "landscape" ? "#e2e8f0" : "transparent",
-        }}
-      >
-        <Compass size={16} />
-      </button>
-
-      {/* Margins Selector */}
-      <select
-        className="pdocs-select"
-        value={margins.preset}
-        onChange={(e) => {
-          const val = e.target.value as MarginPreset;
-          if (val === "custom") {
-            onOpenPageSetup?.();
-          } else if (onMarginsChange) {
-            const presets: Record<string, { top: number; bottom: number; left: number; right: number }> = {
-              normal: { top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 },
-              narrow: { top: 0.5, bottom: 0.5, left: 0.5, right: 0.5 },
-              moderate: { top: 1.0, bottom: 1.0, left: 0.75, right: 0.75 },
-              wide: { top: 1.0, bottom: 1.0, left: 2.0, right: 2.0 },
-            };
-            const p = presets[val] || presets.normal;
-            onMarginsChange({ preset: val, ...p });
-          }
-        }}
-        title="Document Margins"
-      >
-        <option value="normal">Margins: Normal (1.0")</option>
-        <option value="narrow">Margins: Narrow (0.5")</option>
-        <option value="moderate">Margins: Moderate (0.75")</option>
-        <option value="wide">Margins: Wide (2.0")</option>
-        <option value="custom">Margins: Custom...</option>
-      </select>
-
-      {/* Page Setup Dialog Trigger */}
+      {/* Page Setup Dialog Trigger (Paper Size, Orientation, Margins & Background) */}
       <button
         className="pdocs-tool-btn"
         onClick={onOpenPageSetup}
-        title="Page Setup (Paper, Margins & Background)"
+        title={`Page setup: ${paperSize} (${orientation}), Margins: ${margins.preset} (Click to customize)`}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "0 10px",
+          color: "#334155",
+        }}
       >
-        <Settings2 size={16} />
+        <Sliders size={16} />
+        <span style={{ fontSize: "12px", fontWeight: 500 }}>Page setup</span>
       </button>
 
       <div className="pdocs-toolbar-divider" />
