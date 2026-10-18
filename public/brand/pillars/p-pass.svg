@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="P-Pass - Postveil Sovereign Suite">
+  <defs>
+    <!-- Postveil Signature Rounded Seal Mask -->
+    <clipPath id="seal-p-pass">
+      <rect x="6" y="6" width="88" height="88" rx="22"/>
+    </clipPath>
+    <!-- Subtle Ambient Gradient -->
+    <linearGradient id="bg-p-pass" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <clipPath id="cal-hdr-clip">
+      <rect x="22" y="24" width="56" height="54" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <!-- Postveil Seal Base Container -->
+  <rect x="6" y="6" width="88" height="88" rx="22" fill="url(#bg-p-pass)" stroke="#0F172A" stroke-opacity="0.12" stroke-width="1.5"/>
+
+  <!-- Postveil Sovereign Dual-Plane Diagonal Brand Shear (Iconic Identity Anchor) -->
+  <polygon points="0,0 68,0 22,100 0,100" clip-path="url(#seal-p-pass)" fill="#1E293B" opacity="0.08"/>
+  <polygon points="78,0 100,0 100,100 32,100" clip-path="url(#seal-p-pass)" fill="#0F172A" opacity="0.05" transform="translate(2,-2)"/>
+
+  <!-- Pillar Specific Architectural Symbolism -->
+  <g id="symbol-p-pass">
+    <!-- Hardened Hardened Steel Padlock Shackle -->
+      <path d="M34 42 V30 C34 21.2 41.2 14 50 14 C58.8 14 66 21.2 66 30 V42" fill="none" stroke="#1E293B" stroke-width="7" stroke-linecap="round"/>
+      <!-- Heavy Vault Body -->
+      <rect x="22" y="40" width="56" height="46" rx="10" fill="#1E293B" stroke="#0F172A" stroke-width="2.5"/>
+      <!-- Argon2id Cryptographic Core Keyhole -->
+      <circle cx="50" cy="58" r="6" fill="#10B981"/>
+      <path d="M47 58 L45 72 H55 L53 58 Z" fill="#10B981"/>
+      <!-- Hardware Biometric Sensor Rings -->
+      <circle cx="50" cy="62" r="16" fill="none" stroke="#334155" stroke-width="1.5" stroke-dasharray="3 3"/>
+  </g>
+</svg>

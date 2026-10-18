@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="P-Forms - Postveil Sovereign Suite">
+  <defs>
+    <!-- Postveil Signature Rounded Seal Mask -->
+    <clipPath id="seal-p-forms">
+      <rect x="6" y="6" width="88" height="88" rx="22"/>
+    </clipPath>
+    <!-- Subtle Ambient Gradient -->
+    <linearGradient id="bg-p-forms" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EEF2FF"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <clipPath id="cal-hdr-clip">
+      <rect x="22" y="24" width="56" height="54" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <!-- Postveil Seal Base Container -->
+  <rect x="6" y="6" width="88" height="88" rx="22" fill="url(#bg-p-forms)" stroke="#312E81" stroke-opacity="0.12" stroke-width="1.5"/>
+
+  <!-- Postveil Sovereign Dual-Plane Diagonal Brand Shear (Iconic Identity Anchor) -->
+  <polygon points="0,0 68,0 22,100 0,100" clip-path="url(#seal-p-forms)" fill="#4F46E5" opacity="0.08"/>
+  <polygon points="78,0 100,0 100,100 32,100" clip-path="url(#seal-p-forms)" fill="#312E81" opacity="0.05" transform="translate(2,-2)"/>
+
+  <!-- Pillar Specific Architectural Symbolism -->
+  <g id="symbol-p-forms">
+    <!-- Survey Clipboard Tray -->
+      <rect x="22" y="24" width="56" height="56" rx="9" fill="#FFFFFF" stroke="#4F46E5" stroke-width="3"/>
+      <!-- Clipboard Top Metal Clip -->
+      <path d="M38 24 V20 C38 18 40 16 42 16 H58 C60 16 62 18 62 20 V24 Z" fill="#312E81"/>
+      <rect x="44" y="20" width="12" height="4" rx="1" fill="#FFFFFF"/>
+      <!-- Conversational Checkbox Question Items -->
+      <rect x="30" y="36" width="9" height="9" rx="2.5" fill="#4F46E5"/>
+      <path d="M32.5 40.5 L34.5 42.5 L37 38" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="45" y1="40.5" x2="68" y2="40.5" stroke="#4F46E5" stroke-width="2.5" stroke-linecap="round"/>
+
+      <rect x="30" y="50" width="9" height="9" rx="2.5" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+      <line x1="45" y1="54.5" x2="68" y2="54.5" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round"/>
+
+      <rect x="30" y="64" width="9" height="9" rx="2.5" fill="#EEF2FF" stroke="#4F46E5" stroke-width="1.5"/>
+      <line x1="45" y1="68.5" x2="60" y2="68.5" stroke="#94A3B8" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+</svg>

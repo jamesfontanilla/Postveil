@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="P-PDF - Postveil Sovereign Suite">
+  <defs>
+    <!-- Postveil Signature Rounded Seal Mask -->
+    <clipPath id="seal-p-pdf">
+      <rect x="6" y="6" width="88" height="88" rx="22"/>
+    </clipPath>
+    <!-- Subtle Ambient Gradient -->
+    <linearGradient id="bg-p-pdf" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FEF2F2"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <clipPath id="cal-hdr-clip">
+      <rect x="22" y="24" width="56" height="54" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <!-- Postveil Seal Base Container -->
+  <rect x="6" y="6" width="88" height="88" rx="22" fill="url(#bg-p-pdf)" stroke="#7F1D1D" stroke-opacity="0.12" stroke-width="1.5"/>
+
+  <!-- Postveil Sovereign Dual-Plane Diagonal Brand Shear (Iconic Identity Anchor) -->
+  <polygon points="0,0 68,0 22,100 0,100" clip-path="url(#seal-p-pdf)" fill="#DC2626" opacity="0.08"/>
+  <polygon points="78,0 100,0 100,100 32,100" clip-path="url(#seal-p-pdf)" fill="#7F1D1D" opacity="0.05" transform="translate(2,-2)"/>
+
+  <!-- Pillar Specific Architectural Symbolism -->
+  <g id="symbol-p-pdf">
+    <!-- Signature Red PDF Container Sheet -->
+      <path d="M26 20 H56 L74 38 V78 C74 81 71.5 83.5 68.5 83.5 H26 C23 83.5 20.5 81 20.5 78 V25.5 C20.5 22.5 23 20 26 20 Z" fill="#DC2626" stroke="#7F1D1D" stroke-width="2.5" stroke-linejoin="round"/>
+      <!-- Fold Corner -->
+      <polygon points="56,20 74,38 56,38" fill="#FCA5A5"/>
+      <!-- Distinctive Bold 'PDF' Vector Brandmark -->
+      <rect x="28" y="44" width="38" height="24" rx="4" fill="#FFFFFF"/>
+      <text x="32" y="61" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="900" fill="#DC2626" letter-spacing="1">PDF</text>
+      <!-- Redaction Crossbar Indicator -->
+      <line x1="28" y1="73" x2="52" y2="73" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+</svg>

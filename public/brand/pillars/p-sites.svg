@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="P-Sites - Postveil Sovereign Suite">
+  <defs>
+    <!-- Postveil Signature Rounded Seal Mask -->
+    <clipPath id="seal-p-sites">
+      <rect x="6" y="6" width="88" height="88" rx="22"/>
+    </clipPath>
+    <!-- Subtle Ambient Gradient -->
+    <linearGradient id="bg-p-sites" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ECFDF5"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <clipPath id="cal-hdr-clip">
+      <rect x="22" y="24" width="56" height="54" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <!-- Postveil Seal Base Container -->
+  <rect x="6" y="6" width="88" height="88" rx="22" fill="url(#bg-p-sites)" stroke="#064E3B" stroke-opacity="0.12" stroke-width="1.5"/>
+
+  <!-- Postveil Sovereign Dual-Plane Diagonal Brand Shear (Iconic Identity Anchor) -->
+  <polygon points="0,0 68,0 22,100 0,100" clip-path="url(#seal-p-sites)" fill="#059669" opacity="0.08"/>
+  <polygon points="78,0 100,0 100,100 32,100" clip-path="url(#seal-p-sites)" fill="#064E3B" opacity="0.05" transform="translate(2,-2)"/>
+
+  <!-- Pillar Specific Architectural Symbolism -->
+  <g id="symbol-p-sites">
+    <!-- Global Edge Planet / Orbit Grid -->
+      <circle cx="50" cy="50" r="26" fill="#FFFFFF" stroke="#059669" stroke-width="3"/>
+      <!-- Equator & Longitudinal Meridian Curves -->
+      <ellipse cx="50" cy="50" rx="26" ry="11" fill="none" stroke="#059669" stroke-width="2"/>
+      <ellipse cx="50" cy="50" rx="11" ry="26" fill="none" stroke="#059669" stroke-width="2"/>
+      <line x1="24" y1="50" x2="76" y2="50" stroke="#059669" stroke-width="2"/>
+      <line x1="50" y1="24" x2="50" y2="76" stroke="#059669" stroke-width="2"/>
+      <!-- Edge Broadcast Nodes (300+ Cities) -->
+      <circle cx="36" cy="40" r="3" fill="#10B981"/>
+      <circle cx="64" cy="40" r="3" fill="#10B981"/>
+      <circle cx="50" cy="61" r="3" fill="#10B981"/>
+      <!-- Lightning Fast Sub-50ms TTFB Ray -->
+      <polygon points="50,16 54,26 48,26 52,36 44,36" fill="#F59E0B" stroke="#D97706" stroke-width="1"/>
+  </g>
+</svg>

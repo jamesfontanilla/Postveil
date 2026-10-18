@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="P-Deck - Postveil Sovereign Suite">
+  <defs>
+    <!-- Postveil Signature Rounded Seal Mask -->
+    <clipPath id="seal-p-deck">
+      <rect x="6" y="6" width="88" height="88" rx="22"/>
+    </clipPath>
+    <!-- Subtle Ambient Gradient -->
+    <linearGradient id="bg-p-deck" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFF7ED"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <clipPath id="cal-hdr-clip">
+      <rect x="22" y="24" width="56" height="54" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <!-- Postveil Seal Base Container -->
+  <rect x="6" y="6" width="88" height="88" rx="22" fill="url(#bg-p-deck)" stroke="#7C2D12" stroke-opacity="0.12" stroke-width="1.5"/>
+
+  <!-- Postveil Sovereign Dual-Plane Diagonal Brand Shear (Iconic Identity Anchor) -->
+  <polygon points="0,0 68,0 22,100 0,100" clip-path="url(#seal-p-deck)" fill="#EA580C" opacity="0.08"/>
+  <polygon points="78,0 100,0 100,100 32,100" clip-path="url(#seal-p-deck)" fill="#7C2D12" opacity="0.05" transform="translate(2,-2)"/>
+
+  <!-- Pillar Specific Architectural Symbolism -->
+  <g id="symbol-p-deck">
+    <!-- Cinema-Grade 16:9 Presentation Display -->
+      <rect x="18" y="24" width="64" height="42" rx="7" fill="#EA580C" stroke="#7C2D12" stroke-width="2.5"/>
+      <rect x="22" y="28" width="56" height="34" rx="4" fill="#FFFFFF"/>
+      <!-- Stand and Base -->
+      <path d="M50 66 V76 M38 76 H62" stroke="#7C2D12" stroke-width="3" stroke-linecap="round"/>
+      <!-- Visual Slide Layout Elements: Header, Hero Chart & Text -->
+      <rect x="28" y="34" width="18" height="4" rx="1.5" fill="#EA580C"/>
+      <path d="M28 54 L36 44 L44 49 L54 38 L62 46" fill="none" stroke="#F97316" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="54" cy="38" r="2.5" fill="#EA580C"/>
+  </g>
+</svg>

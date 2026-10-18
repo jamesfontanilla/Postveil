@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="P-Docs - Postveil Sovereign Suite">
+  <defs>
+    <!-- Postveil Signature Rounded Seal Mask -->
+    <clipPath id="seal-p-docs">
+      <rect x="6" y="6" width="88" height="88" rx="22"/>
+    </clipPath>
+    <!-- Subtle Ambient Gradient -->
+    <linearGradient id="bg-p-docs" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F4F7F4"/>
+      <stop offset="100%" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <clipPath id="cal-hdr-clip">
+      <rect x="22" y="24" width="56" height="54" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <!-- Postveil Seal Base Container -->
+  <rect x="6" y="6" width="88" height="88" rx="22" fill="url(#bg-p-docs)" stroke="#172522" stroke-opacity="0.12" stroke-width="1.5"/>
+
+  <!-- Postveil Sovereign Dual-Plane Diagonal Brand Shear (Iconic Identity Anchor) -->
+  <polygon points="0,0 68,0 22,100 0,100" clip-path="url(#seal-p-docs)" fill="#1F6B58" opacity="0.08"/>
+  <polygon points="78,0 100,0 100,100 32,100" clip-path="url(#seal-p-docs)" fill="#172522" opacity="0.05" transform="translate(2,-2)"/>
+
+  <!-- Pillar Specific Architectural Symbolism -->
+  <g id="symbol-p-docs">
+    <!-- Document Sheet with Dog-Ear Corner -->
+      <path d="M26 20 H56 L74 38 V78 C74 81 71.5 83.5 68.5 83.5 H26 C23 83.5 20.5 81 20.5 78 V25.5 C20.5 22.5 23 20 26 20 Z" fill="#FFFFFF" stroke="#1F6B58" stroke-width="3" stroke-linejoin="round"/>
+      <!-- Dog Ear Fold -->
+      <path d="M56 20 V38 H74" fill="#E2E8F0" stroke="#1F6B58" stroke-width="2.5" stroke-linejoin="round"/>
+      <polygon points="56,20 74,38 56,38" fill="#D1FAE5"/>
+      <!-- Clean Typography Lines -->
+      <line x1="32" y1="48" x2="62" y2="48" stroke="#1F6B58" stroke-width="3" stroke-linecap="round"/>
+      <line x1="32" y1="58" x2="62" y2="58" stroke="#1F6B58" stroke-width="3" stroke-linecap="round"/>
+      <line x1="32" y1="68" x2="48" y2="68" stroke="#10B981" stroke-width="3" stroke-linecap="round"/>
+  </g>
+</svg>
