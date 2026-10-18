@@ -1,3 +1,5 @@
+@import "katex/dist/katex.min.css";
+
 /* Postveil P-Docs Sovereign Styles */
 :root {
   --pdocs-bg: #f8fafc;
@@ -304,23 +306,82 @@
 .pdocs-paper-sheet {
   width: 100%;
   max-width: 820px;
-  min-height: 1056px; /* Standard A4 / Letter aspect */
   background-color: var(--pdocs-surface);
   box-shadow: var(--pdocs-paper-shadow);
   border-radius: 4px;
-  padding: 64px 72px;
+  padding: 56px 64px;
   box-sizing: border-box;
-  margin-bottom: 24px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  margin-bottom: 32px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
   position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdocs-paper-page {
+  /* When in paginated mode, each page has crisp boundaries */
+  transition: box-shadow 0.2s ease;
+}
+
+.pdocs-paper-page:hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.pdocs-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #94a3b8;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 8px;
+  margin-bottom: 24px;
+  user-select: none;
+}
+
+.pdocs-page-header-title {
+  font-weight: 500;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdocs-page-header-stamp {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pdocs-page-body {
+  flex: 1;
+}
+
+.pdocs-page-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #94a3b8;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 8px;
+  margin-top: 24px;
+  user-select: none;
 }
 
 .pdocs-canvas-continuous .pdocs-paper-sheet {
   box-shadow: none;
   border: none;
   min-height: auto;
+  height: auto !important;
   padding: 24px 32px;
   background: none;
+  margin-bottom: 0;
+}
+
+.pdocs-canvas-continuous .pdocs-page-header,
+.pdocs-canvas-continuous .pdocs-page-footer {
+  display: none;
 }
 
 /* Block Elements */
@@ -346,19 +407,19 @@
 }
 
 .pdocs-heading-1 {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
   color: #0f172a;
   border-bottom: 2px solid #0f5132;
   padding-bottom: 6px;
-  margin-top: 16px;
+  margin-top: 14px;
 }
 
 .pdocs-heading-2 {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 600;
   color: #1e293b;
-  margin-top: 14px;
+  margin-top: 12px;
 }
 
 .pdocs-heading-3 {
@@ -369,7 +430,7 @@
 }
 
 .pdocs-paragraph {
-  font-size: 15px;
+  font-size: inherit;
   color: #1a1a1a;
 }
 
@@ -385,11 +446,22 @@
 
 .pdocs-callout {
   width: 100%;
-  padding: 14px 18px;
+  padding: 12px 16px;
   border-radius: 10px;
   border-left: 4px solid #0f5132;
   background-color: #f0fdf4;
   margin: 8px 0;
+  transition: all 0.2s ease;
+}
+
+.pdocs-callout.callout-note {
+  border-left-color: #0284c7;
+  background-color: #f0f9ff;
+}
+
+.pdocs-callout.callout-tip {
+  border-left-color: #15803d;
+  background-color: #f0fdf4;
 }
 
 .pdocs-callout.callout-warning {
@@ -397,11 +469,37 @@
   background-color: #fffbeb;
 }
 
+.pdocs-callout.callout-danger {
+  border-left-color: #dc2626;
+  background-color: #fef2f2;
+}
+
+.pdocs-callout.callout-info {
+  border-left-color: #4f46e5;
+  background-color: #eef2ff;
+}
+
+.pdocs-callout-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
 .pdocs-callout-title {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  margin-bottom: 4px;
+  outline: none;
+}
+
+.pdocs-callout-variant-select {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
 }
 
 .pdocs-task-item {
@@ -424,16 +522,32 @@
   color: #94a3b8;
 }
 
+/* Math Block with KaTeX */
 .pdocs-math-block {
   width: 100%;
   background-color: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 16px;
-  text-align: center;
-  font-family: "KaTeX_Main", "Times New Roman", serif;
-  font-size: 18px;
-  color: #0f172a;
+  padding: 14px 18px;
+  margin: 10px 0;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pdocs-math-block:hover {
+  border-color: #0f5132;
+  box-shadow: 0 2px 8px rgba(15, 81, 50, 0.08);
+}
+
+.pdocs-math-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 6px;
+  font-family: sans-serif;
 }
 
 .pdocs-code-block {
@@ -447,10 +561,47 @@
   overflow-x: auto;
 }
 
+/* Table */
+.pdocs-table-container {
+  width: 100%;
+  margin: 12px 0;
+  overflow-x: auto;
+}
+
+.pdocs-table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  background: #f8fafc;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.pdocs-table-action-btn {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pdocs-table-action-btn:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
 .pdocs-table {
   width: 100%;
   border-collapse: collapse;
-  margin: 12px 0;
 }
 
 .pdocs-table th, .pdocs-table td {
@@ -463,6 +614,32 @@
 .pdocs-table th {
   background-color: #f1f5f9;
   font-weight: 600;
+}
+
+/* Page Break Divider block */
+.pdocs-page-break-indicator {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  user-select: none;
+}
+
+.pdocs-page-break-line {
+  flex: 1;
+  border-top: 1px dashed #94a3b8;
+}
+
+.pdocs-page-break-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 
 /* Modals */
@@ -488,20 +665,45 @@
   border: 1px solid #e2e8f0;
 }
 
-@media (max-width: 768px) {
+/* Responsive & Mobile Adaptation */
+@media (max-width: 1024px) {
   .pdocs-sidebar {
     position: absolute;
     left: 0;
     top: 108px;
     bottom: 0;
     z-index: 150;
-    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.12);
   }
+}
+
+@media (max-width: 860px) {
   .pdocs-paper-sheet {
-    padding: 32px 20px;
-    margin-bottom: 12px;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: auto !important;
+    height: auto !important;
+    padding: 32px 18px !important;
+    margin-bottom: 16px !important;
   }
+  .pdocs-page-header,
+  .pdocs-page-footer {
+    display: none !important;
+  }
+  .pdocs-canvas-viewport {
+    padding: 16px 8px 60px;
+  }
+}
+
+@media (max-width: 768px) {
   .pdocs-header {
     padding: 0 8px;
+  }
+  .pdocs-title-input {
+    font-size: 14px;
+    max-width: 160px;
+  }
+  .pdocs-status-indicator {
+    display: none;
   }
 }

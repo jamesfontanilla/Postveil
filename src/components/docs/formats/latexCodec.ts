@@ -60,8 +60,18 @@ export const latexCodec: DocumentCodec = {
   },
 
   async export(doc: UniversalDoc, options?: ExportOptions): Promise<{ data: string; filename: string }> {
+    const paperClass =
+      doc.metadata.paperSize === "Letter"
+        ? "letterpaper"
+        : doc.metadata.paperSize === "Legal"
+        ? "legalpaper"
+        : doc.metadata.paperSize === "A3"
+        ? "a3paper"
+        : doc.metadata.paperSize === "A5"
+        ? "a5paper"
+        : "a4paper";
     const latexLines: string[] = [
-      `\\documentclass[11pt,${doc.metadata.paperSize === "Letter" ? "letterpaper" : "a4paper"}]{article}`,
+      `\\documentclass[11pt,${paperClass}]{article}`,
       `\\usepackage[utf8]{inputenc}`,
       `\\usepackage{amsmath,amssymb,amsfonts}`,
       `\\usepackage{graphicx}`,

@@ -20,8 +20,10 @@ import {
   Sigma,
   AlertCircle,
   Minus,
+  Scissors,
+  Compass,
 } from "lucide-react";
-import { type BlockType } from "../types";
+import { type BlockType, type PaperSize, type Orientation } from "../types";
 
 interface DocsToolbarProps {
   canUndo: boolean;
@@ -34,6 +36,9 @@ interface DocsToolbarProps {
   onFontFamilyChange: (font: "Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono") => void;
   fontSize: number;
   onFontSizeChange: (delta: number) => void;
+  paperSize?: PaperSize;
+  orientation?: Orientation;
+  onPaperSetupChange?: (size: PaperSize, orientation: Orientation) => void;
 }
 
 export const DocsToolbar: React.FC<DocsToolbarProps> = ({
@@ -47,6 +52,9 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   onFontFamilyChange,
   fontSize,
   onFontSizeChange,
+  paperSize = "A4",
+  orientation = "portrait",
+  onPaperSetupChange,
 }) => {
   return (
     <div className="pdocs-toolbar" role="toolbar" aria-label="Document editing tools">
@@ -140,36 +148,113 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
 
       <div className="pdocs-tool-separator" />
 
-      {/* Inline Marks */}
-      <button className="pdocs-tool-btn" title="Bold (Ctrl+B)">
+      {/* Inline Marks with Selection Preservation */}
+      <button
+        className="pdocs-tool-btn"
+        title="Bold (Ctrl+B)"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("bold");
+        }}
+      >
         <Bold size={16} />
       </button>
-      <button className="pdocs-tool-btn" title="Italic (Ctrl+I)">
+      <button
+        className="pdocs-tool-btn"
+        title="Italic (Ctrl+I)"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("italic");
+        }}
+      >
         <Italic size={16} />
       </button>
-      <button className="pdocs-tool-btn" title="Underline (Ctrl+U)">
+      <button
+        className="pdocs-tool-btn"
+        title="Underline (Ctrl+U)"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("underline");
+        }}
+      >
         <Underline size={16} />
       </button>
-      <button className="pdocs-tool-btn" title="Strikethrough">
+      <button
+        className="pdocs-tool-btn"
+        title="Strikethrough"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("strikeThrough");
+        }}
+      >
         <Strikethrough size={16} />
       </button>
-      <button className="pdocs-tool-btn" title="Inline Code">
+      <button
+        className="pdocs-tool-btn"
+        title="Inline Code"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          const sel = window.getSelection();
+          if (!sel || sel.rangeCount === 0) return;
+          const range = sel.getRangeAt(0);
+          const text = range.toString();
+          if (!text) return;
+          const code = document.createElement("code");
+          code.style.backgroundColor = "#f1f5f9";
+          code.style.padding = "2px 6px";
+          code.style.borderRadius = "4px";
+          code.style.fontFamily = "'JetBrains Mono', monospace";
+          code.style.fontSize = "0.9em";
+          code.style.color = "#0f5132";
+          code.textContent = text;
+          range.deleteContents();
+          range.insertNode(code);
+        }}
+      >
         <Code size={16} />
       </button>
 
       <div className="pdocs-tool-separator" />
 
       {/* Alignment */}
-      <button className="pdocs-tool-btn active" title="Align Left">
+      <button
+        className="pdocs-tool-btn"
+        title="Align Left"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("justifyLeft");
+        }}
+      >
         <AlignLeft size={16} />
       </button>
-      <button className="pdocs-tool-btn" title="Align Center">
+      <button
+        className="pdocs-tool-btn"
+        title="Align Center"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("justifyCenter");
+        }}
+      >
         <AlignCenter size={16} />
       </button>
-      <button className="pdocs-tool-btn" title="Align Right">
+      <button
+        className="pdocs-tool-btn"
+        title="Align Right"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("justifyRight");
+        }}
+      >
         <AlignRight size={16} />
       </button>
-      <button className="pdocs-tool-btn" title="Justify">
+      <button
+        className="pdocs-tool-btn"
+        title="Justify"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("justifyFull");
+        }}
+      >
         <AlignJustify size={16} />
       </button>
 
@@ -228,6 +313,44 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Insert Horizontal Rule"
       >
         <Minus size={16} />
+      </button>
+      <button
+        className="pdocs-tool-btn"
+        onClick={() => onInsertBlock("pageBreak")}
+        title="Insert Page Break (New Page)"
+      >
+        <Scissors size={16} />
+      </button>
+
+      <div className="pdocs-tool-separator" />
+
+      {/* Paper Size Selector */}
+      <select
+        className="pdocs-select"
+        value={paperSize}
+        onChange={(e) => onPaperSetupChange?.(e.target.value as PaperSize, orientation)}
+        title="Paper Size"
+      >
+        <option value="A4">A4 (210 × 297mm)</option>
+        <option value="Letter">US Letter (8.5 × 11")</option>
+        <option value="Legal">US Legal (8.5 × 14")</option>
+        <option value="A3">A3 (297 × 420mm)</option>
+        <option value="A5">A5 (148 × 210mm)</option>
+        <option value="Tabloid">Tabloid (11 × 17")</option>
+      </select>
+
+      {/* Orientation Toggle */}
+      <button
+        className={`pdocs-tool-btn ${orientation === "landscape" ? "active" : ""}`}
+        onClick={() =>
+          onPaperSetupChange?.(paperSize, orientation === "portrait" ? "landscape" : "portrait")
+        }
+        title={`Orientation: ${orientation} (click to toggle)`}
+        style={{
+          backgroundColor: orientation === "landscape" ? "#e2e8f0" : "transparent",
+        }}
+      >
+        <Compass size={16} />
       </button>
     </div>
   );

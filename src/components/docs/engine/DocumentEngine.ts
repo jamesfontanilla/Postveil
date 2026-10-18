@@ -77,6 +77,60 @@ export class DocumentEngine {
     this.pushHistory();
   }
 
+  public splitBlock(currentId: string, currentContent: string, newContent: string, newType: BlockType = "paragraph"): DocBlock {
+    const blockIndex = this.doc.blocks.findIndex((b) => b.id === currentId);
+    if (blockIndex >= 0) {
+      this.doc.blocks[blockIndex].content = currentContent;
+    }
+    const newBlock: DocBlock = {
+      id: `b_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      type: newType,
+      content: newContent,
+    };
+    if (blockIndex >= 0) {
+      this.doc.blocks.splice(blockIndex + 1, 0, newBlock);
+    } else {
+      this.doc.blocks.push(newBlock);
+    }
+    this.recalculateStats();
+    this.pushHistory();
+    return newBlock;
+  }
+
+  public updateTableRows(blockId: string, rows: import("../types").TableRow[]) {
+    const block = this.doc.blocks.find((b) => b.id === blockId);
+    if (block) {
+      block.rows = rows;
+      this.recalculateStats();
+      this.pushHistory();
+    }
+  }
+
+  public updateCallout(blockId: string, variant?: CalloutVariant, title?: string) {
+    const block = this.doc.blocks.find((b) => b.id === blockId);
+    if (block) {
+      if (variant) block.calloutVariant = variant;
+      if (title !== undefined) block.calloutTitle = title;
+      this.pushHistory();
+    }
+  }
+
+  public updateMathLatex(blockId: string, latex: string) {
+    const block = this.doc.blocks.find((b) => b.id === blockId);
+    if (block) {
+      block.latex = latex;
+      block.content = latex;
+      this.pushHistory();
+    }
+  }
+
+  public updatePaperSetup(paperSize: import("../types").PaperSize, orientation: import("../types").Orientation) {
+    this.doc.metadata.paperSize = paperSize;
+    this.doc.metadata.orientation = orientation;
+    this.doc.metadata.updatedAt = new Date().toISOString();
+    this.pushHistory();
+  }
+
   public changeBlockType(id: string, newType: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) {
     const block = this.doc.blocks.find((b) => b.id === id);
     if (block) {

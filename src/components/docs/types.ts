@@ -60,6 +60,8 @@ export interface DocBlock {
   latex?: string; // For math blocks
   rows?: TableRow[]; // For tables
 }
+export type PaperSize = "A4" | "Letter" | "Legal" | "A3" | "A5" | "Tabloid";
+export type Orientation = "portrait" | "landscape";
 
 export interface DocumentMetadata {
   id: string;
@@ -71,8 +73,8 @@ export interface DocumentMetadata {
   wordCount: number;
   charCount: number;
   readingTimeMinutes: number;
-  paperSize: "A4" | "Letter" | "Legal";
-  orientation: "portrait" | "landscape";
+  paperSize: PaperSize;
+  orientation: Orientation;
   lineSpacing: "1.0" | "1.15" | "1.5" | "2.0";
   fontFamily: "Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono";
   fontSize: number; // in px or pt
@@ -101,7 +103,8 @@ export interface FormatSpecification {
 export interface ExportOptions {
   format: SupportedFormat;
   includeMetadata?: boolean;
-  paperSize?: "A4" | "Letter";
+  paperSize?: PaperSize;
+  orientation?: Orientation;
   mathEngine?: "latex" | "mathml" | "unicode";
   styleTheme?: "modern" | "classic" | "academic" | "minimal";
 }

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import BrandMark from "../../BrandMark";
 import { WaffleLauncher } from "../../accounts/WaffleLauncher";
-import { type UniversalDoc, type SupportedFormat } from "../types";
+import { type UniversalDoc, type SupportedFormat, type BlockType } from "../types";
 
 interface DocsHeaderProps {
   doc: UniversalDoc;
@@ -33,6 +33,7 @@ interface DocsHeaderProps {
   onBackToMail: () => void;
   onSwitchToAccounts: () => void;
   onSignOut?: () => void;
+  onInsertBlock?: (type: BlockType) => void;
   userEmail?: string;
   userName?: string;
 }
@@ -49,6 +50,7 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
   onBackToMail,
   onSwitchToAccounts,
   onSignOut,
+  onInsertBlock,
   userEmail = "user@postveil.app",
   userName = "Postveil Creator",
 }) => {
@@ -179,11 +181,290 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
               )}
             </div>
 
-            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>Edit</button>
-            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>View</button>
-            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>Insert</button>
-            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>Format</button>
-            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>Tools</button>
+            {/* Edit Menu */}
+            <div style={{ position: "relative" }}>
+              <button
+                className="pdocs-menu-item"
+                onClick={() => setActiveMenu(activeMenu === "edit" ? null : "edit")}
+              >
+                Edit
+              </button>
+              {activeMenu === "edit" && (
+                <>
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 120 }}
+                    onClick={() => setActiveMenu(null)}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "24px",
+                      left: 0,
+                      backgroundColor: "#ffffff",
+                      borderRadius: "10px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "6px",
+                      minWidth: "180px",
+                      zIndex: 130,
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                    }}
+                  >
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        document.execCommand("undo");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Undo (Ctrl+Z)
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        document.execCommand("redo");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Redo (Ctrl+Y)
+                    </button>
+                    <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        document.execCommand("selectAll");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Select All (Ctrl+A)
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* View Menu */}
+            <div style={{ position: "relative" }}>
+              <button
+                className="pdocs-menu-item"
+                onClick={() => setActiveMenu(activeMenu === "view" ? null : "view")}
+              >
+                View
+              </button>
+              {activeMenu === "view" && (
+                <>
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 120 }}
+                    onClick={() => setActiveMenu(null)}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "24px",
+                      left: 0,
+                      backgroundColor: "#ffffff",
+                      borderRadius: "10px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "6px",
+                      minWidth: "200px",
+                      zIndex: 130,
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                    }}
+                  >
+                    <button
+                      className={`pdocs-tool-btn ${viewMode === "paginated" ? "active" : ""}`}
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onViewModeChange("paginated");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Paginated Paper View
+                    </button>
+                    <button
+                      className={`pdocs-tool-btn ${viewMode === "continuous" ? "active" : ""}`}
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onViewModeChange("continuous");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Continuous Flow Canvas
+                    </button>
+                    <button
+                      className={`pdocs-tool-btn ${viewMode === "markdown" ? "active" : ""}`}
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onViewModeChange("markdown");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Markdown Source Split View
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Insert Menu */}
+            <div style={{ position: "relative" }}>
+              <button
+                className="pdocs-menu-item"
+                onClick={() => setActiveMenu(activeMenu === "insert" ? null : "insert")}
+              >
+                Insert
+              </button>
+              {activeMenu === "insert" && (
+                <>
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 120 }}
+                    onClick={() => setActiveMenu(null)}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "24px",
+                      left: 0,
+                      backgroundColor: "#ffffff",
+                      borderRadius: "10px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "6px",
+                      minWidth: "200px",
+                      zIndex: 130,
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                    }}
+                  >
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onInsertBlock?.("pageBreak");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Page Break (New Sheet)
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onInsertBlock?.("table");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Table
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onInsertBlock?.("mathBlock");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      LaTeX Math Equation
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onInsertBlock?.("callout");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Sovereign Callout Box
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onInsertBlock?.("taskList");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Checklist
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onInsertBlock?.("divider");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Horizontal Line
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Tools Menu */}
+            <div style={{ position: "relative" }}>
+              <button
+                className="pdocs-menu-item"
+                onClick={() => setActiveMenu(activeMenu === "tools" ? null : "tools")}
+              >
+                Tools
+              </button>
+              {activeMenu === "tools" && (
+                <>
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 120 }}
+                    onClick={() => setActiveMenu(null)}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "24px",
+                      left: 0,
+                      backgroundColor: "#ffffff",
+                      borderRadius: "10px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "12px",
+                      minWidth: "220px",
+                      zIndex: 130,
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                      fontSize: "12px",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>
+                      Document Statistics
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b" }}>
+                      <span>Words:</span>
+                      <strong style={{ color: "#0f172a" }}>{doc.metadata.wordCount}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b" }}>
+                      <span>Characters:</span>
+                      <strong style={{ color: "#0f172a" }}>{doc.metadata.charCount}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b" }}>
+                      <span>Reading Time:</span>
+                      <strong style={{ color: "#0f172a" }}>~{doc.metadata.readingTimeMinutes} min</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "#64748b" }}>
+                      <span>Paper Format:</span>
+                      <strong style={{ color: "#0f5132" }}>{doc.metadata.paperSize} ({doc.metadata.orientation})</strong>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>

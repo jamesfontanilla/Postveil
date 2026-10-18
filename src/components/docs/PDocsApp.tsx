@@ -131,6 +131,46 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     }
   };
 
+  const handleSplitBlock = (currentId: string, currentContent: string, newContent: string, newType?: BlockType) => {
+    const newBlock = engineRef.current.splitBlock(currentId, currentContent, newContent, newType);
+    setDoc({ ...engineRef.current.getDocument() });
+    setTimeout(() => {
+      const el = document.getElementById(newBlock.id);
+      if (el) {
+        el.focus();
+        // Place caret at start of new block
+        const sel = window.getSelection();
+        if (sel) {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }
+    }, 30);
+  };
+
+  const handleUpdateTableRows = (blockId: string, rows: import("./types").TableRow[]) => {
+    engineRef.current.updateTableRows(blockId, rows);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleUpdateCallout = (blockId: string, variant?: import("./types").CalloutVariant, title?: string) => {
+    engineRef.current.updateCallout(blockId, variant, title);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleUpdateMathLatex = (blockId: string, latex: string) => {
+    engineRef.current.updateMathLatex(blockId, latex);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handlePaperSetupChange = (paperSize: import("./types").PaperSize, orientation: import("./types").Orientation) => {
+    engineRef.current.updatePaperSetup(paperSize, orientation);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
   return (
     <div className="pdocs-container">
       {/* Header */}
@@ -146,6 +186,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onBackToMail={onBackToMail}
         onSwitchToAccounts={onSwitchToAccounts}
         onSignOut={onSignOut}
+        onInsertBlock={handleInsertBlock}
         userEmail={userEmail}
         userName={userName}
       />
@@ -175,6 +216,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             metadata: { ...prev.metadata, fontSize: next },
           }));
         }}
+        paperSize={doc.metadata.paperSize}
+        orientation={doc.metadata.orientation}
+        onPaperSetupChange={handlePaperSetupChange}
       />
 
       {/* Main Workspace */}
@@ -228,6 +272,10 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 onToggleTask={handleToggleTask}
                 onInsertBlockAfter={handleInsertBlockAfter}
                 onDeleteBlock={handleDeleteBlock}
+                onSplitBlock={handleSplitBlock}
+                onUpdateTableRows={handleUpdateTableRows}
+                onUpdateCallout={handleUpdateCallout}
+                onUpdateMathLatex={handleUpdateMathLatex}
               />
             </div>
           </div>
@@ -239,6 +287,10 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             onToggleTask={handleToggleTask}
             onInsertBlockAfter={handleInsertBlockAfter}
             onDeleteBlock={handleDeleteBlock}
+            onSplitBlock={handleSplitBlock}
+            onUpdateTableRows={handleUpdateTableRows}
+            onUpdateCallout={handleUpdateCallout}
+            onUpdateMathLatex={handleUpdateMathLatex}
           />
         )}
       </div>
