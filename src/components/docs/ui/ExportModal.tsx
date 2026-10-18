@@ -78,15 +78,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     <div className="pdocs-modal-overlay" onClick={onClose} role="dialog" aria-label="Export Document">
       <div className="pdocs-modal" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div
-          style={{
-            padding: "20px 24px",
-            borderBottom: "1px solid #e2e8f0",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
+        <div className="pdocs-export-modal-header">
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div
               style={{
@@ -120,21 +112,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div style={{ display: "flex", minHeight: "360px" }}>
+        <div className="pdocs-export-modal-body">
           {/* Format Picker Column */}
-          <div
-            style={{
-              width: "240px",
-              borderRight: "1px solid #e2e8f0",
-              padding: "12px",
-              backgroundColor: "#f8fafc",
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              overflowY: "auto",
-              maxHeight: "420px",
-            }}
-          >
+          <div className="pdocs-export-formats-col">
             <div
               style={{
                 fontSize: "11px",
@@ -178,7 +158,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
 
           {/* Format Details & Giant Comparison */}
-          <div style={{ flex: 1, padding: "24px", display: "flex", flexDirection: "column" }}>
+          <div className="pdocs-export-details-col">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: "20px", fontWeight: 700, color: "#0f172a" }}>

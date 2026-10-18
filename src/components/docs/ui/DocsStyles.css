@@ -848,6 +848,81 @@
     border-radius: 16px !important;
     max-height: 90vh !important;
     overflow-y: auto !important;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+/* Universal Export Modal Layout */
+.pdocs-export-modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.pdocs-export-modal-body {
+  display: flex;
+  min-height: 380px;
+  overflow: hidden;
+}
+
+.pdocs-export-formats-col {
+  width: 240px;
+  border-right: 1px solid #e2e8f0;
+  padding: 12px;
+  background-color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 440px;
+  flex-shrink: 0;
+}
+
+.pdocs-export-details-col {
+  flex: 1;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+@media (max-width: 768px) {
+  .pdocs-export-modal-header {
+    padding: 14px 16px;
+  }
+  .pdocs-export-modal-body {
+    flex-direction: column;
+    overflow-y: auto;
+    min-height: auto;
+  }
+  .pdocs-export-formats-col {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    max-height: 160px;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 8px;
+    background-color: #f8fafc;
+    -webkit-overflow-scrolling: touch;
+  }
+  .pdocs-export-formats-col > div:first-child {
+    display: none;
+  }
+  .pdocs-export-formats-col button {
+    flex-shrink: 0;
+    min-width: 130px;
+    padding: 6px 10px !important;
+  }
+  .pdocs-export-details-col {
+    padding: 16px;
   }
 }
 
