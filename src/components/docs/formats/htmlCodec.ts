@@ -188,6 +188,7 @@ export const htmlCodec: DocumentCodec = {
       }
     }
 
+    const m = doc.metadata.margins || { top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 };
     const fullHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -199,7 +200,7 @@ export const htmlCodec: DocumentCodec = {
   <style>
     @page {
       size: ${doc.metadata.paperSize || "A4"} ${doc.metadata.orientation || "portrait"};
-      margin: 20mm 20mm 25mm 20mm;
+      margin: ${m.top}in ${m.right}in ${m.bottom}in ${m.left}in;
       @bottom-right {
         content: counter(page);
       }

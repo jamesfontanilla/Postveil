@@ -23,7 +23,8 @@ import {
   Scissors,
   Compass,
 } from "lucide-react";
-import { type BlockType, type PaperSize, type Orientation } from "../types";
+import { type BlockType, type PaperSize, type Orientation, type DocMargins, type MarginPreset } from "../types";
+import { Sliders, Settings2 } from "lucide-react";
 
 interface DocsToolbarProps {
   canUndo: boolean;
@@ -38,7 +39,10 @@ interface DocsToolbarProps {
   onFontSizeChange: (delta: number) => void;
   paperSize?: PaperSize;
   orientation?: Orientation;
+  margins?: DocMargins;
   onPaperSetupChange?: (size: PaperSize, orientation: Orientation) => void;
+  onMarginsChange?: (margins: DocMargins) => void;
+  onOpenPageSetup?: () => void;
 }
 
 export const DocsToolbar: React.FC<DocsToolbarProps> = ({
@@ -54,7 +58,10 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   onFontSizeChange,
   paperSize = "A4",
   orientation = "portrait",
+  margins = { preset: "normal", top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 },
   onPaperSetupChange,
+  onMarginsChange,
+  onOpenPageSetup,
 }) => {
   return (
     <div className="pdocs-toolbar" role="toolbar" aria-label="Document editing tools">
@@ -351,6 +358,43 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         }}
       >
         <Compass size={16} />
+      </button>
+
+      {/* Margins Selector */}
+      <select
+        className="pdocs-select"
+        value={margins.preset}
+        onChange={(e) => {
+          const val = e.target.value as MarginPreset;
+          if (val === "custom") {
+            onOpenPageSetup?.();
+          } else if (onMarginsChange) {
+            const presets: Record<string, { top: number; bottom: number; left: number; right: number }> = {
+              normal: { top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 },
+              narrow: { top: 0.5, bottom: 0.5, left: 0.5, right: 0.5 },
+              moderate: { top: 1.0, bottom: 1.0, left: 0.75, right: 0.75 },
+              wide: { top: 1.0, bottom: 1.0, left: 2.0, right: 2.0 },
+            };
+            const p = presets[val] || presets.normal;
+            onMarginsChange({ preset: val, ...p });
+          }
+        }}
+        title="Document Margins"
+      >
+        <option value="normal">Margins: Normal (1.0")</option>
+        <option value="narrow">Margins: Narrow (0.5")</option>
+        <option value="moderate">Margins: Moderate (0.75")</option>
+        <option value="wide">Margins: Wide (2.0")</option>
+        <option value="custom">Margins: Custom...</option>
+      </select>
+
+      {/* Page Setup Dialog Trigger */}
+      <button
+        className="pdocs-tool-btn"
+        onClick={onOpenPageSetup}
+        title="Page Setup (Paper, Margins & Background)"
+      >
+        <Settings2 size={16} />
       </button>
     </div>
   );

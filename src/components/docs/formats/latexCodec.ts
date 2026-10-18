@@ -70,6 +70,7 @@ export const latexCodec: DocumentCodec = {
         : doc.metadata.paperSize === "A5"
         ? "a5paper"
         : "a4paper";
+    const m = doc.metadata.margins || { top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 };
     const latexLines: string[] = [
       `\\documentclass[11pt,${paperClass}]{article}`,
       `\\usepackage[utf8]{inputenc}`,
@@ -77,7 +78,7 @@ export const latexCodec: DocumentCodec = {
       `\\usepackage{graphicx}`,
       `\\usepackage{hyperref}`,
       `\\usepackage{geometry}`,
-      `\\geometry{margin=1in}`,
+      `\\geometry{top=${m.top}in, bottom=${m.bottom}in, left=${m.left}in, right=${m.right}in}`,
       ``,
       `\\title{${escapeLatex(doc.metadata.title)}}`,
       `\\author{${escapeLatex(doc.metadata.author)}}`,

@@ -63,6 +63,16 @@ export interface DocBlock {
 export type PaperSize = "A4" | "Letter" | "Legal" | "A3" | "A5" | "Tabloid";
 export type Orientation = "portrait" | "landscape";
 
+export type MarginPreset = "normal" | "narrow" | "moderate" | "wide" | "custom";
+
+export interface DocMargins {
+  preset: MarginPreset;
+  top: number; // in inches
+  bottom: number;
+  left: number;
+  right: number;
+}
+
 export interface DocumentMetadata {
   id: string;
   title: string;
@@ -75,6 +85,8 @@ export interface DocumentMetadata {
   readingTimeMinutes: number;
   paperSize: PaperSize;
   orientation: Orientation;
+  margins?: DocMargins;
+  pageColor?: string;
   lineSpacing: "1.0" | "1.15" | "1.5" | "2.0";
   fontFamily: "Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono";
   fontSize: number; // in px or pt

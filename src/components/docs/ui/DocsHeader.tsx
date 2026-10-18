@@ -34,6 +34,7 @@ interface DocsHeaderProps {
   onSwitchToAccounts: () => void;
   onSignOut?: () => void;
   onInsertBlock?: (type: BlockType) => void;
+  onOpenPageSetup?: () => void;
   userEmail?: string;
   userName?: string;
 }
@@ -51,6 +52,7 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
   onSwitchToAccounts,
   onSignOut,
   onInsertBlock,
+  onOpenPageSetup,
   userEmail = "user@postveil.app",
   userName = "Postveil Creator",
 }) => {
@@ -175,6 +177,18 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                     >
                       <Printer size={15} style={{ marginRight: 8 }} />
                       Print / Save as PDF
+                    </button>
+                    <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onOpenPageSetup?.();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <Settings2 size={15} style={{ marginRight: 8 }} />
+                      Page setup (Margins & Size)...
                     </button>
                   </div>
                 </>

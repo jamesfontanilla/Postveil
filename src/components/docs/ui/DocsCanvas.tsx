@@ -108,24 +108,35 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   const orientation = doc.metadata.orientation || "portrait";
   const dim = PAPER_DIMENSIONS[paperSize]?.[orientation] || PAPER_DIMENSIONS.A4.portrait;
 
+  const margins = doc.metadata.margins || {
+    preset: "normal",
+    top: 1.0,
+    bottom: 1.0,
+    left: 1.0,
+    right: 1.0,
+  };
+  const topMarginPx = Math.round(margins.top * 72);
+  const bottomMarginPx = Math.round(margins.bottom * 72);
+  const leftMarginPx = Math.round(margins.left * 72);
+  const rightMarginPx = Math.round(margins.right * 72);
+
   // Multi-page partitioning for Paginated View
   const pages = useMemo(() => {
     if (viewMode === "continuous") {
       return [doc.blocks];
     }
 
-    const usableHeight = dim.height - 180; // Accounting for 56px top + 56px bottom + headers/footers
+    const usableHeight = dim.height - topMarginPx - bottomMarginPx - 64;
     const result: DocBlock[][] = [];
     let currentPage: DocBlock[] = [];
     let currentHeight = 0;
 
     for (const block of doc.blocks) {
       if (block.type === "pageBreak") {
-        if (currentPage.length > 0) {
-          result.push(currentPage);
-          currentPage = [];
-          currentHeight = 0;
-        }
+        currentPage.push(block);
+        result.push(currentPage);
+        currentPage = [];
+        currentHeight = 0;
         continue;
       }
 
@@ -145,7 +156,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
     }
 
     return result;
-  }, [doc.blocks, dim.height, viewMode]);
+  }, [doc.blocks, dim.height, viewMode, topMarginPx, bottomMarginPx]);
 
   const handleOpenMathEditor = (blockId: string, currentLatex: string) => {
     setEditingMathBlockId(blockId);
@@ -160,6 +171,13 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, block: DocBlock) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      // Ctrl+Enter or Cmd+Enter: Insert Page Break directly at caret!
+      e.preventDefault();
+      onInsertBlockAfter(block.id, "pageBreak");
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       // Split block on Enter for paragraphs, headings, and lists
       if (
@@ -217,6 +235,11 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
             style={{
               width: viewMode === "continuous" ? "100%" : `min(${dim.width}px, 100%)`,
               minHeight: viewMode === "continuous" ? "auto" : `${dim.height}px`,
+              padding:
+                viewMode === "continuous"
+                  ? "24px 32px"
+                  : `${topMarginPx}px ${rightMarginPx}px ${bottomMarginPx}px ${leftMarginPx}px`,
+              backgroundColor: doc.metadata.pageColor || "#ffffff",
               fontFamily: doc.metadata.fontFamily,
               fontSize: `${doc.metadata.fontSize}px`,
               lineHeight: doc.metadata.lineSpacing,
@@ -227,7 +250,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
               <div className="pdocs-page-header">
                 <span className="pdocs-page-header-title">{doc.metadata.title}</span>
                 <span className="pdocs-page-header-stamp">
-                  Postveil Sovereign Suite • {paperSize} {orientation}
+                  {paperSize} {orientation} • Margins: {margins.preset.toUpperCase()} ({margins.top}" T/B, {margins.left}" L/R)
                 </span>
               </div>
             )}
@@ -245,6 +268,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                       handleOpenMathEditor(block.id, block.latex || block.content || ""),
                     onUpdateTableRows,
                     onUpdateCallout,
+                    onDeleteBlock,
                   })}
 
                   {/* Hover Quick Actions */}
@@ -479,6 +503,7 @@ interface RenderBlockParams {
   onOpenMathEditor: () => void;
   onUpdateTableRows?: (blockId: string, rows: TableRow[]) => void;
   onUpdateCallout?: (blockId: string, variant?: CalloutVariant, title?: string) => void;
+  onDeleteBlock?: (blockId: string) => void;
 }
 
 function renderBlock({
@@ -489,6 +514,7 @@ function renderBlock({
   onOpenMathEditor,
   onUpdateTableRows,
   onUpdateCallout,
+  onDeleteBlock,
 }: RenderBlockParams) {
   switch (block.type) {
     case "heading": {
@@ -818,7 +844,49 @@ function renderBlock({
       return (
         <div className="pdocs-page-break-indicator">
           <div className="pdocs-page-break-line" />
-          <span className="pdocs-page-break-label">--- Page Break ---</span>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              background: "#f1f5f9",
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "1px solid #cbd5e1",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+              userSelect: "none",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                color: "#0f5132",
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+              }}
+            >
+              Page Break
+            </span>
+            {onDeleteBlock && (
+              <button
+                onClick={() => onDeleteBlock(block.id)}
+                title="Remove Page Break (Merge with Next Page)"
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "2px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  color: "#dc2626",
+                  borderRadius: "3px",
+                }}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
           <div className="pdocs-page-break-line" />
         </div>
       );

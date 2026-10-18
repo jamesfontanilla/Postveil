@@ -124,9 +124,16 @@ export class DocumentEngine {
     }
   }
 
-  public updatePaperSetup(paperSize: import("../types").PaperSize, orientation: import("../types").Orientation) {
+  public updatePaperSetup(
+    paperSize: import("../types").PaperSize,
+    orientation: import("../types").Orientation,
+    margins?: import("../types").DocMargins,
+    pageColor?: string
+  ) {
     this.doc.metadata.paperSize = paperSize;
     this.doc.metadata.orientation = orientation;
+    if (margins) this.doc.metadata.margins = margins;
+    if (pageColor) this.doc.metadata.pageColor = pageColor;
     this.doc.metadata.updatedAt = new Date().toISOString();
     this.pushHistory();
   }

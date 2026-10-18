@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import "./ui/DocsStyles.css";
-import { type UniversalDoc, type BlockType, type SupportedFormat } from "./types";
+import {
+  type UniversalDoc,
+  type BlockType,
+  type SupportedFormat,
+  type PaperSize,
+  type Orientation,
+  type DocMargins,
+} from "./types";
 import { UniversalFormatEngine } from "./formats/UniversalFormatEngine";
 import { DocumentEngine } from "./engine/DocumentEngine";
 import { OpfsDocStorage } from "./engine/OpfsDocStorage";
@@ -10,6 +17,7 @@ import { DocsSidebar } from "./ui/DocsSidebar";
 import { DocsCanvas } from "./ui/DocsCanvas";
 import { ExportModal } from "./ui/ExportModal";
 import { ImportModal } from "./ui/ImportModal";
+import { PageSetupModal } from "./ui/PageSetupModal";
 
 interface PDocsAppProps {
   onBackToMail: () => void;
@@ -35,6 +43,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<SupportedFormat>("docx");
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isPageSetupOpen, setIsPageSetupOpen] = useState(false);
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [fontFamily, setFontFamily] = useState<"Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono">("Schibsted Grotesk");
   const [fontSize, setFontSize] = useState(15);
   const [markdownSource, setMarkdownSource] = useState("");
@@ -76,9 +86,10 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   };
 
   const handleInsertBlock = (type: BlockType) => {
-    const lastBlock = doc.blocks[doc.blocks.length - 1];
-    const newBlock = engineRef.current.insertBlockAfter(lastBlock?.id || "", type, "");
+    const targetId = activeBlockId || doc.blocks[doc.blocks.length - 1]?.id || "";
+    const newBlock = engineRef.current.insertBlockAfter(targetId, type, "");
     setDoc({ ...engineRef.current.getDocument() });
+    setActiveBlockId(newBlock.id);
     setTimeout(() => {
       document.getElementById(newBlock.id)?.focus();
     }, 50);
@@ -87,6 +98,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const handleInsertBlockAfter = (afterId: string, type: BlockType) => {
     const newBlock = engineRef.current.insertBlockAfter(afterId, type, "");
     setDoc({ ...engineRef.current.getDocument() });
+    setActiveBlockId(newBlock.id);
     setTimeout(() => {
       document.getElementById(newBlock.id)?.focus();
     }, 50);
@@ -134,6 +146,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const handleSplitBlock = (currentId: string, currentContent: string, newContent: string, newType?: BlockType) => {
     const newBlock = engineRef.current.splitBlock(currentId, currentContent, newContent, newType);
     setDoc({ ...engineRef.current.getDocument() });
+    setActiveBlockId(newBlock.id);
     setTimeout(() => {
       const el = document.getElementById(newBlock.id);
       if (el) {
@@ -166,8 +179,23 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     setDoc({ ...engineRef.current.getDocument() });
   };
 
-  const handlePaperSetupChange = (paperSize: import("./types").PaperSize, orientation: import("./types").Orientation) => {
-    engineRef.current.updatePaperSetup(paperSize, orientation);
+  const handlePaperSetupChange = (paperSize: PaperSize, orientation: Orientation) => {
+    engineRef.current.updatePaperSetup(paperSize, orientation, doc.metadata.margins, doc.metadata.pageColor);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleMarginsChange = (margins: DocMargins) => {
+    engineRef.current.updatePaperSetup(doc.metadata.paperSize, doc.metadata.orientation, margins, doc.metadata.pageColor);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleApplyPageSetup = (
+    paperSize: PaperSize,
+    orientation: Orientation,
+    margins: DocMargins,
+    pageColor: string
+  ) => {
+    engineRef.current.updatePaperSetup(paperSize, orientation, margins, pageColor);
     setDoc({ ...engineRef.current.getDocument() });
   };
 
@@ -187,6 +215,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onSwitchToAccounts={onSwitchToAccounts}
         onSignOut={onSignOut}
         onInsertBlock={handleInsertBlock}
+        onOpenPageSetup={() => setIsPageSetupOpen(true)}
         userEmail={userEmail}
         userName={userName}
       />
@@ -218,7 +247,10 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         }}
         paperSize={doc.metadata.paperSize}
         orientation={doc.metadata.orientation}
+        margins={doc.metadata.margins}
         onPaperSetupChange={handlePaperSetupChange}
+        onMarginsChange={handleMarginsChange}
+        onOpenPageSetup={() => setIsPageSetupOpen(true)}
       />
 
       {/* Main Workspace */}
@@ -308,6 +340,17 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
         onDocumentImported={handleDocumentImported}
+      />
+
+      {/* Page Setup Modal */}
+      <PageSetupModal
+        isOpen={isPageSetupOpen}
+        onClose={() => setIsPageSetupOpen(false)}
+        currentPaperSize={doc.metadata.paperSize}
+        currentOrientation={doc.metadata.orientation}
+        currentMargins={doc.metadata.margins}
+        currentPageColor={doc.metadata.pageColor}
+        onApply={handleApplyPageSetup}
       />
     </div>
   );
