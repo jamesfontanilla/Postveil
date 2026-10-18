@@ -393,6 +393,62 @@
   gap: 8px;
 }
 
+/* Block Quick Actions Hover Capsule - strictly hidden by default! */
+.hover-action-tools {
+  position: absolute;
+  right: -42px;
+  top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform: translateX(4px);
+  z-index: 20;
+}
+
+.pdocs-block-row:hover .hover-action-tools {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.pdocs-block-add-btn,
+.pdocs-block-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  transition: all 0.12s ease;
+}
+
+.pdocs-block-add-btn:hover {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+.pdocs-block-delete-btn:hover {
+  background-color: #fef2f2;
+  color: #dc2626;
+}
+
+@media print {
+  .hover-action-tools {
+    display: none !important;
+  }
+}
+
 .pdocs-block-content {
   flex: 1;
   outline: none;

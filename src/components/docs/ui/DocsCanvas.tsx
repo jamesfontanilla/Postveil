@@ -126,12 +126,27 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       return [doc.blocks];
     }
 
-    const usableHeight = dim.height - topMarginPx - bottomMarginPx - 64;
+    // Height budget: paper height minus margins and header/footer buffers (~90px)
+    const usableHeight = dim.height - topMarginPx - bottomMarginPx - 90;
     const result: DocBlock[][] = [];
     let currentPage: DocBlock[] = [];
     let currentHeight = 0;
 
-    for (const block of doc.blocks) {
+    // Helper: calculate total height of a heading plus its following content block
+    // to strictly prevent "widow/orphan headings" from being stranded at page bottom
+    const getHeadingLeadHeight = (startIndex: number): number => {
+      let leadH = 0;
+      for (let j = startIndex; j < Math.min(doc.blocks.length, startIndex + 3); j++) {
+        const b = doc.blocks[j];
+        if (b.type === "pageBreak") break;
+        leadH += estimateBlockHeight(b);
+        if (b.type !== "heading") break; // Included at least one content item
+      }
+      return leadH;
+    };
+
+    for (let i = 0; i < doc.blocks.length; i++) {
+      const block = doc.blocks[i];
       if (block.type === "pageBreak") {
         currentPage.push(block);
         result.push(currentPage);
@@ -141,7 +156,18 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       }
 
       const h = estimateBlockHeight(block);
-      if (currentHeight + h > usableHeight && currentPage.length > 0) {
+
+      // Orphan Heading Prevention ("Keep with next"):
+      // If this block is a heading, ensure it is NOT stranded alone at the bottom of the page
+      let orphanHeadingBreak = false;
+      if (block.type === "heading" && i + 1 < doc.blocks.length) {
+        const leadHeight = getHeadingLeadHeight(i);
+        if (currentHeight + leadHeight > usableHeight && currentPage.length > 0) {
+          orphanHeadingBreak = true;
+        }
+      }
+
+      if ((orphanHeadingBreak || currentHeight + h > usableHeight) && currentPage.length > 0) {
         result.push(currentPage);
         currentPage = [block];
         currentHeight = h;
@@ -271,29 +297,12 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                     onDeleteBlock,
                   })}
 
-                  {/* Hover Quick Actions */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      right: "-36px",
-                      top: "2px",
-                      display: "flex",
-                      gap: "2px",
-                      opacity: 0.18,
-                      transition: "opacity 0.2s ease",
-                    }}
-                    className="hover-action-tools"
-                  >
+                  {/* Hover Quick Actions (strictly hidden until row hover) */}
+                  <div className="hover-action-tools">
                     <button
                       onClick={() => onInsertBlockAfter(block.id, "paragraph")}
                       title="Add block below"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: 2,
-                        color: "#64748b",
-                      }}
+                      className="pdocs-block-add-btn"
                     >
                       <Plus size={14} />
                     </button>
@@ -301,13 +310,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                       <button
                         onClick={() => onDeleteBlock(block.id)}
                         title="Delete block"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          padding: 2,
-                          color: "#dc2626",
-                        }}
+                        className="pdocs-block-delete-btn"
                       >
                         <Trash2 size={14} />
                       </button>
