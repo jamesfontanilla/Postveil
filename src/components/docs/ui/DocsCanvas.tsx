@@ -365,7 +365,9 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
 
   return (
     <main
-      className={`pdocs-canvas-viewport ${viewMode === "continuous" ? "pdocs-canvas-continuous" : ""}`}
+      className={`pdocs-canvas-viewport ${
+        viewMode === "continuous" ? "pdocs-canvas-continuous" : viewMode === "paginated" ? "pdocs-canvas-paginated" : ""
+      }`}
       role="main"
       aria-label="Document editing surface"
     >

@@ -737,11 +737,11 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
           <button
             className={`pdocs-tool-btn ${viewMode === "paginated" ? "active" : ""}`}
             onClick={() => onViewModeChange("paginated")}
-            title="Paginated Print View (Letter/A4)"
+            title="Print Layout (Letter/A4 discrete pages)"
             style={{ fontSize: "12px", height: "28px" }}
           >
             <Layers size={13} className="pdocs-view-mode-icon" />
-            <span className="pdocs-view-mode-label">Pages</span>
+            <span className="pdocs-view-mode-label">Print Layout</span>
           </button>
           <button
             className={`pdocs-tool-btn ${viewMode === "continuous" ? "active" : ""}`}
