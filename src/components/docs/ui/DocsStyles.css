@@ -175,13 +175,10 @@
   align-items: center;
   padding: 0 16px;
   gap: 6px;
-  overflow-x: auto;
+  overflow: visible;
+  position: relative;
+  z-index: 100;
   flex-shrink: 0;
-  scrollbar-width: none;
-}
-
-.pdocs-toolbar::-webkit-scrollbar {
-  display: none;
 }
 
 .pdocs-tool-btn {
@@ -717,6 +714,13 @@
 
 /* Responsive & Mobile Adaptation */
 @media (max-width: 1024px) {
+  .pdocs-toolbar {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .pdocs-toolbar::-webkit-scrollbar {
+    display: none;
+  }
   .pdocs-sidebar {
     position: absolute;
     left: 0;
