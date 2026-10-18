@@ -19,7 +19,11 @@ export class DocumentEngine {
   }
 
   public getDocument(): UniversalDoc {
-    return this.doc;
+    return {
+      ...this.doc,
+      metadata: { ...this.doc.metadata },
+      blocks: [...this.doc.blocks],
+    };
   }
 
   public setDocument(newDoc: UniversalDoc) {
