@@ -55,29 +55,29 @@ function estimateBlockHeight(block: DocBlock): number {
   switch (block.type) {
     case "heading": {
       const lvl = block.level || 1;
-      return lvl === 1 ? 80 : lvl === 2 ? 60 : 45;
+      return lvl === 1 ? 105 : lvl === 2 ? 54 : 46;
     }
     case "paragraph": {
       const textLen = (block.content || "").length;
-      return Math.max(34, 28 + Math.ceil(textLen / 75) * 22);
+      return Math.max(38, 20 + Math.ceil(textLen / 65) * 24);
     }
     case "taskList":
     case "bulletList":
     case "orderedList":
       return 36;
     case "blockquote":
-      return 75;
+      return 80;
     case "callout":
-      return 110;
+      return 125;
     case "mathBlock":
-      return 100;
+      return 145;
     case "codeBlock": {
       const lines = (block.content || "").split("\n").length;
-      return Math.max(70, 40 + lines * 20);
+      return 66 + lines * 20;
     }
     case "table": {
       const rowCount = block.rows?.length || 2;
-      return 45 + rowCount * 38;
+      return 40 + rowCount * 38 + 12;
     }
     case "divider":
       return 35;
@@ -126,8 +126,8 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       return [doc.blocks];
     }
 
-    // Height budget: paper height minus margins and header/footer buffers (~90px)
-    const usableHeight = dim.height - topMarginPx - bottomMarginPx - 90;
+    // Height budget: distance between top margin and bottom margin, with 16px safety buffer
+    const usableHeight = dim.height - topMarginPx - bottomMarginPx - 16;
     const result: DocBlock[][] = [];
     let currentPage: DocBlock[] = [];
     let currentHeight = 0;
@@ -254,26 +254,41 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       aria-label="Document editing surface"
     >
       {pages.map((pageBlocks, pageIdx) => {
+        const isContinuous = viewMode === "continuous";
         return (
           <div
             key={`page-${pageIdx}`}
             className="pdocs-paper-sheet pdocs-paper-page"
             style={{
-              width: viewMode === "continuous" ? "100%" : `min(${dim.width}px, 100%)`,
-              minHeight: viewMode === "continuous" ? "auto" : `${dim.height}px`,
-              padding:
-                viewMode === "continuous"
-                  ? "24px 32px"
-                  : `${topMarginPx}px ${rightMarginPx}px ${bottomMarginPx}px ${leftMarginPx}px`,
+              width: isContinuous ? "100%" : `${dim.width}px`,
+              height: isContinuous ? "auto" : `${dim.height}px`,
+              minHeight: isContinuous ? "auto" : `${dim.height}px`,
+              position: "relative",
+              overflow: isContinuous ? "visible" : "hidden",
               backgroundColor: doc.metadata.pageColor || "#ffffff",
               fontFamily: doc.metadata.fontFamily,
               fontSize: `${doc.metadata.fontSize}px`,
               lineHeight: doc.metadata.lineSpacing,
+              padding: isContinuous ? "24px 32px" : "0",
+              boxSizing: "border-box",
             }}
           >
-            {/* Page Header */}
-            {viewMode !== "continuous" && (
-              <div className="pdocs-page-header">
+            {/* Page Header (anchored strictly inside the top margin zone) */}
+            {!isContinuous && (
+              <div
+                className="pdocs-page-header"
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: `${leftMarginPx}px`,
+                  right: `${rightMarginPx}px`,
+                  height: `${topMarginPx}px`,
+                  display: "flex",
+                  alignItems: "flex-end",
+                  paddingBottom: "8px",
+                  boxSizing: "border-box",
+                }}
+              >
                 <span className="pdocs-page-header-title">{doc.metadata.title}</span>
                 <span className="pdocs-page-header-stamp">
                   {paperSize} {orientation} • Margins: {margins.preset.toUpperCase()} ({margins.top}" T/B, {margins.left}" L/R)
@@ -281,8 +296,19 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
               </div>
             )}
 
-            {/* Page Body */}
-            <div className="pdocs-page-body">
+            {/* Page Body (strictly bounded within the top, bottom, left, and right margins) */}
+            <div
+              className="pdocs-page-body"
+              style={{
+                position: isContinuous ? "static" : "absolute",
+                top: isContinuous ? "auto" : `${topMarginPx}px`,
+                bottom: isContinuous ? "auto" : `${bottomMarginPx}px`,
+                left: isContinuous ? "auto" : `${leftMarginPx}px`,
+                right: isContinuous ? "auto" : `${rightMarginPx}px`,
+                overflow: isContinuous ? "visible" : "hidden",
+                boxSizing: "border-box",
+              }}
+            >
               {pageBlocks.map((block) => (
                 <div key={block.id} id={block.id} className="pdocs-block-row group">
                   {renderBlock({
@@ -320,9 +346,22 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
               ))}
             </div>
 
-            {/* Page Footer */}
-            {viewMode !== "continuous" && (
-              <div className="pdocs-page-footer">
+            {/* Page Footer (anchored strictly inside the bottom margin zone) */}
+            {!isContinuous && (
+              <div
+                className="pdocs-page-footer"
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: `${leftMarginPx}px`,
+                  right: `${rightMarginPx}px`,
+                  height: `${bottomMarginPx}px`,
+                  display: "flex",
+                  alignItems: "flex-start",
+                  paddingTop: "8px",
+                  boxSizing: "border-box",
+                }}
+              >
                 <span>
                   {paperSize} • {orientation.toUpperCase()}
                 </span>

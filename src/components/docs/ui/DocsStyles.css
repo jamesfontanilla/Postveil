@@ -304,18 +304,14 @@
 
 /* Paper Sheet (Paginated View) */
 .pdocs-paper-sheet {
-  width: 100%;
-  max-width: 820px;
   background-color: var(--pdocs-surface);
   box-shadow: var(--pdocs-paper-shadow);
   border-radius: 4px;
-  padding: 56px 64px;
   box-sizing: border-box;
   margin-bottom: 32px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   position: relative;
-  display: flex;
-  flex-direction: column;
+  flex-shrink: 0;
 }
 
 .pdocs-paper-page {
@@ -334,14 +330,13 @@
   font-size: 11px;
   color: #94a3b8;
   border-bottom: 1px solid #f1f5f9;
-  padding-bottom: 8px;
-  margin-bottom: 24px;
   user-select: none;
+  box-sizing: border-box;
 }
 
 .pdocs-page-header-title {
   font-weight: 500;
-  max-width: 300px;
+  max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -354,7 +349,7 @@
 }
 
 .pdocs-page-body {
-  flex: 1;
+  box-sizing: border-box;
 }
 
 .pdocs-page-footer {
@@ -364,9 +359,8 @@
   font-size: 11px;
   color: #94a3b8;
   border-top: 1px solid #f1f5f9;
-  padding-top: 8px;
-  margin-top: 24px;
   user-select: none;
+  box-sizing: border-box;
 }
 
 .pdocs-canvas-continuous .pdocs-paper-sheet {
