@@ -15,7 +15,18 @@ export default function AuthScreen({
   onBack?: () => void;
 }) {
   const [mode, setMode] = useState<"signin" | "signup" | "forgot" | "recovery">(initialMode);
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => {
+    try {
+      const claimed = sessionStorage.getItem("postveil_claimed_handle");
+      if (claimed && initialMode === "signup") {
+        const handleOnly = claimed.replace(/\.postveil\.me$/i, "");
+        return `${handleOnly}@postveil.me`;
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+    return "";
+  });
   const [password, setPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [busy, setBusy] = useState(false);

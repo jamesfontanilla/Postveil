@@ -1,0 +1,1253 @@
+/* ============================================================================
+   POSTVEIL SOVEREIGN SUITE — PUBLIC HOMEPAGE (postveil.me)
+   Engineered around the Multi-Product Sovereign Suite UI Playbook
+   ============================================================================ */
+
+.pv-home-root {
+  --pv-bg: #f8faf8;
+  --pv-surface: #ffffff;
+  --pv-surface-soft: #f1f5f2;
+  --pv-surface-dark: #09140e;
+  --pv-surface-dark-2: #0f2118;
+  --pv-text: #0b1710;
+  --pv-text-muted: #4b5e53;
+  --pv-text-subtle: #6e8276;
+  --pv-emerald: #0f5b3c;
+  --pv-emerald-bright: #10b981;
+  --pv-emerald-light: #e6f4ed;
+  --pv-border: #dce5df;
+  --pv-border-strong: #c2d1c7;
+  --pv-radius-lg: 20px;
+  --pv-radius-md: 14px;
+  --pv-radius-sm: 10px;
+  --pv-shadow-sm: 0 2px 8px rgba(9, 20, 14, 0.04);
+  --pv-shadow-md: 0 12px 32px rgba(9, 20, 14, 0.07);
+  --pv-shadow-lg: 0 24px 64px rgba(9, 20, 14, 0.12);
+
+  min-height: 100vh;
+  background-color: var(--pv-bg);
+  color: var(--pv-text);
+  font-family: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+.pv-home-root *,
+.pv-home-root *::before,
+.pv-home-root *::after {
+  box-sizing: border-box;
+}
+
+/* ----------------------------------------------------------------------------
+   1. STICKY GLASSMORPHISM NAVBAR
+   ---------------------------------------------------------------------------- */
+.pv-nav-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(248, 250, 248, 0.86);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--pv-border);
+}
+
+.pv-nav-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pv-brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--pv-text);
+}
+
+.pv-brand-logo-wrap {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--pv-emerald);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(15, 91, 60, 0.22);
+}
+
+.pv-brand-logo-wrap img {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.pv-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.pv-brand-text strong {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.pv-brand-text small {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--pv-emerald);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pv-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.pv-nav-links a {
+  text-decoration: none;
+  color: var(--pv-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  transition: color 0.15s ease;
+}
+
+.pv-nav-links a:hover {
+  color: var(--pv-emerald);
+}
+
+.pv-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pv-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--pv-border-strong);
+  color: var(--pv-text);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pv-btn-ghost:hover {
+  background: var(--pv-surface);
+  border-color: var(--pv-emerald);
+  color: var(--pv-emerald);
+}
+
+.pv-btn-primary {
+  background: var(--pv-emerald);
+  border: 1px solid var(--pv-emerald);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 14px rgba(15, 91, 60, 0.22);
+}
+
+.pv-btn-primary:hover {
+  background: #0b462e;
+  transform: translateY(-1px);
+}
+
+.pv-mobile-toggle {
+  display: none;
+  background: var(--pv-surface);
+  border: 1px solid var(--pv-border);
+  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  color: var(--pv-text);
+  cursor: pointer;
+}
+
+.pv-mobile-drawer {
+  display: none;
+  background: var(--pv-surface);
+  border-bottom: 1px solid var(--pv-border);
+  padding: 16px 24px 20px;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pv-mobile-drawer.open {
+  display: flex;
+}
+
+.pv-mobile-drawer a {
+  text-decoration: none;
+  color: var(--pv-text);
+  font-size: 15px;
+  font-weight: 600;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pv-surface-soft);
+}
+
+.pv-mobile-drawer-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.pv-mobile-drawer-actions button {
+  flex: 1;
+  justify-content: center;
+}
+
+/* ----------------------------------------------------------------------------
+   2. HERO SECTION & INTERACTIVE HANDLE CLAIM BAR
+   ---------------------------------------------------------------------------- */
+.pv-hero {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 56px 24px 40px;
+  text-align: center;
+}
+
+.pv-eyebrow-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--pv-emerald-light);
+  color: var(--pv-emerald);
+  border: 1px solid rgba(15, 91, 60, 0.2);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  margin-bottom: 22px;
+}
+
+.pv-hero-title {
+  font-size: clamp(36px, 5.4vw, 68px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.06;
+  max-width: 960px;
+  margin: 0 auto 20px;
+  color: var(--pv-text);
+}
+
+.pv-hero-title em {
+  font-style: normal;
+  background: linear-gradient(135deg, #0f5b3c 0%, #059669 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.pv-hero-subtitle {
+  font-size: clamp(16px, 2vw, 20px);
+  color: var(--pv-text-muted);
+  max-width: 740px;
+  margin: 0 auto 32px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* Interactive Handle Claim Box */
+.pv-claim-card {
+  max-width: 680px;
+  margin: 0 auto 18px;
+  background: var(--pv-surface);
+  border: 2px solid var(--pv-border-strong);
+  border-radius: 18px;
+  padding: 8px;
+  box-shadow: var(--pv-shadow-md);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.pv-claim-card:focus-within {
+  border-color: var(--pv-emerald);
+  box-shadow: 0 12px 36px rgba(15, 91, 60, 0.14);
+}
+
+.pv-claim-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pv-claim-input-group {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: 6px 14px;
+  background: var(--pv-surface-soft);
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.pv-claim-prefix {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 14px;
+  color: var(--pv-text-subtle);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.pv-claim-input {
+  border: none;
+  background: transparent;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--pv-text);
+  width: 100%;
+  min-width: 90px;
+  padding: 6px 4px;
+  outline: none;
+}
+
+.pv-claim-input::placeholder {
+  color: #9ab0a3;
+  font-weight: 500;
+}
+
+.pv-claim-suffix {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--pv-emerald);
+  white-space: nowrap;
+}
+
+.pv-claim-submit {
+  background: var(--pv-emerald);
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  padding: 14px 22px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.pv-claim-submit:hover {
+  background: #0b462e;
+  transform: translateY(-1px);
+}
+
+.pv-claim-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px 2px;
+  font-size: 13px;
+}
+
+.pv-claim-available {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pv-emerald);
+  font-weight: 600;
+}
+
+.pv-claim-custom-domain-link {
+  background: none;
+  border: none;
+  color: var(--pv-text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.pv-claim-custom-domain-link:hover {
+  color: var(--pv-emerald);
+}
+
+.pv-hero-trust-pills {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 20px;
+  color: var(--pv-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pv-hero-trust-pills span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pv-hero-trust-pills svg {
+  color: var(--pv-emerald);
+}
+
+/* ----------------------------------------------------------------------------
+   3. INTERACTIVE LIVE SUITE SHOWCASE (P-Mail, P-Docs, P-Drive, P-Pass, P-CAD)
+   ---------------------------------------------------------------------------- */
+.pv-showcase-section {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 24px 72px;
+}
+
+.pv-showcase-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.pv-showcase-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  background: var(--pv-surface);
+  border: 1px solid var(--pv-border);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pv-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pv-showcase-tab img {
+  width: 20px;
+  height: 20px;
+}
+
+.pv-showcase-tab:hover {
+  border-color: var(--pv-emerald);
+  color: var(--pv-text);
+}
+
+.pv-showcase-tab.active {
+  background: var(--pv-emerald);
+  border-color: var(--pv-emerald);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(15, 91, 60, 0.22);
+}
+
+.pv-showcase-window {
+  background: var(--pv-surface);
+  border: 1px solid var(--pv-border-strong);
+  border-radius: var(--pv-radius-lg);
+  box-shadow: var(--pv-shadow-lg);
+  overflow: hidden;
+}
+
+.pv-window-topbar {
+  background: #101f17;
+  color: #e2ece6;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #1e3529;
+}
+
+.pv-window-dots {
+  display: flex;
+  gap: 7px;
+}
+
+.pv-window-dots span {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #2d4739;
+}
+
+.pv-window-dots span:nth-child(1) { background: #ef4444; }
+.pv-window-dots span:nth-child(2) { background: #f59e0b; }
+.pv-window-dots span:nth-child(3) { background: #10b981; }
+
+.pv-window-url {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  background: #172b21;
+  color: #a7f3d0;
+  padding: 5px 16px;
+  border-radius: 999px;
+  border: 1px solid #264536;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pv-window-badge {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.pv-window-body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 400px;
+}
+
+.pv-window-sidebar {
+  background: var(--pv-surface-soft);
+  border-right: 1px solid var(--pv-border);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pv-window-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--pv-border);
+  margin-bottom: 4px;
+}
+
+.pv-window-sidebar-header img {
+  width: 28px;
+  height: 28px;
+}
+
+.pv-window-sidebar-header div strong {
+  display: block;
+  font-size: 15px;
+}
+
+.pv-window-sidebar-header div small {
+  font-size: 12px;
+  color: var(--pv-text-muted);
+}
+
+.pv-window-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pv-text-muted);
+}
+
+.pv-window-nav-item.active {
+  background: var(--pv-emerald-light);
+  color: var(--pv-emerald);
+}
+
+.pv-window-main {
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.pv-window-feature-header h3 {
+  font-size: 24px;
+  font-weight: 800;
+  margin: 0 0 8px;
+  letter-spacing: -0.02em;
+}
+
+.pv-window-feature-header p {
+  font-size: 15px;
+  color: var(--pv-text-muted);
+  margin: 0;
+  max-width: 680px;
+}
+
+.pv-window-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.pv-window-mini-card {
+  background: var(--pv-bg);
+  border: 1px solid var(--pv-border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.pv-window-mini-card strong {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 6px;
+  color: var(--pv-text);
+}
+
+.pv-window-mini-card p {
+  font-size: 13px;
+  color: var(--pv-text-muted);
+  margin: 0;
+}
+
+.pv-window-footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--pv-border);
+}
+
+.pv-replaces-tag {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: var(--pv-emerald);
+  background: var(--pv-emerald-light);
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+/* ----------------------------------------------------------------------------
+   4. THE 20 SOVEREIGN PILLARS BENTO SHOWCASE (All 20 Custom SVG Logos)
+   ---------------------------------------------------------------------------- */
+.pv-pillars-section {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 72px 24px;
+}
+
+.pv-section-header {
+  text-align: center;
+  max-width: 760px;
+  margin: 0 auto 40px;
+}
+
+.pv-section-header h2 {
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+  margin: 0 0 14px;
+}
+
+.pv-section-header p {
+  font-size: 16px;
+  color: var(--pv-text-muted);
+  margin: 0;
+}
+
+.pv-category-filter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.pv-cat-btn {
+  background: var(--pv-surface);
+  border: 1px solid var(--pv-border);
+  color: var(--pv-text-muted);
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pv-cat-btn.active {
+  background: var(--pv-text);
+  border-color: var(--pv-text);
+  color: #ffffff;
+}
+
+.pv-pillars-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.pv-pillar-card {
+  background: var(--pv-surface);
+  border: 1px solid var(--pv-border);
+  border-radius: var(--pv-radius-md);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.pv-pillar-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--pv-shadow-md);
+  border-color: var(--pv-emerald);
+}
+
+.pv-pillar-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pv-pillar-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--pv-surface-soft);
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pv-pillar-icon img {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.pv-pillar-status {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--pv-surface-soft);
+  color: var(--pv-text-muted);
+}
+
+.pv-pillar-status.live {
+  background: var(--pv-emerald-light);
+  color: var(--pv-emerald);
+}
+
+.pv-pillar-body h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0 0 4px;
+  color: var(--pv-text);
+}
+
+.pv-pillar-body p {
+  font-size: 13px;
+  color: var(--pv-text-muted);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.pv-pillar-replaces {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--pv-text-subtle);
+  padding-top: 10px;
+  border-top: 1px dashed var(--pv-border);
+}
+
+.pv-pillar-replaces strong {
+  color: var(--pv-text);
+}
+
+/* ----------------------------------------------------------------------------
+   5. SOVEREIGN ARCHITECTURE & SAAS TAX RECEIPT COMPARISON
+   ---------------------------------------------------------------------------- */
+.pv-arch-section {
+  background: var(--pv-surface-dark);
+  color: #f0f7f3;
+  padding: 84px 24px;
+}
+
+.pv-arch-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 48px;
+  align-items: center;
+}
+
+.pv-arch-copy .pv-eyebrow-pill {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.25);
+}
+
+.pv-arch-copy h2 {
+  font-size: clamp(28px, 3.8vw, 42px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+  margin: 0 0 16px;
+  color: #ffffff;
+}
+
+.pv-arch-copy > p {
+  font-size: 16px;
+  color: #a3b8ad;
+  margin: 0 0 28px;
+}
+
+.pv-arch-points {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pv-arch-point {
+  background: var(--pv-surface-dark-2);
+  border: 1px solid #1d382b;
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.pv-arch-point-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pv-arch-point h4 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: #ffffff;
+}
+
+.pv-arch-point p {
+  margin: 0;
+  font-size: 13.5px;
+  color: #9cb3a7;
+}
+
+/* SaaS Tax Receipt Card */
+.pv-receipt-card {
+  background: #0f2118;
+  border: 1px solid #254636;
+  border-radius: 20px;
+  padding: 28px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+
+.pv-receipt-header {
+  border-bottom: 1px dashed #294c3b;
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+}
+
+.pv-receipt-header span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: #34d399;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pv-receipt-header h3 {
+  margin: 6px 0 0;
+  font-size: 20px;
+  color: #ffffff;
+}
+
+.pv-receipt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-bottom: 20px;
+}
+
+.pv-receipt-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: #b4c7bd;
+}
+
+.pv-receipt-row s {
+  color: #ef4444;
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.pv-receipt-total-old {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-top: 1px dashed #294c3b;
+  border-bottom: 1px dashed #294c3b;
+  font-size: 14px;
+  color: #fca5a5;
+  font-weight: 700;
+}
+
+.pv-receipt-total-new {
+  margin-top: 16px;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pv-receipt-total-new div strong {
+  display: block;
+  font-size: 16px;
+  color: #ffffff;
+}
+
+.pv-receipt-total-new div small {
+  font-size: 12px;
+  color: #6ee7b7;
+}
+
+.pv-receipt-price {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 24px;
+  font-weight: 800;
+  color: #34d399;
+}
+
+/* ----------------------------------------------------------------------------
+   6. TRANSPARENT PRICING & WELCOME GIFT SECTION
+   ---------------------------------------------------------------------------- */
+.pv-pricing-section {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 80px 24px;
+}
+
+.pv-pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.pv-price-card {
+  background: var(--pv-surface);
+  border: 1px solid var(--pv-border);
+  border-radius: var(--pv-radius-lg);
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.pv-price-card.featured {
+  border: 2px solid var(--pv-emerald);
+  box-shadow: var(--pv-shadow-md);
+  position: relative;
+}
+
+.pv-price-badge {
+  position: absolute;
+  top: -12px;
+  left: 24px;
+  background: var(--pv-emerald);
+  color: #ffffff;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.pv-price-tier {
+  font-size: 18px;
+  font-weight: 800;
+  margin: 0 0 4px;
+}
+
+.pv-price-desc {
+  font-size: 13px;
+  color: var(--pv-text-muted);
+  margin: 0 0 18px;
+}
+
+.pv-price-amount {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+
+.pv-price-amount strong {
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.pv-price-amount span {
+  font-size: 13px;
+  color: var(--pv-text-muted);
+}
+
+.pv-gift-callout {
+  background: var(--pv-emerald-light);
+  border: 1px solid rgba(15, 91, 60, 0.25);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--pv-emerald);
+  margin-bottom: 18px;
+  line-height: 1.4;
+}
+
+.pv-price-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pv-price-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--pv-text);
+}
+
+.pv-price-features li svg {
+  color: var(--pv-emerald);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.pv-price-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 12px 18px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ----------------------------------------------------------------------------
+   7. FINAL CTA & CLEAN FOOTER
+   ---------------------------------------------------------------------------- */
+.pv-final-cta {
+  max-width: 1280px;
+  margin: 0 auto 64px;
+  padding: 0 24px;
+}
+
+.pv-final-cta-box {
+  background: linear-gradient(135deg, #0b291c 0%, #0f5b3c 100%);
+  color: #ffffff;
+  border-radius: 24px;
+  padding: 56px 40px;
+  text-align: center;
+  box-shadow: var(--pv-shadow-lg);
+}
+
+.pv-final-cta-box h2 {
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0 0 12px;
+}
+
+.pv-final-cta-box p {
+  font-size: 17px;
+  color: #c7e6d8;
+  max-width: 600px;
+  margin: 0 auto 28px;
+}
+
+.pv-final-cta-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.pv-btn-white {
+  background: #ffffff;
+  color: var(--pv-emerald);
+  border: none;
+  padding: 14px 26px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pv-btn-outline-light {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 14px 24px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.pv-footer {
+  border-top: 1px solid var(--pv-border);
+  background: var(--pv-surface);
+  padding: 40px 24px;
+}
+
+.pv-footer-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.pv-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 14px;
+  color: var(--pv-text-muted);
+}
+
+.pv-footer-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.pv-footer-links a,
+.pv-footer-links button {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pv-text-muted);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pv-footer-links a:hover,
+.pv-footer-links button:hover {
+  color: var(--pv-emerald);
+}
+
+/* ----------------------------------------------------------------------------
+   RESPONSIVE BREAKPOINTS (Tablet 1024px / 768px & Mobile 390px)
+   ---------------------------------------------------------------------------- */
+@media (max-width: 1080px) {
+  .pv-pillars-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .pv-pricing-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .pv-arch-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .pv-nav-links {
+    display: none;
+  }
+  .pv-mobile-toggle {
+    display: inline-flex;
+  }
+  .pv-window-body {
+    grid-template-columns: 1fr;
+  }
+  .pv-window-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--pv-border);
+  }
+  .pv-window-cards-grid {
+    grid-template-columns: 1fr;
+  }
+  .pv-pillars-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .pv-nav-container {
+    padding: 0 16px;
+  }
+  .pv-nav-actions .pv-btn-ghost {
+    display: none;
+  }
+  .pv-hero {
+    padding: 36px 16px 28px;
+  }
+  .pv-claim-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pv-claim-submit {
+    width: 100%;
+    justify-content: center;
+  }
+  .pv-pillars-grid,
+  .pv-pricing-grid {
+    grid-template-columns: 1fr;
+  }
+  .pv-final-cta-box {
+    padding: 36px 20px;
+  }
+  .pv-window-topbar .pv-window-badge {
+    display: none;
+  }
+}
