@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Undo,
   Redo,
@@ -22,9 +22,23 @@ import {
   Minus,
   Scissors,
   Compass,
+  Sliders,
+  Settings2,
+  Highlighter,
+  Baseline,
+  Subscript,
+  Superscript,
+  RemoveFormatting,
+  MoveVertical,
+  Search,
 } from "lucide-react";
-import { type BlockType, type PaperSize, type Orientation, type DocMargins, type MarginPreset } from "../types";
-import { Sliders, Settings2 } from "lucide-react";
+import {
+  type BlockType,
+  type PaperSize,
+  type Orientation,
+  type DocMargins,
+  type MarginPreset,
+} from "../types";
 
 interface DocsToolbarProps {
   canUndo: boolean;
@@ -37,13 +51,46 @@ interface DocsToolbarProps {
   onFontFamilyChange: (font: "Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono") => void;
   fontSize: number;
   onFontSizeChange: (delta: number) => void;
+  lineSpacing?: "1.0" | "1.15" | "1.5" | "2.0";
+  onLineSpacingChange?: (spacing: "1.0" | "1.15" | "1.5" | "2.0") => void;
   paperSize?: PaperSize;
   orientation?: Orientation;
   margins?: DocMargins;
   onPaperSetupChange?: (size: PaperSize, orientation: Orientation) => void;
   onMarginsChange?: (margins: DocMargins) => void;
   onOpenPageSetup?: () => void;
+  onOpenFindReplace?: () => void;
 }
+
+const TEXT_COLORS = [
+  { name: "Black", color: "#000000" },
+  { name: "Dark Slate", color: "#334155" },
+  { name: "Gray", color: "#64748b" },
+  { name: "Postveil Green", color: "#0f5132" },
+  { name: "Emerald", color: "#16a34a" },
+  { name: "Teal", color: "#0d9488" },
+  { name: "Cyan", color: "#0891b2" },
+  { name: "Blue", color: "#2563eb" },
+  { name: "Indigo", color: "#4f46e5" },
+  { name: "Purple", color: "#9333ea" },
+  { name: "Pink", color: "#db2777" },
+  { name: "Red", color: "#dc2626" },
+  { name: "Orange", color: "#ea580c" },
+  { name: "Amber", color: "#d97706" },
+  { name: "Yellow", color: "#ca8a04" },
+  { name: "Pure White", color: "#ffffff" },
+];
+
+const HIGHLIGHT_COLORS = [
+  { name: "None", color: "transparent" },
+  { name: "Pastel Yellow", color: "#fef08a" },
+  { name: "Pastel Green", color: "#bbf7d0" },
+  { name: "Pastel Cyan", color: "#a5f3fc" },
+  { name: "Pastel Blue", color: "#bfdbfe" },
+  { name: "Pastel Purple", color: "#e9d5ff" },
+  { name: "Pastel Pink", color: "#fbcfe8" },
+  { name: "Pastel Orange", color: "#fed7aa" },
+];
 
 export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   canUndo,
@@ -56,13 +103,38 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   onFontFamilyChange,
   fontSize,
   onFontSizeChange,
+  lineSpacing = 1.6,
+  onLineSpacingChange,
   paperSize = "A4",
   orientation = "portrait",
   margins = { preset: "normal", top: 1.0, bottom: 1.0, left: 1.0, right: 1.0 },
   onPaperSetupChange,
   onMarginsChange,
   onOpenPageSetup,
+  onOpenFindReplace,
 }) => {
+  const [activeTextColor, setActiveTextColor] = useState("#000000");
+  const [activeHighlightColor, setActiveHighlightColor] = useState("transparent");
+  const [isTextColorOpen, setIsTextColorOpen] = useState(false);
+  const [isHighlightOpen, setIsHighlightOpen] = useState(false);
+  const [isLineSpacingOpen, setIsLineSpacingOpen] = useState(false);
+
+  const applyTextColor = (color: string) => {
+    setActiveTextColor(color);
+    document.execCommand("foreColor", false, color);
+    setIsTextColorOpen(false);
+  };
+
+  const applyHighlightColor = (color: string) => {
+    setActiveHighlightColor(color);
+    if (color === "transparent") {
+      document.execCommand("removeFormat");
+    } else {
+      document.execCommand("hiliteColor", false, color);
+    }
+    setIsHighlightOpen(false);
+  };
+
   return (
     <div className="pdocs-toolbar" role="toolbar" aria-label="Document editing tools">
       {/* Undo / Redo */}
@@ -87,6 +159,15 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
 
       <button className="pdocs-tool-btn" onClick={onPrint} title="Print / PDF (Ctrl+P)">
         <Printer size={16} />
+      </button>
+
+      {/* Find and Replace Trigger */}
+      <button
+        className="pdocs-tool-btn"
+        onClick={onOpenFindReplace}
+        title="Find and replace (Ctrl+H)"
+      >
+        <Search size={16} />
       </button>
 
       <div className="pdocs-tool-separator" />
@@ -155,7 +236,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
 
       <div className="pdocs-tool-separator" />
 
-      {/* Inline Marks with Selection Preservation */}
+      {/* Inline Marks */}
       <button
         className="pdocs-tool-btn"
         title="Bold (Ctrl+B)"
@@ -196,6 +277,170 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
       >
         <Strikethrough size={16} />
       </button>
+
+      {/* Text Color Dropdown */}
+      <div style={{ position: "relative" }}>
+        <button
+          className="pdocs-tool-btn"
+          title="Text color"
+          onClick={() => {
+            setIsTextColorOpen(!isTextColorOpen);
+            setIsHighlightOpen(false);
+            setIsLineSpacingOpen(false);
+          }}
+          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}
+        >
+          <Baseline size={15} />
+          <div
+            style={{
+              width: "14px",
+              height: "3px",
+              backgroundColor: activeTextColor,
+              borderRadius: "1px",
+            }}
+          />
+        </button>
+        {isTextColorOpen && (
+          <>
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 120 }}
+              onClick={() => setIsTextColorOpen(false)}
+            />
+            <div
+              style={{
+                position: "absolute",
+                top: "34px",
+                left: 0,
+                backgroundColor: "#ffffff",
+                borderRadius: "8px",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                border: "1px solid #cbd5e1",
+                padding: "8px",
+                zIndex: 130,
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 24px)",
+                gap: "6px",
+              }}
+            >
+              {TEXT_COLORS.map((c) => (
+                <button
+                  key={c.name}
+                  onClick={() => applyTextColor(c.color)}
+                  title={c.name}
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "4px",
+                    backgroundColor: c.color,
+                    border: c.color === "#ffffff" ? "1px solid #cbd5e1" : "none",
+                    cursor: "pointer",
+                  }}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Highlight Color Dropdown */}
+      <div style={{ position: "relative" }}>
+        <button
+          className="pdocs-tool-btn"
+          title="Highlight color"
+          onClick={() => {
+            setIsHighlightOpen(!isHighlightOpen);
+            setIsTextColorOpen(false);
+            setIsLineSpacingOpen(false);
+          }}
+          style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}
+        >
+          <Highlighter size={15} />
+          <div
+            style={{
+              width: "14px",
+              height: "3px",
+              backgroundColor:
+                activeHighlightColor === "transparent" ? "#cbd5e1" : activeHighlightColor,
+              borderRadius: "1px",
+            }}
+          />
+        </button>
+        {isHighlightOpen && (
+          <>
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 120 }}
+              onClick={() => setIsHighlightOpen(false)}
+            />
+            <div
+              style={{
+                position: "absolute",
+                top: "34px",
+                left: 0,
+                backgroundColor: "#ffffff",
+                borderRadius: "8px",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                border: "1px solid #cbd5e1",
+                padding: "8px",
+                zIndex: 130,
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 24px)",
+                gap: "6px",
+              }}
+            >
+              {HIGHLIGHT_COLORS.map((c) => (
+                <button
+                  key={c.name}
+                  onClick={() => applyHighlightColor(c.color)}
+                  title={c.name}
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: "4px",
+                    backgroundColor: c.color,
+                    border: c.color === "transparent" ? "1px dashed #94a3b8" : "none",
+                    cursor: "pointer",
+                  }}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Subscript & Superscript */}
+      <button
+        className="pdocs-tool-btn"
+        title="Subscript (Ctrl+,)"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("subscript");
+        }}
+      >
+        <Subscript size={15} />
+      </button>
+      <button
+        className="pdocs-tool-btn"
+        title="Superscript (Ctrl+.)"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("superscript");
+        }}
+      >
+        <Superscript size={15} />
+      </button>
+
+      {/* Clear Formatting */}
+      <button
+        className="pdocs-tool-btn"
+        title="Clear formatting (Ctrl+\)"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          document.execCommand("removeFormat");
+        }}
+      >
+        <RemoveFormatting size={15} />
+      </button>
+
       <button
         className="pdocs-tool-btn"
         title="Inline Code"
@@ -264,6 +509,65 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
       >
         <AlignJustify size={16} />
       </button>
+
+      {/* Line & Paragraph Spacing Dropdown */}
+      <div style={{ position: "relative" }}>
+        <button
+          className="pdocs-tool-btn"
+          title="Line & paragraph spacing"
+          onClick={() => {
+            setIsLineSpacingOpen(!isLineSpacingOpen);
+            setIsTextColorOpen(false);
+            setIsHighlightOpen(false);
+          }}
+        >
+          <MoveVertical size={16} />
+        </button>
+        {isLineSpacingOpen && (
+          <>
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 120 }}
+              onClick={() => setIsLineSpacingOpen(false)}
+            />
+            <div
+              style={{
+                position: "absolute",
+                top: "34px",
+                left: 0,
+                backgroundColor: "#ffffff",
+                borderRadius: "8px",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                border: "1px solid #cbd5e1",
+                padding: "6px",
+                zIndex: 130,
+                minWidth: "160px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "2px",
+              }}
+            >
+              {[
+                { label: "Single (1.0)", value: "1.0" as const },
+                { label: "1.15", value: "1.15" as const },
+                { label: "1.5", value: "1.5" as const },
+                { label: "Double (2.0)", value: "2.0" as const },
+              ].map((opt) => (
+                <button
+                  key={opt.label}
+                  className={`pdocs-tool-btn ${lineSpacing === opt.value ? "active" : ""}`}
+                  style={{ justifyContent: "flex-start", width: "100%", padding: "6px 10px" }}
+                  onClick={() => {
+                    onLineSpacingChange?.(opt.value);
+                    setIsLineSpacingOpen(false);
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
       <div className="pdocs-tool-separator" />
 

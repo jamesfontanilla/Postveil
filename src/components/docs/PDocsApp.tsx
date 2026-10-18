@@ -18,6 +18,8 @@ import { DocsCanvas } from "./ui/DocsCanvas";
 import { ExportModal } from "./ui/ExportModal";
 import { ImportModal } from "./ui/ImportModal";
 import { PageSetupModal } from "./ui/PageSetupModal";
+import { DocumentLibraryModal } from "./ui/DocumentLibraryModal";
+import { FindReplaceModal } from "./ui/FindReplaceModal";
 
 interface PDocsAppProps {
   onBackToMail: () => void;
@@ -44,10 +46,46 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [exportFormat, setExportFormat] = useState<SupportedFormat>("docx");
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isPageSetupOpen, setIsPageSetupOpen] = useState(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [isFindReplaceOpen, setIsFindReplaceOpen] = useState(false);
+  const [showRuler, setShowRuler] = useState(true);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [fontFamily, setFontFamily] = useState<"Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono">("Schibsted Grotesk");
   const [fontSize, setFontSize] = useState(15);
   const [markdownSource, setMarkdownSource] = useState("");
+
+  // Restore active document from OPFS on mount
+  useEffect(() => {
+    void (async () => {
+      const activeId = OpfsDocStorage.getActiveDocumentId();
+      if (activeId) {
+        const loaded = await OpfsDocStorage.loadDocumentLocally(activeId);
+        if (loaded) {
+          engineRef.current.setDocument(loaded);
+          setDoc(loaded);
+        }
+      }
+    })();
+  }, []);
+
+  // Global keyboard shortcuts (Ctrl+O: Open Library, Ctrl+H: Find/Replace)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const modKey = isMac ? e.metaKey : e.ctrlKey;
+
+      if (modKey && (e.key === "o" || e.key === "O")) {
+        e.preventDefault();
+        setIsLibraryOpen(true);
+      } else if (modKey && (e.key === "h" || e.key === "H")) {
+        e.preventDefault();
+        setIsFindReplaceOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Auto-save to local OPFS on change
   useEffect(() => {
@@ -123,11 +161,53 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     const newDoc = UniversalFormatEngine.createBlankDocument("Untitled Document", userName);
     engineRef.current.setDocument(newDoc);
     setDoc(newDoc);
+    OpfsDocStorage.setActiveDocumentId(newDoc.metadata.id);
+  };
+
+  const handleSelectDocFromLibrary = (loadedDoc: UniversalDoc) => {
+    engineRef.current.setDocument(loadedDoc);
+    setDoc(loadedDoc);
+    OpfsDocStorage.setActiveDocumentId(loadedDoc.metadata.id);
+    setIsLibraryOpen(false);
+  };
+
+  const handleDuplicateDoc = async () => {
+    const cloned = await OpfsDocStorage.duplicateDocumentLocally(doc.metadata.id);
+    if (cloned) {
+      engineRef.current.setDocument(cloned);
+      setDoc(cloned);
+      OpfsDocStorage.setActiveDocumentId(cloned.metadata.id);
+    }
+  };
+
+  const handleReplaceBlockContent = (blockId: string, newContent: string) => {
+    engineRef.current.updateBlockContent(blockId, newContent);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleReplaceAllBlocks = (newDoc: UniversalDoc) => {
+    engineRef.current.setDocument(newDoc);
+    setDoc(newDoc);
+  };
+
+  const handleLineSpacingChange = (spacing: "1.0" | "1.15" | "1.5" | "2.0") => {
+    setDoc((prev) => {
+      const updated = {
+        ...prev,
+        metadata: {
+          ...prev.metadata,
+          lineSpacing: spacing,
+        },
+      };
+      engineRef.current.setDocument(updated);
+      return updated;
+    });
   };
 
   const handleDocumentImported = (importedDoc: UniversalDoc) => {
     engineRef.current.setDocument(importedDoc);
     setDoc(importedDoc);
+    OpfsDocStorage.setActiveDocumentId(importedDoc.metadata.id);
   };
 
   const handleOpenExportWithFormat = (format: SupportedFormat) => {
@@ -216,6 +296,11 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onSignOut={onSignOut}
         onInsertBlock={handleInsertBlock}
         onOpenPageSetup={() => setIsPageSetupOpen(true)}
+        onOpenLibrary={() => setIsLibraryOpen(true)}
+        onDuplicateDoc={handleDuplicateDoc}
+        onOpenFindReplace={() => setIsFindReplaceOpen(true)}
+        showRuler={showRuler}
+        onToggleRuler={() => setShowRuler((prev) => !prev)}
         userEmail={userEmail}
         userName={userName}
       />
@@ -245,12 +330,15 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             metadata: { ...prev.metadata, fontSize: next },
           }));
         }}
+        lineSpacing={doc.metadata.lineSpacing || 1.15}
+        onLineSpacingChange={handleLineSpacingChange}
         paperSize={doc.metadata.paperSize}
         orientation={doc.metadata.orientation}
         margins={doc.metadata.margins}
         onPaperSetupChange={handlePaperSetupChange}
         onMarginsChange={handleMarginsChange}
         onOpenPageSetup={() => setIsPageSetupOpen(true)}
+        onOpenFindReplace={() => setIsFindReplaceOpen(true)}
       />
 
       {/* Main Workspace */}
@@ -300,6 +388,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
               <DocsCanvas
                 doc={doc}
                 viewMode="continuous"
+                showRuler={false}
+                onMarginsChange={handleMarginsChange}
                 onUpdateBlockContent={handleUpdateBlockContent}
                 onToggleTask={handleToggleTask}
                 onInsertBlockAfter={handleInsertBlockAfter}
@@ -315,6 +405,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
           <DocsCanvas
             doc={doc}
             viewMode={viewMode}
+            showRuler={showRuler}
+            onMarginsChange={handleMarginsChange}
             onUpdateBlockContent={handleUpdateBlockContent}
             onToggleTask={handleToggleTask}
             onInsertBlockAfter={handleInsertBlockAfter}
@@ -351,6 +443,27 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         currentMargins={doc.metadata.margins}
         currentPageColor={doc.metadata.pageColor}
         onApply={handleApplyPageSetup}
+      />
+
+      {/* Document Library Modal */}
+      <DocumentLibraryModal
+        isOpen={isLibraryOpen}
+        activeDocId={doc.metadata.id}
+        onClose={() => setIsLibraryOpen(false)}
+        onSelectDoc={handleSelectDocFromLibrary}
+        onCreateNewDoc={() => {
+          handleNewDoc();
+          setIsLibraryOpen(false);
+        }}
+      />
+
+      {/* Find and Replace Modal */}
+      <FindReplaceModal
+        isOpen={isFindReplaceOpen}
+        doc={doc}
+        onClose={() => setIsFindReplaceOpen(false)}
+        onReplaceBlockContent={handleReplaceBlockContent}
+        onReplaceAllBlocks={handleReplaceAllBlocks}
       />
     </div>
   );

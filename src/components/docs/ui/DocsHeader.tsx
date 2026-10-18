@@ -16,6 +16,9 @@ import {
   Eye,
   FileCode,
   Layers,
+  FolderOpen,
+  Copy,
+  Search,
 } from "lucide-react";
 import BrandMark from "../../BrandMark";
 import { WaffleLauncher } from "../../accounts/WaffleLauncher";
@@ -35,6 +38,11 @@ interface DocsHeaderProps {
   onSignOut?: () => void;
   onInsertBlock?: (type: BlockType) => void;
   onOpenPageSetup?: () => void;
+  onOpenLibrary?: () => void;
+  onDuplicateDoc?: () => void;
+  onOpenFindReplace?: () => void;
+  showRuler?: boolean;
+  onToggleRuler?: () => void;
   userEmail?: string;
   userName?: string;
 }
@@ -53,6 +61,11 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
   onSignOut,
   onInsertBlock,
   onOpenPageSetup,
+  onOpenLibrary,
+  onDuplicateDoc,
+  onOpenFindReplace,
+  showRuler = true,
+  onToggleRuler,
   userEmail = "user@postveil.app",
   userName = "Postveil Creator",
 }) => {
@@ -148,12 +161,35 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                       className="pdocs-tool-btn"
                       style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
                       onClick={() => {
+                        onOpenLibrary?.();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <FolderOpen size={15} style={{ marginRight: 8, color: "#0f5132" }} />
+                      Open... (Library & Local OPFS)
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onDuplicateDoc?.();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <Copy size={15} style={{ marginRight: 8 }} />
+                      Make a copy
+                    </button>
+                    <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
                         onOpenImport();
                         setActiveMenu(null);
                       }}
                     >
                       <Upload size={15} style={{ marginRight: 8 }} />
-                      Open / Import (DOCX, ODT, MD...)
+                      Import (DOCX, ODT, MD...)
                     </button>
                     <button
                       className="pdocs-tool-btn"
@@ -176,7 +212,7 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                       }}
                     >
                       <Printer size={15} style={{ marginRight: 8 }} />
-                      Print / Save as PDF
+                      Print / Save as PDF (Ctrl+P)
                     </button>
                     <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
                     <button
@@ -218,7 +254,7 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                       borderRadius: "10px",
                       boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
                       padding: "6px",
-                      minWidth: "180px",
+                      minWidth: "200px",
                       zIndex: 130,
                       border: "1px solid #e2e8f0",
                       display: "flex",
@@ -257,6 +293,18 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                     >
                       Select All (Ctrl+A)
                     </button>
+                    <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onOpenFindReplace?.();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <Search size={14} style={{ marginRight: 8 }} />
+                      Find and replace (Ctrl+H)
+                    </button>
                   </div>
                 </>
               )}
@@ -285,7 +333,7 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                       borderRadius: "10px",
                       boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
                       padding: "6px",
-                      minWidth: "200px",
+                      minWidth: "220px",
                       zIndex: 130,
                       border: "1px solid #e2e8f0",
                       display: "flex",
@@ -322,6 +370,18 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                       }}
                     >
                       Markdown Source Split View
+                    </button>
+                    <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "space-between", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onToggleRuler?.();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <span>Show ruler</span>
+                      {showRuler && <Check size={14} color="#0f5132" />}
                     </button>
                   </div>
                 </>

@@ -9,6 +9,7 @@ import {
   type CalloutVariant,
   type PaperSize,
   type Orientation,
+  type DocMargins,
 } from "../types";
 import {
   CheckSquare,
@@ -27,10 +28,13 @@ import {
   X,
   Check,
 } from "lucide-react";
+import { DocsRuler } from "./DocsRuler";
 
 interface DocsCanvasProps {
   doc: UniversalDoc;
   viewMode: "paginated" | "continuous" | "markdown";
+  showRuler?: boolean;
+  onMarginsChange?: (margins: DocMargins) => void;
   onUpdateBlockContent: (blockId: string, content: string) => void;
   onToggleTask: (blockId: string) => void;
   onInsertBlockAfter: (afterId: string, type: BlockType) => void;
@@ -91,6 +95,8 @@ function estimateBlockHeight(block: DocBlock): number {
 export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   doc,
   viewMode,
+  showRuler = true,
+  onMarginsChange,
   onUpdateBlockContent,
   onToggleTask,
   onInsertBlockAfter,
@@ -253,6 +259,17 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       role="main"
       aria-label="Document editing surface"
     >
+      {/* Interactive Drag Margin Ruler */}
+      {viewMode !== "continuous" && showRuler && (
+        <div style={{ marginBottom: 12 }}>
+          <DocsRuler
+            paperWidth={dim.width}
+            margins={margins}
+            onMarginsChange={onMarginsChange || (() => {})}
+          />
+        </div>
+      )}
+
       {pages.map((pageBlocks, pageIdx) => {
         const isContinuous = viewMode === "continuous";
         return (
