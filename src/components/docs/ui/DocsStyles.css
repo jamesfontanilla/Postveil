@@ -772,6 +772,14 @@
     padding: 32px 18px !important;
     margin-bottom: 16px !important;
   }
+  .pdocs-page-body {
+    position: relative !important;
+    top: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: auto !important;
+    overflow: visible !important;
+  }
   .pdocs-page-header,
   .pdocs-page-footer {
     display: none !important;
