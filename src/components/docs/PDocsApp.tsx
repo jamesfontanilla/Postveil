@@ -21,6 +21,8 @@ import { ImportModal } from "./ui/ImportModal";
 import { PageSetupModal } from "./ui/PageSetupModal";
 import { DocumentLibraryModal } from "./ui/DocumentLibraryModal";
 import { FindReplaceModal } from "./ui/FindReplaceModal";
+import { VersionHistoryModal } from "./ui/VersionHistoryModal";
+import { HyperlinkModal } from "./ui/HyperlinkModal";
 
 interface PDocsAppProps {
   onBackToMail: () => void;
@@ -49,6 +51,10 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [isPageSetupOpen, setIsPageSetupOpen] = useState(false);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [isFindReplaceOpen, setIsFindReplaceOpen] = useState(false);
+  const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
+  const [isHyperlinkModalOpen, setIsHyperlinkModalOpen] = useState(false);
+  const [hyperlinkInitialText, setHyperlinkInitialText] = useState("");
+  const [hyperlinkInitialUrl, setHyperlinkInitialUrl] = useState("");
   const [showRuler, setShowRuler] = useState(true);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [fontFamily, setFontFamily] = useState<"Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono">("Schibsted Grotesk");
@@ -69,7 +75,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     })();
   }, []);
 
-  // Global keyboard shortcuts (Ctrl+O: Open Library, Ctrl+H: Find/Replace)
+  // Global keyboard shortcuts (Ctrl+O, Ctrl+H, Ctrl+K, Ctrl+Alt+Shift+H, Ctrl+Alt+F)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
@@ -81,12 +87,25 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
       } else if (modKey && (e.key === "h" || e.key === "H")) {
         e.preventDefault();
         setIsFindReplaceOpen(true);
+      } else if (modKey && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        const sel = window.getSelection();
+        const selectedText = sel ? sel.toString().trim() : "";
+        setHyperlinkInitialText(selectedText);
+        setHyperlinkInitialUrl("");
+        setIsHyperlinkModalOpen(true);
+      } else if (modKey && e.altKey && e.shiftKey && (e.key === "h" || e.key === "H")) {
+        e.preventDefault();
+        setIsVersionHistoryOpen(true);
+      } else if (modKey && e.altKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        handleAddFootnote();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [activeBlockId, doc]);
 
   // Auto-save to local OPFS on change
   useEffect(() => {
@@ -329,6 +348,67 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const handleAddFootnote = (blockId?: string, text?: string) => {
+    const targetBlockId = blockId || activeBlockId || doc.blocks[0]?.id || "";
+    engineRef.current.addFootnote(targetBlockId, text || "Footnote citation text.");
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleUpdateFootnote = (id: string, text: string) => {
+    engineRef.current.updateFootnote(id, text);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleDeleteFootnote = (id: string) => {
+    engineRef.current.deleteFootnote(id);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleUpdateHeaderFooter = (
+    headerText?: string,
+    footerText?: string,
+    differentFirstPage?: boolean,
+    pageNumberStyle?: "none" | "standard" | "pageOfTotal"
+  ) => {
+    engineRef.current.updateHeaderFooter(headerText, footerText, differentFirstPage, pageNumberStyle);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleOpenHyperlinkModal = (initialText?: string, initialUrl?: string) => {
+    const sel = window.getSelection();
+    const selectedText = sel ? sel.toString().trim() : "";
+    setHyperlinkInitialText(initialText || selectedText || "");
+    setHyperlinkInitialUrl(initialUrl || "");
+    setIsHyperlinkModalOpen(true);
+  };
+
+  const handleApplyHyperlink = (text: string, url: string) => {
+    try {
+      const activeEl = document.activeElement;
+      if (
+        activeEl &&
+        (activeEl.getAttribute("contenteditable") === "true" ||
+          activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA")
+      ) {
+        document.execCommand(
+          "insertHTML",
+          false,
+          `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">${text || url}</a>`
+        );
+      }
+    } catch (err) {
+      console.warn("Could not insert hyperlink HTML:", err);
+    }
+  };
+
+  const handleRestoreVersion = (restoredDoc: UniversalDoc) => {
+    engineRef.current.setDocument(restoredDoc);
+    setDoc(restoredDoc);
+    OpfsDocStorage.setActiveDocumentId(restoredDoc.metadata.id);
+    setIsVersionHistoryOpen(false);
+  };
+
   return (
     <div className="pdocs-container">
       {/* Header */}
@@ -349,6 +429,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onOpenLibrary={() => setIsLibraryOpen(true)}
         onDuplicateDoc={handleDuplicateDoc}
         onOpenFindReplace={() => setIsFindReplaceOpen(true)}
+        onOpenVersionHistory={() => setIsVersionHistoryOpen(true)}
+        onOpenHyperlinkModal={() => handleOpenHyperlinkModal()}
+        onAddFootnote={() => handleAddFootnote()}
         showRuler={showRuler}
         onToggleRuler={() => setShowRuler((prev) => !prev)}
         columns={doc.metadata.columns || 1}
@@ -392,6 +475,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onMarginsChange={handleMarginsChange}
         onOpenPageSetup={() => setIsPageSetupOpen(true)}
         onOpenFindReplace={() => setIsFindReplaceOpen(true)}
+        onOpenHyperlinkModal={() => handleOpenHyperlinkModal()}
+        onAddFootnote={() => handleAddFootnote()}
         columns={doc.metadata.columns || 1}
         columnSpacing={doc.metadata.columnSpacing || 0.5}
         columnDivider={doc.metadata.columnDivider || false}
@@ -459,6 +544,11 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 onInsertBlocksAfter={handleInsertBlocksAfter}
                 onUpdateImage={handleUpdateImage}
                 onUpdateToc={handleUpdateToc}
+                onAddFootnote={handleAddFootnote}
+                onUpdateFootnote={handleUpdateFootnote}
+                onDeleteFootnote={handleDeleteFootnote}
+                onUpdateHeaderFooter={handleUpdateHeaderFooter}
+                onOpenHyperlinkModal={handleOpenHyperlinkModal}
               />
             </div>
           </div>
@@ -479,6 +569,11 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             onInsertBlocksAfter={handleInsertBlocksAfter}
             onUpdateImage={handleUpdateImage}
             onUpdateToc={handleUpdateToc}
+            onAddFootnote={handleAddFootnote}
+            onUpdateFootnote={handleUpdateFootnote}
+            onDeleteFootnote={handleDeleteFootnote}
+            onUpdateHeaderFooter={handleUpdateHeaderFooter}
+            onOpenHyperlinkModal={handleOpenHyperlinkModal}
           />
         )}
       </div>
@@ -528,6 +623,23 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onClose={() => setIsFindReplaceOpen(false)}
         onReplaceBlockContent={handleReplaceBlockContent}
         onReplaceAllBlocks={handleReplaceAllBlocks}
+      />
+
+      {/* Version History Modal */}
+      <VersionHistoryModal
+        isOpen={isVersionHistoryOpen}
+        currentDoc={doc}
+        onClose={() => setIsVersionHistoryOpen(false)}
+        onRestoreVersion={handleRestoreVersion}
+      />
+
+      {/* Hyperlink Modal */}
+      <HyperlinkModal
+        isOpen={isHyperlinkModalOpen}
+        initialText={hyperlinkInitialText}
+        initialUrl={hyperlinkInitialUrl}
+        onClose={() => setIsHyperlinkModalOpen(false)}
+        onApply={handleApplyHyperlink}
       />
     </div>
   );

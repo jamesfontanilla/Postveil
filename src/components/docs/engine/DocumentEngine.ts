@@ -279,4 +279,52 @@ export class DocumentEngine {
     this.doc.metadata.charCount = chars;
     this.doc.metadata.readingTimeMinutes = Math.max(1, Math.ceil(words / 200));
   }
+
+  public addFootnote(blockId: string, text: string = "Footnote citation or reference text"): import("../types").FootnoteItem {
+    if (!this.doc.metadata.footnotes) {
+      this.doc.metadata.footnotes = [];
+    }
+    const nextNumber = this.doc.metadata.footnotes.length + 1;
+    const footnote: import("../types").FootnoteItem = {
+      id: `fn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      number: nextNumber,
+      text,
+      blockId,
+    };
+    this.doc.metadata.footnotes.push(footnote);
+    this.pushHistory();
+    return footnote;
+  }
+
+  public updateFootnote(id: string, text: string) {
+    if (!this.doc.metadata.footnotes) return;
+    const fn = this.doc.metadata.footnotes.find((f) => f.id === id);
+    if (fn) {
+      fn.text = text;
+      this.pushHistory();
+    }
+  }
+
+  public deleteFootnote(id: string) {
+    if (!this.doc.metadata.footnotes) return;
+    this.doc.metadata.footnotes = this.doc.metadata.footnotes.filter((f) => f.id !== id);
+    // Renumber remaining footnotes
+    this.doc.metadata.footnotes.forEach((f, idx) => {
+      f.number = idx + 1;
+    });
+    this.pushHistory();
+  }
+
+  public updateHeaderFooter(
+    headerText?: string,
+    footerText?: string,
+    differentFirstPage?: boolean,
+    pageNumberStyle?: "standard" | "pageOfTotal" | "none"
+  ) {
+    if (headerText !== undefined) this.doc.metadata.headerText = headerText;
+    if (footerText !== undefined) this.doc.metadata.footerText = footerText;
+    if (differentFirstPage !== undefined) this.doc.metadata.differentFirstPage = differentFirstPage;
+    if (pageNumberStyle !== undefined) this.doc.metadata.pageNumberStyle = pageNumberStyle;
+    this.pushHistory();
+  }
 }

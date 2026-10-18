@@ -35,6 +35,8 @@ import {
   Image as ImageIcon,
   ListTree,
   Check,
+  Link2,
+  Bookmark,
 } from "lucide-react";
 import {
   type BlockType,
@@ -69,6 +71,8 @@ interface DocsToolbarProps {
   columnDivider?: boolean;
   onColumnsChange?: (columns: 1 | 2 | 3, spacing?: number, divider?: boolean) => void;
   onInsertImageFile?: (file: File) => void;
+  onOpenHyperlinkModal?: (text?: string, url?: string) => void;
+  onAddFootnote?: () => void;
 }
 
 const TEXT_COLORS = [
@@ -126,6 +130,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   columnDivider = false,
   onColumnsChange,
   onInsertImageFile,
+  onOpenHyperlinkModal,
+  onAddFootnote,
 }) => {
   const [activeTextColor, setActiveTextColor] = useState("#000000");
   const [activeHighlightColor, setActiveHighlightColor] = useState("transparent");
@@ -658,10 +664,21 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
       />
       <button
         className="pdocs-tool-btn"
-        onClick={() => fileInputRef.current?.click()}
-        title="Insert Image (Local file to OPFS)"
+        onClick={() => {
+          const sel = window.getSelection()?.toString() || "";
+          onOpenHyperlinkModal?.(sel, "");
+        }}
+        title="Insert Link (Ctrl+K)"
       >
-        <ImageIcon size={16} />
+        <Link2 size={16} />
+      </button>
+
+      <button
+        className="pdocs-tool-btn"
+        onClick={() => onAddFootnote?.()}
+        title="Insert Footnote (Ctrl+Alt+F)"
+      >
+        <Bookmark size={16} />
       </button>
 
       <button

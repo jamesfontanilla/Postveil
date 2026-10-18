@@ -34,6 +34,9 @@ import {
   AlignRight,
   Image as ImageIcon,
   ListTree,
+  Link2,
+  Bookmark,
+  ExternalLink,
 } from "lucide-react";
 import { DocsRuler } from "./DocsRuler";
 import { LlmPasteParser } from "../engine/LlmPasteParser";
@@ -54,6 +57,11 @@ interface DocsCanvasProps {
   onInsertBlocksAfter?: (afterId: string, blocks: DocBlock[]) => void;
   onUpdateImage?: (blockId: string, url: string, alt?: string, width?: string, align?: "left" | "center" | "right") => void;
   onUpdateToc?: (blockId: string, style: "dotted" | "links") => void;
+  onAddFootnote?: (blockId: string, text?: string) => void;
+  onUpdateFootnote?: (id: string, text: string) => void;
+  onDeleteFootnote?: (id: string) => void;
+  onUpdateHeaderFooter?: (headerText?: string, footerText?: string, differentFirstPage?: boolean, pageNumberStyle?: "standard" | "pageOfTotal" | "none") => void;
+  onOpenHyperlinkModal?: (initialText?: string, initialUrl?: string) => void;
 }
 
 // Paper dimensions in pixels at 96 DPI
@@ -125,12 +133,23 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   onInsertBlocksAfter,
   onUpdateImage,
   onUpdateToc,
+  onAddFootnote,
+  onUpdateFootnote,
+  onDeleteFootnote,
+  onUpdateHeaderFooter,
+  onOpenHyperlinkModal,
 }) => {
   // Equation Editor state
   const [editingMathBlockId, setEditingMathBlockId] = useState<string | null>(null);
   const [mathLatexInput, setMathLatexInput] = useState("");
   // TOC refresh ticker to trigger re-index
   const [, setTocTicker] = useState(0);
+
+  // Header & Footer inline editing
+  const [isEditingHeader, setIsEditingHeader] = useState(false);
+  const [headerTextInput, setHeaderTextInput] = useState(doc.metadata.headerText || "");
+  const [isEditingFooter, setIsEditingFooter] = useState(false);
+  const [footerTextInput, setFooterTextInput] = useState(doc.metadata.footerText || "");
 
   const paperSize = doc.metadata.paperSize || "A4";
   const orientation = doc.metadata.orientation || "portrait";
@@ -246,6 +265,19 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, block: DocBlock) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+      e.preventDefault();
+      const sel = window.getSelection()?.toString() || "";
+      onOpenHyperlinkModal?.(sel, "");
+      return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.altKey && (e.key === "f" || e.key === "F")) {
+      e.preventDefault();
+      onAddFootnote?.(block.id);
+      return;
+    }
+
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       if (e.shiftKey) {
@@ -342,6 +374,8 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
             {!isContinuous && (
               <div
                 className="pdocs-page-header"
+                onDoubleClick={() => setIsEditingHeader(true)}
+                title="Double click to edit Header"
                 style={{
                   position: "absolute",
                   top: 0,
@@ -350,14 +384,52 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                   height: `${topMarginPx}px`,
                   display: "flex",
                   alignItems: "flex-end",
+                  justifyContent: "space-between",
                   paddingBottom: "8px",
                   boxSizing: "border-box",
+                  cursor: "pointer",
                 }}
               >
-                <span className="pdocs-page-header-title">{doc.metadata.title}</span>
-                <span className="pdocs-page-header-stamp">
-                  {paperSize} {orientation} • Margins: {margins.preset.toUpperCase()} ({margins.top}" T/B, {margins.left}" L/R)
-                </span>
+                {isEditingHeader ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "#f8fafc", padding: "4px 8px", borderRadius: "6px", border: "1px solid #cbd5e1" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#0f5132" }}>HEADER:</span>
+                    <input
+                      type="text"
+                      value={headerTextInput}
+                      onChange={(e) => setHeaderTextInput(e.target.value)}
+                      onBlur={() => {
+                        onUpdateHeaderFooter?.(headerTextInput, undefined, undefined, undefined);
+                        setIsEditingHeader(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          onUpdateHeaderFooter?.(headerTextInput, undefined, undefined, undefined);
+                          setIsEditingHeader(false);
+                        }
+                      }}
+                      placeholder="Custom running header text..."
+                      autoFocus
+                      style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: "12px", color: "#334155" }}
+                    />
+                    <label style={{ fontSize: "11px", display: "inline-flex", alignItems: "center", gap: 4, color: "#64748b", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={doc.metadata.differentFirstPage || false}
+                        onChange={(e) => onUpdateHeaderFooter?.(undefined, undefined, e.target.checked, undefined)}
+                      />
+                      Different first page
+                    </label>
+                  </div>
+                ) : (
+                  <>
+                    <span className="pdocs-page-header-title">
+                      {pageIdx === 0 && doc.metadata.differentFirstPage ? "" : doc.metadata.headerText || doc.metadata.title}
+                    </span>
+                    <span className="pdocs-page-header-stamp">
+                      {paperSize} {orientation} • Margins: {margins.preset.toUpperCase()} ({margins.top}" T/B, {margins.left}" L/R)
+                    </span>
+                  </>
+                )}
               </div>
             )}
 
@@ -383,6 +455,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                   {renderBlock({
                     block,
                     allBlocks: doc.blocks,
+                    footnotes: doc.metadata.footnotes || [],
                     onUpdate: onUpdateBlockContent,
                     onToggleTask,
                     onKeyDown: (e) => handleKeyDown(e, block),
@@ -406,6 +479,24 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                     >
                       <Plus size={14} />
                     </button>
+                    <button
+                      onClick={() => onAddFootnote?.(block.id)}
+                      title="Add Footnote (Ctrl+Alt+F)"
+                      className="pdocs-block-add-btn"
+                      style={{ fontSize: "12px", fontWeight: 700, color: "#0f5132" }}
+                    >
+                      ¹
+                    </button>
+                    <button
+                      onClick={() => {
+                        const sel = window.getSelection()?.toString() || "";
+                        onOpenHyperlinkModal?.(sel, "");
+                      }}
+                      title="Insert Link (Ctrl+K)"
+                      className="pdocs-block-add-btn"
+                    >
+                      <Link2 size={13} />
+                    </button>
                     {doc.blocks.length > 1 && (
                       <button
                         onClick={() => onDeleteBlock(block.id)}
@@ -420,10 +511,99 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
               ))}
             </div>
 
+            {/* Page Footnotes Section */}
+            {(() => {
+              const allFootnotes = doc.metadata.footnotes || [];
+              if (allFootnotes.length === 0) return null;
+              const pageBlockIds = new Set(pageBlocks.map((b) => b.id));
+              const pageFootnotes = isContinuous
+                ? allFootnotes
+                : allFootnotes.filter((f) => !f.blockId || pageBlockIds.has(f.blockId));
+
+              if (pageFootnotes.length === 0) return null;
+
+              return (
+                <div
+                  className="pdocs-page-footnotes"
+                  style={{
+                    position: isContinuous ? "static" : "absolute",
+                    bottom: `${bottomMarginPx + 4}px`,
+                    left: `${leftMarginPx}px`,
+                    right: `${rightMarginPx}px`,
+                    borderTop: "1px solid #cbd5e1",
+                    paddingTop: "6px",
+                    marginTop: "12px",
+                    fontSize: "11px",
+                    lineHeight: "1.4",
+                    color: "#475569",
+                    backgroundColor: doc.metadata.pageColor || "#ffffff",
+                    zIndex: 10,
+                  }}
+                >
+                  <div style={{ width: "80px", borderTop: "1px solid #475569", marginBottom: "6px" }} />
+                  {pageFootnotes.map((fn) => (
+                    <div
+                      key={fn.id}
+                      id={`footnote-${fn.id}`}
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: "6px",
+                        marginBottom: "3px",
+                      }}
+                    >
+                      <sup
+                        style={{
+                          fontWeight: 700,
+                          color: "#0f5132",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => {
+                          if (fn.blockId) {
+                            document.getElementById(fn.blockId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                          }
+                        }}
+                        title="Jump to reference in body"
+                      >
+                        {fn.number}
+                      </sup>
+                      <span
+                        contentEditable
+                        suppressContentEditableWarning
+                        style={{ outline: "none", flex: 1 }}
+                        onBlur={(e) => onUpdateFootnote?.(fn.id, e.currentTarget.textContent || "")}
+                      >
+                        {fn.text}
+                      </span>
+                      {onDeleteFootnote && (
+                        <button
+                          onClick={() => onDeleteFootnote(fn.id)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            padding: "2px",
+                            color: "#94a3b8",
+                            display: "inline-flex",
+                            alignItems: "center",
+                          }}
+                          title="Delete footnote"
+                        >
+                          <X size={11} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
             {/* Page Footer (anchored strictly inside the bottom margin zone) */}
             {!isContinuous && (
               <div
                 className="pdocs-page-footer"
+                onDoubleClick={() => setIsEditingFooter(true)}
+                title="Double click to edit Footer"
                 style={{
                   position: "absolute",
                   bottom: 0,
@@ -432,16 +612,44 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                   height: `${bottomMarginPx}px`,
                   display: "flex",
                   alignItems: "flex-start",
+                  justifyContent: "space-between",
                   paddingTop: "8px",
                   boxSizing: "border-box",
+                  cursor: "pointer",
                 }}
               >
-                <span>
-                  {paperSize} • {orientation.toUpperCase()}
-                </span>
-                <span>
-                  Page {pageIdx + 1} of {pages.length}
-                </span>
+                {isEditingFooter ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "#f8fafc", padding: "4px 8px", borderRadius: "6px", border: "1px solid #cbd5e1" }}>
+                    <span style={{ fontSize: "11px", fontWeight: 700, color: "#0f5132" }}>FOOTER:</span>
+                    <input
+                      type="text"
+                      value={footerTextInput}
+                      onChange={(e) => setFooterTextInput(e.target.value)}
+                      onBlur={() => {
+                        onUpdateHeaderFooter?.(undefined, footerTextInput, undefined, undefined);
+                        setIsEditingFooter(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          onUpdateHeaderFooter?.(undefined, footerTextInput, undefined, undefined);
+                          setIsEditingFooter(false);
+                        }
+                      }}
+                      placeholder="Custom footer text..."
+                      autoFocus
+                      style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: "12px", color: "#334155" }}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <span>
+                      {doc.metadata.footerText || `${paperSize} • ${orientation.toUpperCase()}`}
+                    </span>
+                    <span>
+                      Page {pageIdx + 1} of {pages.length}
+                    </span>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -614,6 +822,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
 interface RenderBlockParams {
   block: DocBlock;
   allBlocks: DocBlock[];
+  footnotes?: import("../types").FootnoteItem[];
   onUpdate: (id: string, text: string) => void;
   onToggleTask: (id: string) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
@@ -630,6 +839,7 @@ interface RenderBlockParams {
 function renderBlock({
   block,
   allBlocks,
+  footnotes,
   onUpdate,
   onToggleTask,
   onKeyDown,
@@ -646,33 +856,79 @@ function renderBlock({
     case "heading": {
       const lvl = block.level || 1;
       const cls = `pdocs-heading-${lvl}`;
+      const blockFootnotes = (footnotes || []).filter((f) => f.blockId === block.id);
       return (
-        <div
-          contentEditable
-          suppressContentEditableWarning
-          className={`pdocs-block-content ${cls}`}
-          onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          data-placeholder="Heading..."
-        >
-          {block.content}
+        <div style={{ display: "flex", alignItems: "baseline", width: "100%" }}>
+          <div
+            contentEditable
+            suppressContentEditableWarning
+            className={`pdocs-block-content ${cls}`}
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            data-placeholder="Heading..."
+            style={{ flex: 1 }}
+          >
+            {block.content}
+          </div>
+          {blockFootnotes.map((fn) => (
+            <sup
+              key={fn.id}
+              onClick={() => {
+                document.getElementById(`footnote-${fn.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+              }}
+              title={`Footnote ${fn.number}: ${fn.text}`}
+              style={{
+                color: "#0f5132",
+                fontWeight: 700,
+                cursor: "pointer",
+                padding: "0 4px",
+                fontSize: "0.75em",
+                userSelect: "none",
+              }}
+            >
+              [{fn.number}]
+            </sup>
+          ))}
         </div>
       );
     }
 
     case "paragraph": {
+      const blockFootnotes = (footnotes || []).filter((f) => f.blockId === block.id);
       return (
-        <div
-          contentEditable
-          suppressContentEditableWarning
-          className="pdocs-block-content pdocs-paragraph"
-          onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          data-placeholder="Type '/' or paste text/math/code from chatbot..."
-        >
-          {block.content}
+        <div style={{ display: "flex", alignItems: "baseline", width: "100%" }}>
+          <div
+            contentEditable
+            suppressContentEditableWarning
+            className="pdocs-block-content pdocs-paragraph"
+            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            data-placeholder="Type '/' or paste text/math/code from chatbot..."
+            style={{ flex: 1 }}
+          >
+            {block.content}
+          </div>
+          {blockFootnotes.map((fn) => (
+            <sup
+              key={fn.id}
+              onClick={() => {
+                document.getElementById(`footnote-${fn.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+              }}
+              title={`Footnote ${fn.number}: ${fn.text}`}
+              style={{
+                color: "#0f5132",
+                fontWeight: 700,
+                cursor: "pointer",
+                padding: "0 4px",
+                fontSize: "0.75em",
+                userSelect: "none",
+              }}
+            >
+              [{fn.number}]
+            </sup>
+          ))}
         </div>
       );
     }

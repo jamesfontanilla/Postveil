@@ -103,6 +103,29 @@ export interface DocumentMetadata {
   fontSize: number; // in px or pt
   isEncrypted: boolean;
   authorKeyId?: string;
+  differentFirstPage?: boolean;
+  headerText?: string;
+  footerText?: string;
+  headerMargin?: number; // in inches
+  footerMargin?: number; // in inches
+  pageNumberStyle?: "standard" | "pageOfTotal" | "none";
+  footnotes?: FootnoteItem[];
+}
+
+export interface FootnoteItem {
+  id: string;
+  number: number;
+  text: string;
+  blockId?: string;
+}
+
+export interface DocVersionSnapshot {
+  id: string;
+  timestamp: string;
+  name?: string;
+  author: string;
+  wordCount: number;
+  doc: UniversalDoc;
 }
 
 export interface UniversalDoc {

@@ -190,4 +190,83 @@ export class OpfsDocStorage {
     // Sort descending by updatedAt
     return list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }
+
+  /* --------------------------------------------------------------------------
+     Document Version History / Revision Snapshots
+     -------------------------------------------------------------------------- */
+  private static VERSIONS_PREFIX = "pdocs_versions_";
+
+  public static async saveVersionSnapshot(doc: UniversalDoc, name?: string): Promise<import("../types").DocVersionSnapshot> {
+    const snapshot: import("../types").DocVersionSnapshot = {
+      id: `v_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      name: name || undefined,
+      author: doc.metadata.author || "Current User",
+      wordCount: doc.metadata.wordCount || 0,
+      doc: JSON.parse(JSON.stringify(doc)),
+    };
+
+    try {
+      const key = `${this.VERSIONS_PREFIX}${doc.metadata.id}`;
+      const existing = await this.loadVersionSnapshots(doc.metadata.id);
+      const updated = [snapshot, ...existing].slice(0, 30); // Keep last 30 snapshots
+
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(key, JSON.stringify(updated));
+      }
+
+      if (typeof window !== "undefined" && "storage" in navigator && "getDirectory" in navigator.storage) {
+        const root = await navigator.storage.getDirectory();
+        const dir = await root.getDirectoryHandle(this.DIRECTORY_NAME, { create: true });
+        const fileHandle = await dir.getFileHandle(`${key}.json`, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(updated, null, 2));
+        await writable.close();
+      }
+    } catch {}
+
+    return snapshot;
+  }
+
+  public static async loadVersionSnapshots(docId: string): Promise<import("../types").DocVersionSnapshot[]> {
+    const key = `${this.VERSIONS_PREFIX}${docId}`;
+    try {
+      if (typeof window !== "undefined" && "storage" in navigator && "getDirectory" in navigator.storage) {
+        const root = await navigator.storage.getDirectory();
+        const dir = await root.getDirectoryHandle(this.DIRECTORY_NAME, { create: true });
+        try {
+          const fileHandle = await dir.getFileHandle(`${key}.json`);
+          const file = await fileHandle.getFile();
+          const text = await file.text();
+          return JSON.parse(text);
+        } catch {}
+      }
+
+      if (typeof localStorage !== "undefined") {
+        const item = localStorage.getItem(key);
+        if (item) return JSON.parse(item);
+      }
+    } catch {}
+    return [];
+  }
+
+  public static async restoreVersionSnapshot(
+    docId: string,
+    snapshotId: string
+  ): Promise<UniversalDoc | null> {
+    const versions = await this.loadVersionSnapshots(docId);
+    const target = versions.find((v) => v.id === snapshotId);
+    if (!target) return null;
+
+    const restoredDoc: UniversalDoc = {
+      ...target.doc,
+      metadata: {
+        ...target.doc.metadata,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    await this.saveDocumentLocally(restoredDoc);
+    return restoredDoc;
+  }
 }
