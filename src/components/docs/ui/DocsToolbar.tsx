@@ -41,6 +41,7 @@ import {
   PenSquare,
   Eye,
   ShieldCheck,
+  Pipette,
 } from "lucide-react";
 import {
   type BlockType,
@@ -86,34 +87,141 @@ interface DocsToolbarProps {
   onOpenSignatureModal?: () => void;
 }
 
-const TEXT_COLORS = [
-  { name: "Black", color: "#000000" },
-  { name: "Dark Slate", color: "#334155" },
-  { name: "Gray", color: "#64748b" },
-  { name: "Postveil Green", color: "#0f5132" },
-  { name: "Emerald", color: "#16a34a" },
-  { name: "Teal", color: "#0d9488" },
-  { name: "Cyan", color: "#0891b2" },
-  { name: "Blue", color: "#2563eb" },
-  { name: "Indigo", color: "#4f46e5" },
-  { name: "Purple", color: "#9333ea" },
-  { name: "Pink", color: "#db2777" },
-  { name: "Red", color: "#dc2626" },
-  { name: "Orange", color: "#ea580c" },
-  { name: "Amber", color: "#d97706" },
-  { name: "Yellow", color: "#ca8a04" },
-  { name: "Pure White", color: "#ffffff" },
+// Microsoft Word-style Standard & Theme Palettes (10 columns x 6 shade tiers = 60 Theme Colors + 10 Standard Colors)
+const THEME_COLOR_COLUMNS = [
+  // 1: White to Black / Dark Gray
+  [
+    { name: "White", color: "#ffffff" },
+    { name: "White, Darker 5%", color: "#f8fafc" },
+    { name: "White, Darker 15%", color: "#f1f5f9" },
+    { name: "White, Darker 25%", color: "#e2e8f0" },
+    { name: "White, Darker 35%", color: "#cbd5e1" },
+    { name: "White, Darker 50%", color: "#94a3b8" },
+  ],
+  // 2: Black to Lighter
+  [
+    { name: "Black", color: "#000000" },
+    { name: "Black, Lighter 50%", color: "#64748b" },
+    { name: "Black, Lighter 35%", color: "#475569" },
+    { name: "Black, Lighter 25%", color: "#334155" },
+    { name: "Black, Lighter 15%", color: "#1e293b" },
+    { name: "Black, Lighter 5%", color: "#0f172a" },
+  ],
+  // 3: Warm Gray / Slate
+  [
+    { name: "Warm Gray", color: "#e7e5e4" },
+    { name: "Warm Gray, Lighter 80%", color: "#fafaf9" },
+    { name: "Warm Gray, Lighter 60%", color: "#f5f5f4" },
+    { name: "Warm Gray, Darker 25%", color: "#a8a29e" },
+    { name: "Warm Gray, Darker 50%", color: "#78716c" },
+    { name: "Warm Gray, Darker 75%", color: "#44403c" },
+  ],
+  // 4: Navy / Dark Blue
+  [
+    { name: "Navy Blue", color: "#1e3a8a" },
+    { name: "Navy, Lighter 80%", color: "#eff6ff" },
+    { name: "Navy, Lighter 60%", color: "#dbeafe" },
+    { name: "Navy, Lighter 40%", color: "#bfdbfe" },
+    { name: "Navy, Darker 25%", color: "#172554" },
+    { name: "Navy, Darker 50%", color: "#0f172a" },
+  ],
+  // 5: Cobalt / Accent Blue
+  [
+    { name: "Blue", color: "#2563eb" },
+    { name: "Blue, Lighter 80%", color: "#dbeafe" },
+    { name: "Blue, Lighter 60%", color: "#93c5fd" },
+    { name: "Blue, Lighter 40%", color: "#60a5fa" },
+    { name: "Blue, Darker 25%", color: "#1d4ed8" },
+    { name: "Blue, Darker 50%", color: "#1e40af" },
+  ],
+  // 6: Orange / Copper
+  [
+    { name: "Orange", color: "#ea580c" },
+    { name: "Orange, Lighter 80%", color: "#ffedd5" },
+    { name: "Orange, Lighter 60%", color: "#fed7aa" },
+    { name: "Orange, Lighter 40%", color: "#fdba74" },
+    { name: "Orange, Darker 25%", color: "#c2410c" },
+    { name: "Orange, Darker 50%", color: "#9a3412" },
+  ],
+  // 7: Gray / Slate Accent
+  [
+    { name: "Slate Gray", color: "#64748b" },
+    { name: "Slate, Lighter 80%", color: "#f8fafc" },
+    { name: "Slate, Lighter 60%", color: "#e2e8f0" },
+    { name: "Slate, Lighter 40%", color: "#cbd5e1" },
+    { name: "Slate, Darker 25%", color: "#475569" },
+    { name: "Slate, Darker 50%", color: "#334155" },
+  ],
+  // 8: Gold / Amber
+  [
+    { name: "Gold / Amber", color: "#d97706" },
+    { name: "Gold, Lighter 80%", color: "#fef3c7" },
+    { name: "Gold, Lighter 60%", color: "#fde68a" },
+    { name: "Gold, Lighter 40%", color: "#fcd34d" },
+    { name: "Gold, Darker 25%", color: "#b45309" },
+    { name: "Gold, Darker 50%", color: "#78350f" },
+  ],
+  // 9: Emerald / Forest Green (Postveil theme)
+  [
+    { name: "Emerald Green", color: "#0f5132" },
+    { name: "Green, Lighter 80%", color: "#dcfce7" },
+    { name: "Green, Lighter 60%", color: "#bbf7d0" },
+    { name: "Green, Lighter 40%", color: "#86efac" },
+    { name: "Green, Darker 25%", color: "#166534" },
+    { name: "Green, Darker 50%", color: "#14532d" },
+  ],
+  // 10: Purple / Amethyst
+  [
+    { name: "Amethyst Purple", color: "#7e22ce" },
+    { name: "Purple, Lighter 80%", color: "#f3e8ff" },
+    { name: "Purple, Lighter 60%", color: "#e9d5ff" },
+    { name: "Purple, Lighter 40%", color: "#d8b4fe" },
+    { name: "Purple, Darker 25%", color: "#6b21a8" },
+    { name: "Purple, Darker 50%", color: "#581c87" },
+  ],
 ];
 
-const HIGHLIGHT_COLORS = [
-  { name: "None", color: "transparent" },
-  { name: "Pastel Yellow", color: "#fef08a" },
-  { name: "Pastel Green", color: "#bbf7d0" },
-  { name: "Pastel Cyan", color: "#a5f3fc" },
-  { name: "Pastel Blue", color: "#bfdbfe" },
-  { name: "Pastel Purple", color: "#e9d5ff" },
-  { name: "Pastel Pink", color: "#fbcfe8" },
-  { name: "Pastel Orange", color: "#fed7aa" },
+// Microsoft Word Standard Colors Row (10 universal colors)
+const STANDARD_COLORS = [
+  { name: "Dark Red", color: "#c00000" },
+  { name: "Red", color: "#ff0000" },
+  { name: "Orange", color: "#ffc000" },
+  { name: "Yellow", color: "#ffff00" },
+  { name: "Light Green", color: "#92d050" },
+  { name: "Green", color: "#00b050" },
+  { name: "Light Blue", color: "#00b0f0" },
+  { name: "Blue", color: "#0070c0" },
+  { name: "Dark Blue", color: "#002060" },
+  { name: "Purple", color: "#7030a0" },
+];
+
+// Microsoft Word 15 Highlighters + Transparent (No Color)
+const HIGHLIGHT_PALETTE = [
+  { name: "No Color", color: "transparent" },
+  { name: "Yellow", color: "#ffff00" },
+  { name: "Bright Green", color: "#00ff00" },
+  { name: "Turquoise", color: "#00ffff" },
+  { name: "Pink", color: "#ff00ff" },
+  { name: "Blue", color: "#0000ff" },
+  { name: "Red", color: "#ff0000" },
+  { name: "Dark Blue", color: "#000080" },
+  { name: "Teal", color: "#008080" },
+  { name: "Green", color: "#008000" },
+  { name: "Violet", color: "#800080" },
+  { name: "Dark Red", color: "#800000" },
+  { name: "Dark Yellow", color: "#808000" },
+  { name: "Gray 50%", color: "#808080" },
+  { name: "Gray 25%", color: "#c0c0c0" },
+  { name: "Black", color: "#000000" },
+  // Modern Soft Pastel Highlighters
+  { name: "Pastel Lemon", color: "#fef08a" },
+  { name: "Pastel Mint", color: "#bbf7d0" },
+  { name: "Pastel Sky", color: "#bae6fd" },
+  { name: "Pastel Lavender", color: "#e9d5ff" },
+  { name: "Pastel Rose", color: "#fbcfe8" },
+  { name: "Pastel Peach", color: "#fed7aa" },
+  { name: "Pastel Coral", color: "#fecdd3" },
+  { name: "Pastel Butter", color: "#fef9c3" },
 ];
 
 export const DocsToolbar: React.FC<DocsToolbarProps> = ({
@@ -152,6 +260,10 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   const [activeHighlightColor, setActiveHighlightColor] = useState("transparent");
   const [isTextColorOpen, setIsTextColorOpen] = useState(false);
   const [isHighlightOpen, setIsHighlightOpen] = useState(false);
+  const [customHexText, setCustomHexText] = useState("#000000");
+  const [customHexHighlight, setCustomHexHighlight] = useState("#ffff00");
+  const textColorInputRef = useRef<HTMLInputElement>(null);
+  const highlightColorInputRef = useRef<HTMLInputElement>(null);
   const [isLineSpacingOpen, setIsLineSpacingOpen] = useState(false);
   const [isColumnsOpen, setIsColumnsOpen] = useState(false);
   const [isModeOpen, setIsModeOpen] = useState(false);
@@ -352,31 +464,200 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
                 top: "34px",
                 left: 0,
                 backgroundColor: "#ffffff",
-                borderRadius: "8px",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                borderRadius: "10px",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.2), 0 1px 4px rgba(0,0,0,0.08)",
                 border: "1px solid #cbd5e1",
-                padding: "8px",
+                padding: "12px",
                 zIndex: 130,
-                display: "grid",
-                gridTemplateColumns: "repeat(4, 24px)",
-                gap: "6px",
+                width: "248px",
+                boxSizing: "border-box",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
               }}
             >
-              {TEXT_COLORS.map((c) => (
-                <button
-                  key={c.name}
-                  onClick={() => applyTextColor(c.color)}
-                  title={c.name}
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: "4px",
-                    backgroundColor: c.color,
-                    border: c.color === "#ffffff" ? "1px solid #cbd5e1" : "none",
-                    cursor: "pointer",
-                  }}
-                />
-              ))}
+              {/* Automatic / Default Button */}
+              <button
+                onClick={() => applyTextColor("#000000")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "5px 8px",
+                  borderRadius: "6px",
+                  border: "1px solid #e2e8f0",
+                  backgroundColor: "#f8fafc",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div style={{ width: 14, height: 14, backgroundColor: "#000000", borderRadius: 3, border: "1px solid #cbd5e1" }} />
+                Automatic (Black)
+              </button>
+
+              {/* Theme Colors Section */}
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
+                  Theme Colors
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 18px)", gap: "4px" }}>
+                  {/* Top Header Row of 10 Accent Colors */}
+                  {THEME_COLOR_COLUMNS.map((col, colIdx) => {
+                    const topShade = col[0];
+                    return (
+                      <button
+                        key={`theme-top-${colIdx}`}
+                        onClick={() => applyTextColor(topShade.color)}
+                        title={topShade.name}
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: "3px",
+                          backgroundColor: topShade.color,
+                          border: topShade.color === "#ffffff" ? "1px solid #cbd5e1" : "1px solid rgba(0,0,0,0.1)",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                {/* 5 Rows of Tint/Shade Variations */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 18px)", gap: "4px", marginTop: "4px" }}>
+                  {[1, 2, 3, 4, 5].map((rowIdx) =>
+                    THEME_COLOR_COLUMNS.map((col, colIdx) => {
+                      const shade = col[rowIdx];
+                      return (
+                        <button
+                          key={`theme-shade-${colIdx}-${rowIdx}`}
+                          onClick={() => applyTextColor(shade.color)}
+                          title={shade.name}
+                          style={{
+                            width: 18,
+                            height: 16,
+                            borderRadius: "2px",
+                            backgroundColor: shade.color,
+                            border: shade.color === "#ffffff" ? "1px solid #cbd5e1" : "1px solid rgba(0,0,0,0.06)",
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        />
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Standard Colors Section */}
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
+                  Standard Colors
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(10, 18px)", gap: "4px" }}>
+                  {STANDARD_COLORS.map((c) => (
+                    <button
+                      key={c.name}
+                      onClick={() => applyTextColor(c.color)}
+                      title={c.name}
+                      style={{
+                        width: 18,
+                        height: 18,
+                        borderRadius: "3px",
+                        backgroundColor: c.color,
+                        border: "1px solid rgba(0,0,0,0.1)",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ height: "1px", backgroundColor: "#e2e8f0", margin: "2px 0" }} />
+
+              {/* Custom Hex Picker / Native Eyedropper Bar */}
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
+                  Custom Hex Color
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  {/* Color Swatch Trigger for Native Color Picker */}
+                  <div
+                    onClick={() => textColorInputRef.current?.click()}
+                    title="Open Color Wheel / Eye Dropper"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "6px",
+                      backgroundColor: customHexText,
+                      border: "1px solid #cbd5e1",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Pipette size={13} style={{ color: customHexText === "#ffffff" ? "#475569" : "#ffffff", filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.5))" }} />
+                  </div>
+                  <input
+                    type="color"
+                    ref={textColorInputRef}
+                    value={customHexText.startsWith("#") && customHexText.length === 7 ? customHexText : "#000000"}
+                    onChange={(e) => {
+                      setCustomHexText(e.target.value);
+                      applyTextColor(e.target.value);
+                    }}
+                    style={{ display: "none" }}
+                  />
+                  {/* Hex Text Input */}
+                  <input
+                    type="text"
+                    value={customHexText}
+                    onChange={(e) => setCustomHexText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && /^#([0-9A-Fa-f]{3}){1,2}$/.test(customHexText)) {
+                        applyTextColor(customHexText);
+                      }
+                    }}
+                    placeholder="#2563eb"
+                    style={{
+                      flex: 1,
+                      height: 28,
+                      padding: "0 8px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "12px",
+                      fontFamily: "monospace",
+                      outline: "none",
+                      color: "#1e293b",
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (/^#([0-9A-Fa-f]{3}){1,2}$/.test(customHexText)) {
+                        applyTextColor(customHexText);
+                      }
+                    }}
+                    style={{
+                      height: 28,
+                      padding: "0 10px",
+                      borderRadius: "6px",
+                      backgroundColor: "#0f5132",
+                      color: "#ffffff",
+                      border: "none",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
             </div>
           </>
         )}
@@ -417,31 +698,148 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
                 top: "34px",
                 left: 0,
                 backgroundColor: "#ffffff",
-                borderRadius: "8px",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                borderRadius: "10px",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.2), 0 1px 4px rgba(0,0,0,0.08)",
                 border: "1px solid #cbd5e1",
-                padding: "8px",
+                padding: "12px",
                 zIndex: 130,
-                display: "grid",
-                gridTemplateColumns: "repeat(4, 24px)",
-                gap: "6px",
+                width: "230px",
+                boxSizing: "border-box",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
               }}
             >
-              {HIGHLIGHT_COLORS.map((c) => (
-                <button
-                  key={c.name}
-                  onClick={() => applyHighlightColor(c.color)}
-                  title={c.name}
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: "4px",
-                    backgroundColor: c.color,
-                    border: c.color === "transparent" ? "1px dashed #94a3b8" : "none",
-                    cursor: "pointer",
-                  }}
-                />
-              ))}
+              {/* No Color / Stop Highlighting Button */}
+              <button
+                onClick={() => applyHighlightColor("transparent")}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "5px 8px",
+                  borderRadius: "6px",
+                  border: "1px solid #e2e8f0",
+                  backgroundColor: "#f8fafc",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div style={{ width: 14, height: 14, backgroundColor: "transparent", borderRadius: 3, border: "1px dashed #94a3b8" }} />
+                No Color (Clear Highlight)
+              </button>
+
+              {/* Standard & Pastel Highlighter Palette */}
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
+                  Highlighter Colors
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 26px)", gap: "6px" }}>
+                  {HIGHLIGHT_PALETTE.filter((c) => c.color !== "transparent").map((c) => (
+                    <button
+                      key={c.name}
+                      onClick={() => applyHighlightColor(c.color)}
+                      title={c.name}
+                      style={{
+                        width: 26,
+                        height: 26,
+                        borderRadius: "4px",
+                        backgroundColor: c.color,
+                        border: "1px solid rgba(0,0,0,0.12)",
+                        cursor: "pointer",
+                        padding: 0,
+                        transition: "transform 0.1s ease",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.15)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1.0)")}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ height: "1px", backgroundColor: "#e2e8f0", margin: "2px 0" }} />
+
+              {/* Custom Hex Highlight Picker */}
+              <div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "6px" }}>
+                  Custom Hex Highlight
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <div
+                    onClick={() => highlightColorInputRef.current?.click()}
+                    title="Open Color Wheel / Eye Dropper"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: "6px",
+                      backgroundColor: customHexHighlight,
+                      border: "1px solid #cbd5e1",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Pipette size={13} style={{ color: "#475569" }} />
+                  </div>
+                  <input
+                    type="color"
+                    ref={highlightColorInputRef}
+                    value={customHexHighlight.startsWith("#") && customHexHighlight.length === 7 ? customHexHighlight : "#ffff00"}
+                    onChange={(e) => {
+                      setCustomHexHighlight(e.target.value);
+                      applyHighlightColor(e.target.value);
+                    }}
+                    style={{ display: "none" }}
+                  />
+                  <input
+                    type="text"
+                    value={customHexHighlight}
+                    onChange={(e) => setCustomHexHighlight(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && /^#([0-9A-Fa-f]{3}){1,2}$/.test(customHexHighlight)) {
+                        applyHighlightColor(customHexHighlight);
+                      }
+                    }}
+                    placeholder="#fef08a"
+                    style={{
+                      flex: 1,
+                      height: 28,
+                      padding: "0 8px",
+                      borderRadius: "6px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "12px",
+                      fontFamily: "monospace",
+                      outline: "none",
+                      color: "#1e293b",
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (/^#([0-9A-Fa-f]{3}){1,2}$/.test(customHexHighlight)) {
+                        applyHighlightColor(customHexHighlight);
+                      }
+                    }}
+                    style={{
+                      height: 28,
+                      padding: "0 10px",
+                      borderRadius: "6px",
+                      backgroundColor: "#0f5132",
+                      color: "#ffffff",
+                      border: "none",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
             </div>
           </>
         )}
