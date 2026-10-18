@@ -8,6 +8,8 @@ import {
   type PaperSize,
   type Orientation,
   type DocMargins,
+  type ReviewMode,
+  type CryptographicSignature,
 } from "./types";
 import { UniversalFormatEngine } from "./formats/UniversalFormatEngine";
 import { DocumentEngine } from "./engine/DocumentEngine";
@@ -23,6 +25,8 @@ import { DocumentLibraryModal } from "./ui/DocumentLibraryModal";
 import { FindReplaceModal } from "./ui/FindReplaceModal";
 import { VersionHistoryModal } from "./ui/VersionHistoryModal";
 import { HyperlinkModal } from "./ui/HyperlinkModal";
+import { CryptographicSignatureModal } from "./ui/CryptographicSignatureModal";
+import { NewCommentModal } from "./ui/NewCommentModal";
 
 interface PDocsAppProps {
   onBackToMail: () => void;
@@ -53,6 +57,11 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [isFindReplaceOpen, setIsFindReplaceOpen] = useState(false);
   const [isVersionHistoryOpen, setIsVersionHistoryOpen] = useState(false);
   const [isHyperlinkModalOpen, setIsHyperlinkModalOpen] = useState(false);
+  const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
+  const [isNewCommentModalOpen, setIsNewCommentModalOpen] = useState(false);
+  const [commentTargetBlockId, setCommentTargetBlockId] = useState<string>("");
+  const [commentQuotedText, setCommentQuotedText] = useState<string>("");
+  const [reviewMode, setReviewMode] = useState<ReviewMode>("editing");
   const [hyperlinkInitialText, setHyperlinkInitialText] = useState("");
   const [hyperlinkInitialUrl, setHyperlinkInitialUrl] = useState("");
   const [showRuler, setShowRuler] = useState(true);
@@ -75,7 +84,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     })();
   }, []);
 
-  // Global keyboard shortcuts (Ctrl+O, Ctrl+H, Ctrl+K, Ctrl+Alt+Shift+H, Ctrl+Alt+F)
+  // Global keyboard shortcuts (Ctrl+O, Ctrl+H, Ctrl+K, Ctrl+Alt+Shift+H, Ctrl+Alt+F, Ctrl+Alt+M)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
@@ -100,6 +109,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
       } else if (modKey && e.altKey && (e.key === "f" || e.key === "F")) {
         e.preventDefault();
         handleAddFootnote();
+      } else if (modKey && e.altKey && (e.key === "m" || e.key === "M")) {
+        e.preventDefault();
+        handleOpenNewCommentModal();
       }
     };
 
@@ -409,6 +421,49 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     setIsVersionHistoryOpen(false);
   };
 
+  const handleOpenNewCommentModal = (blockId?: string, quotedText?: string) => {
+    const sel = window.getSelection();
+    const text = quotedText || (sel ? sel.toString().trim() : "");
+    setCommentTargetBlockId(blockId || activeBlockId || doc.blocks[0]?.id || "");
+    setCommentQuotedText(text);
+    setIsNewCommentModalOpen(true);
+  };
+
+  const handleAddComment = (blockId: string, text: string, quotedText?: string) => {
+    engineRef.current.addComment(blockId, text, userName, userEmail, quotedText);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleAddCommentReply = (commentId: string, text: string) => {
+    engineRef.current.addCommentReply(commentId, text, userName, userEmail);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleResolveComment = (commentId: string) => {
+    engineRef.current.resolveComment(commentId);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleDeleteComment = (commentId: string) => {
+    engineRef.current.deleteComment(commentId);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleAcceptSuggestion = (suggestionId: string) => {
+    engineRef.current.acceptSuggestion(suggestionId);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleRejectSuggestion = (suggestionId: string) => {
+    engineRef.current.rejectSuggestion(suggestionId);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleAddSignature = (sig: CryptographicSignature) => {
+    engineRef.current.addSignature(sig);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
   return (
     <div className="pdocs-container">
       {/* Header */}
@@ -432,6 +487,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onOpenVersionHistory={() => setIsVersionHistoryOpen(true)}
         onOpenHyperlinkModal={() => handleOpenHyperlinkModal()}
         onAddFootnote={() => handleAddFootnote()}
+        onOpenSignatureModal={() => setIsSignatureModalOpen(true)}
+        onOpenNewCommentModal={() => handleOpenNewCommentModal()}
         showRuler={showRuler}
         onToggleRuler={() => setShowRuler((prev) => !prev)}
         columns={doc.metadata.columns || 1}
@@ -482,6 +539,10 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         columnDivider={doc.metadata.columnDivider || false}
         onColumnsChange={handleColumnsChange}
         onInsertImageFile={handleInsertImageFile}
+        reviewMode={reviewMode}
+        onReviewModeChange={setReviewMode}
+        onOpenNewCommentModal={() => handleOpenNewCommentModal()}
+        onOpenSignatureModal={() => setIsSignatureModalOpen(true)}
       />
 
       {/* Main Workspace */}
@@ -494,6 +555,13 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
           onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           onScrollToBlock={handleScrollToBlock}
           onOpenExportFormat={handleOpenExportWithFormat}
+          onAddCommentReply={handleAddCommentReply}
+          onResolveComment={handleResolveComment}
+          onDeleteComment={handleDeleteComment}
+          onAcceptSuggestion={handleAcceptSuggestion}
+          onRejectSuggestion={handleRejectSuggestion}
+          onOpenSignatureModal={() => setIsSignatureModalOpen(true)}
+          onOpenNewCommentModal={() => handleOpenNewCommentModal()}
         />
 
         {/* Editing Canvas or Markdown Split */}
@@ -549,6 +617,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 onDeleteFootnote={handleDeleteFootnote}
                 onUpdateHeaderFooter={handleUpdateHeaderFooter}
                 onOpenHyperlinkModal={handleOpenHyperlinkModal}
+                reviewMode={reviewMode}
+                onOpenNewCommentModal={handleOpenNewCommentModal}
               />
             </div>
           </div>
@@ -574,6 +644,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             onDeleteFootnote={handleDeleteFootnote}
             onUpdateHeaderFooter={handleUpdateHeaderFooter}
             onOpenHyperlinkModal={handleOpenHyperlinkModal}
+            reviewMode={reviewMode}
+            onOpenNewCommentModal={handleOpenNewCommentModal}
           />
         )}
       </div>
@@ -640,6 +712,25 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         initialUrl={hyperlinkInitialUrl}
         onClose={() => setIsHyperlinkModalOpen(false)}
         onApply={handleApplyHyperlink}
+      />
+
+      {/* Sovereign Cryptographic Signature Modal */}
+      <CryptographicSignatureModal
+        isOpen={isSignatureModalOpen}
+        onClose={() => setIsSignatureModalOpen(false)}
+        doc={doc}
+        onAddSignature={handleAddSignature}
+        userEmail={userEmail}
+        userName={userName}
+      />
+
+      {/* New Comment Modal */}
+      <NewCommentModal
+        isOpen={isNewCommentModalOpen}
+        onClose={() => setIsNewCommentModalOpen(false)}
+        blockId={commentTargetBlockId}
+        quotedText={commentQuotedText}
+        onAddComment={handleAddComment}
       />
     </div>
   );

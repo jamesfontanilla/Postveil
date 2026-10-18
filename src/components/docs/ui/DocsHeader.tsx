@@ -22,6 +22,7 @@ import {
   History,
   Link2,
   Bookmark,
+  MessageSquare,
 } from "lucide-react";
 import BrandMark from "../../BrandMark";
 import { WaffleLauncher } from "../../accounts/WaffleLauncher";
@@ -47,6 +48,8 @@ interface DocsHeaderProps {
   onOpenVersionHistory?: () => void;
   onOpenHyperlinkModal?: () => void;
   onAddFootnote?: () => void;
+  onOpenSignatureModal?: () => void;
+  onOpenNewCommentModal?: () => void;
   showRuler?: boolean;
   onToggleRuler?: () => void;
   columns?: 1 | 2 | 3;
@@ -76,6 +79,8 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
   onOpenVersionHistory,
   onOpenHyperlinkModal,
   onAddFootnote,
+  onOpenSignatureModal,
+  onOpenNewCommentModal,
   showRuler = true,
   onToggleRuler,
   columns = 1,
@@ -204,6 +209,17 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                     >
                       <History size={15} style={{ marginRight: 8, color: "#2563eb" }} />
                       Version history (Ctrl+Alt+Shift+H)
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onOpenSignatureModal?.();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <ShieldCheck size={15} style={{ marginRight: 8, color: "#059669" }} />
+                      Sovereign digital signature (Ed25519)...
                     </button>
                     <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
                     <button
@@ -466,6 +482,17 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                     >
                       <Bookmark size={15} style={{ marginRight: 8, color: "#7c3aed" }} />
                       Footnote (Ctrl+Alt+F)
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onOpenNewCommentModal?.();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <MessageSquare size={15} style={{ marginRight: 8, color: "#2563eb" }} />
+                      Comment (Ctrl+Alt+M)
                     </button>
                     <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
                     <button

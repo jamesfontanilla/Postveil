@@ -110,6 +110,54 @@ export interface DocumentMetadata {
   footerMargin?: number; // in inches
   pageNumberStyle?: "standard" | "pageOfTotal" | "none";
   footnotes?: FootnoteItem[];
+  comments?: DocComment[];
+  suggestions?: DocSuggestion[];
+  signatures?: CryptographicSignature[];
+}
+
+export type ReviewMode = "editing" | "suggesting" | "viewing";
+
+export interface CommentReply {
+  id: string;
+  author: string;
+  authorEmail?: string;
+  timestamp: string;
+  text: string;
+}
+
+export interface DocComment {
+  id: string;
+  blockId: string;
+  quotedText?: string;
+  author: string;
+  authorEmail?: string;
+  timestamp: string;
+  text: string;
+  resolved: boolean;
+  replies: CommentReply[];
+}
+
+export interface DocSuggestion {
+  id: string;
+  blockId: string;
+  author: string;
+  authorEmail?: string;
+  timestamp: string;
+  type: "insert" | "delete" | "replace";
+  originalText?: string;
+  suggestedText: string;
+  status: "pending" | "accepted" | "rejected";
+}
+
+export interface CryptographicSignature {
+  id: string;
+  signerName: string;
+  signerEmail: string;
+  publicKey: string;
+  signatureBase64: string;
+  documentHashSha256: string;
+  timestamp: string;
+  algorithm: "Ed25519";
 }
 
 export interface FootnoteItem {

@@ -37,6 +37,10 @@ import {
   Check,
   Link2,
   Bookmark,
+  MessageSquare,
+  PenSquare,
+  Eye,
+  ShieldCheck,
 } from "lucide-react";
 import {
   type BlockType,
@@ -44,6 +48,7 @@ import {
   type Orientation,
   type DocMargins,
   type MarginPreset,
+  type ReviewMode,
 } from "../types";
 
 interface DocsToolbarProps {
@@ -73,6 +78,10 @@ interface DocsToolbarProps {
   onInsertImageFile?: (file: File) => void;
   onOpenHyperlinkModal?: (text?: string, url?: string) => void;
   onAddFootnote?: () => void;
+  reviewMode?: ReviewMode;
+  onReviewModeChange?: (mode: ReviewMode) => void;
+  onOpenNewCommentModal?: () => void;
+  onOpenSignatureModal?: () => void;
 }
 
 const TEXT_COLORS = [
@@ -132,6 +141,10 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   onInsertImageFile,
   onOpenHyperlinkModal,
   onAddFootnote,
+  reviewMode = "editing",
+  onReviewModeChange,
+  onOpenNewCommentModal,
+  onOpenSignatureModal,
 }) => {
   const [activeTextColor, setActiveTextColor] = useState("#000000");
   const [activeHighlightColor, setActiveHighlightColor] = useState("transparent");
@@ -139,6 +152,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   const [isHighlightOpen, setIsHighlightOpen] = useState(false);
   const [isLineSpacingOpen, setIsLineSpacingOpen] = useState(false);
   const [isColumnsOpen, setIsColumnsOpen] = useState(false);
+  const [isModeOpen, setIsModeOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const applyTextColor = (color: string) => {
@@ -856,6 +870,135 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
       >
         <Settings2 size={16} />
       </button>
+
+      <div className="pdocs-toolbar-divider" />
+
+      {/* Add Comment Button */}
+      <button
+        className="pdocs-tool-btn"
+        onClick={onOpenNewCommentModal}
+        title="Add comment (Ctrl+Alt+M)"
+      >
+        <MessageSquare size={16} color="#2563eb" />
+      </button>
+
+      {/* Sovereign Digital Signature Button */}
+      <button
+        className="pdocs-tool-btn"
+        onClick={onOpenSignatureModal}
+        title="Sovereign Digital Signature (Ed25519)"
+        style={{ color: "#059669" }}
+      >
+        <ShieldCheck size={16} />
+      </button>
+
+      {/* Review Mode Selector (Editing / Suggesting / Viewing) */}
+      <div style={{ position: "relative", marginLeft: "auto" }}>
+        <button
+          className="pdocs-tool-btn"
+          onClick={() => setIsModeOpen(!isModeOpen)}
+          title={`Mode: ${reviewMode} (click to switch)`}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "4px 8px",
+            fontSize: "12px",
+            fontWeight: 600,
+            color:
+              reviewMode === "editing"
+                ? "#0f5132"
+                : reviewMode === "suggesting"
+                ? "#2563eb"
+                : "#64748b",
+            backgroundColor: "#f1f5f9",
+            borderRadius: "6px",
+          }}
+        >
+          {reviewMode === "editing" ? (
+            <PenSquare size={14} />
+          ) : reviewMode === "suggesting" ? (
+            <MessageSquare size={14} />
+          ) : (
+            <Eye size={14} />
+          )}
+          <span style={{ textTransform: "capitalize" }}>{reviewMode}</span>
+        </button>
+        {isModeOpen && (
+          <>
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 120 }}
+              onClick={() => setIsModeOpen(false)}
+            />
+            <div
+              style={{
+                position: "absolute",
+                top: "28px",
+                right: 0,
+                backgroundColor: "#ffffff",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                boxShadow: "0 8px 20px rgba(0,0,0,0.12)",
+                padding: "4px",
+                zIndex: 130,
+                minWidth: "160px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "2px",
+              }}
+            >
+              <button
+                className={`pdocs-tool-btn ${reviewMode === "editing" ? "active" : ""}`}
+                style={{
+                  justifyContent: "flex-start",
+                  width: "100%",
+                  padding: "6px 8px",
+                  fontSize: "12px",
+                }}
+                onClick={() => {
+                  onReviewModeChange?.("editing");
+                  setIsModeOpen(false);
+                }}
+              >
+                <PenSquare size={14} style={{ marginRight: 6, color: "#0f5132" }} />
+                <span>Editing</span>
+              </button>
+              <button
+                className={`pdocs-tool-btn ${reviewMode === "suggesting" ? "active" : ""}`}
+                style={{
+                  justifyContent: "flex-start",
+                  width: "100%",
+                  padding: "6px 8px",
+                  fontSize: "12px",
+                }}
+                onClick={() => {
+                  onReviewModeChange?.("suggesting");
+                  setIsModeOpen(false);
+                }}
+              >
+                <MessageSquare size={14} style={{ marginRight: 6, color: "#2563eb" }} />
+                <span>Suggesting</span>
+              </button>
+              <button
+                className={`pdocs-tool-btn ${reviewMode === "viewing" ? "active" : ""}`}
+                style={{
+                  justifyContent: "flex-start",
+                  width: "100%",
+                  padding: "6px 8px",
+                  fontSize: "12px",
+                }}
+                onClick={() => {
+                  onReviewModeChange?.("viewing");
+                  setIsModeOpen(false);
+                }}
+              >
+                <Eye size={14} style={{ marginRight: 6, color: "#64748b" }} />
+                <span>Viewing</span>
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 };

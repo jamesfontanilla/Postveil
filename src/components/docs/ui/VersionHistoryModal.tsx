@@ -31,6 +31,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
   const [isNamingOpen, setIsNamingOpen] = useState(false);
   const [versionNameInput, setVersionNameInput] = useState("");
   const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null);
+  const [showDiff, setShowDiff] = useState(true);
 
   // Load versions from OPFS on open
   useEffect(() => {
@@ -133,6 +134,29 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: "12px",
+                color: "#475569",
+                cursor: "pointer",
+                padding: "6px 10px",
+                backgroundColor: showDiff ? "#f0fdf4" : "#f8fafc",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                userSelect: "none",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={showDiff}
+                onChange={(e) => setShowDiff(e.target.checked)}
+                style={{ accentColor: "#059669" }}
+              />
+              <span style={{ fontWeight: 600 }}>Show changes</span>
+            </label>
             <button
               onClick={() => setIsNamingOpen(!isNamingOpen)}
               style={{
@@ -281,22 +305,112 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
                 </h1>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                  {selectedSnapshot.doc.blocks.slice(0, 15).map((block) => (
-                    <div key={block.id} style={{ fontSize: "14px", lineHeight: 1.6, color: "#334155" }}>
-                      {block.type === "heading" ? (
-                        <strong style={{ fontSize: "16px", color: "#0f172a" }}>{block.content}</strong>
-                      ) : block.type === "mathBlock" ? (
-                        <div style={{ padding: "8px", background: "#f8fafc", borderRadius: "6px", fontFamily: "monospace" }}>
-                          LaTeX: {block.latex || block.content}
+                  {selectedSnapshot.doc.blocks.slice(0, 20).map((block) => {
+                    const currentMatch = currentDoc.blocks.find((b) => b.id === block.id);
+                    const isModified = currentMatch && currentMatch.content !== block.content;
+                    const isRemovedInCurrent = !currentMatch;
+
+                    return (
+                      <div
+                        key={block.id}
+                        style={{
+                          fontSize: "14px",
+                          lineHeight: 1.6,
+                          color: "#334155",
+                          padding: showDiff && (isModified || isRemovedInCurrent) ? "6px 10px" : "0",
+                          borderRadius: "6px",
+                          backgroundColor:
+                            showDiff && isRemovedInCurrent
+                              ? "#fef2f2"
+                              : showDiff && isModified
+                              ? "#fffbeb"
+                              : "transparent",
+                          borderLeft:
+                            showDiff && isRemovedInCurrent
+                              ? "3px solid #ef4444"
+                              : showDiff && isModified
+                              ? "3px solid #f59e0b"
+                              : "none",
+                        }}
+                      >
+                        {showDiff && isRemovedInCurrent && (
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              fontWeight: 700,
+                              color: "#dc2626",
+                              backgroundColor: "#fee2e2",
+                              padding: "2px 6px",
+                              borderRadius: "4px",
+                              marginRight: "6px",
+                            }}
+                          >
+                            REMOVED IN CURRENT
+                          </span>
+                        )}
+                        {showDiff && isModified && (
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              fontWeight: 700,
+                              color: "#b45309",
+                              backgroundColor: "#fef3c7",
+                              padding: "2px 6px",
+                              borderRadius: "4px",
+                              marginRight: "6px",
+                            }}
+                          >
+                            MODIFIED
+                          </span>
+                        )}
+                        {block.type === "heading" ? (
+                          <strong style={{ fontSize: "16px", color: "#0f172a" }}>{block.content}</strong>
+                        ) : block.type === "mathBlock" ? (
+                          <div style={{ padding: "8px", background: "#f8fafc", borderRadius: "6px", fontFamily: "monospace" }}>
+                            LaTeX: {block.latex || block.content}
+                          </div>
+                        ) : (
+                          block.content || <span style={{ color: "#94a3b8", fontStyle: "italic" }}>[{block.type} block]</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {showDiff &&
+                    currentDoc.blocks
+                      .filter((cb) => !selectedSnapshot.doc.blocks.some((sb) => sb.id === cb.id))
+                      .slice(0, 5)
+                      .map((newBlock) => (
+                        <div
+                          key={`added_${newBlock.id}`}
+                          style={{
+                            fontSize: "14px",
+                            lineHeight: 1.6,
+                            padding: "6px 10px",
+                            borderRadius: "6px",
+                            backgroundColor: "#f0fdf4",
+                            borderLeft: "3px solid #10b981",
+                            color: "#166534",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "10px",
+                              fontWeight: 700,
+                              color: "#059669",
+                              backgroundColor: "#d1fae5",
+                              padding: "2px 6px",
+                              borderRadius: "4px",
+                              marginRight: "6px",
+                            }}
+                          >
+                            + ADDED IN CURRENT
+                          </span>
+                          {newBlock.content || `[${newBlock.type}]`}
                         </div>
-                      ) : (
-                        block.content || <span style={{ color: "#94a3b8", fontStyle: "italic" }}>[{block.type} block]</span>
-                      )}
-                    </div>
-                  ))}
-                  {selectedSnapshot.doc.blocks.length > 15 && (
+                      ))}
+                  {selectedSnapshot.doc.blocks.length > 20 && (
                     <p style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic", textAlign: "center" }}>
-                      ... and {selectedSnapshot.doc.blocks.length - 15} more blocks
+                      ... and {selectedSnapshot.doc.blocks.length - 20} more blocks
                     </p>
                   )}
                 </div>

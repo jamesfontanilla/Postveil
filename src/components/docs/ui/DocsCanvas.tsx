@@ -37,9 +37,11 @@ import {
   Link2,
   Bookmark,
   ExternalLink,
+  MessageSquare,
 } from "lucide-react";
 import { DocsRuler } from "./DocsRuler";
 import { LlmPasteParser } from "../engine/LlmPasteParser";
+import { type ReviewMode } from "../types";
 
 interface DocsCanvasProps {
   doc: UniversalDoc;
@@ -62,6 +64,8 @@ interface DocsCanvasProps {
   onDeleteFootnote?: (id: string) => void;
   onUpdateHeaderFooter?: (headerText?: string, footerText?: string, differentFirstPage?: boolean, pageNumberStyle?: "standard" | "pageOfTotal" | "none") => void;
   onOpenHyperlinkModal?: (initialText?: string, initialUrl?: string) => void;
+  reviewMode?: ReviewMode;
+  onOpenNewCommentModal?: (blockId: string, quotedText?: string) => void;
 }
 
 // Paper dimensions in pixels at 96 DPI
@@ -138,6 +142,8 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   onDeleteFootnote,
   onUpdateHeaderFooter,
   onOpenHyperlinkModal,
+  reviewMode = "editing",
+  onOpenNewCommentModal,
 }) => {
   // Equation Editor state
   const [editingMathBlockId, setEditingMathBlockId] = useState<string | null>(null);
@@ -470,6 +476,43 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                     onRefreshToc: () => setTocTicker((prev) => prev + 1),
                   })}
 
+                  {/* Active Comment Indicator Pill */}
+                  {(() => {
+                    const blockComments = (doc.metadata.comments || []).filter(
+                      (c) => c.blockId === block.id && !c.resolved
+                    );
+                    if (blockComments.length === 0) return null;
+                    return (
+                      <div
+                        onClick={() => {
+                          onOpenNewCommentModal?.(block.id, (block.content || "").slice(0, 50));
+                        }}
+                        title={`${blockComments.length} active comment(s). Click to view.`}
+                        style={{
+                          position: "absolute",
+                          right: "-32px",
+                          top: "4px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 3,
+                          backgroundColor: "#eff6ff",
+                          border: "1px solid #bfdbfe",
+                          color: "#1d4ed8",
+                          borderRadius: "999px",
+                          padding: "2px 6px",
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          boxShadow: "0 1px 3px rgba(37,99,235,0.12)",
+                          userSelect: "none",
+                        }}
+                      >
+                        <MessageSquare size={10} />
+                        <span>{blockComments.length}</span>
+                      </div>
+                    );
+                  })()}
+
                   {/* Hover Quick Actions (strictly hidden until row hover) */}
                   <div className="hover-action-tools">
                     <button
@@ -496,6 +539,16 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                       className="pdocs-block-add-btn"
                     >
                       <Link2 size={13} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        const sel = window.getSelection()?.toString() || "";
+                        onOpenNewCommentModal?.(block.id, sel || (block.content || "").slice(0, 50));
+                      }}
+                      title="Add comment (Ctrl+Alt+M)"
+                      className="pdocs-block-add-btn"
+                    >
+                      <MessageSquare size={13} color="#2563eb" />
                     </button>
                     {doc.blocks.length > 1 && (
                       <button

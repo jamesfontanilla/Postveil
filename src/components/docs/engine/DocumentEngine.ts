@@ -1,4 +1,12 @@
-import { type UniversalDoc, type DocBlock, type BlockType, type CalloutVariant } from "../types";
+import {
+  type UniversalDoc,
+  type DocBlock,
+  type BlockType,
+  type CalloutVariant,
+  type DocComment,
+  type DocSuggestion,
+  type CryptographicSignature,
+} from "../types";
 
 export interface DocOutlineItem {
   id: string;
@@ -325,6 +333,123 @@ export class DocumentEngine {
     if (footerText !== undefined) this.doc.metadata.footerText = footerText;
     if (differentFirstPage !== undefined) this.doc.metadata.differentFirstPage = differentFirstPage;
     if (pageNumberStyle !== undefined) this.doc.metadata.pageNumberStyle = pageNumberStyle;
+    this.pushHistory();
+  }
+
+  public addComment(
+    blockId: string,
+    text: string,
+    author: string,
+    authorEmail?: string,
+    quotedText?: string
+  ): DocComment {
+    if (!this.doc.metadata.comments) this.doc.metadata.comments = [];
+    const comment: DocComment = {
+      id: `c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      blockId,
+      quotedText,
+      author,
+      authorEmail,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" }),
+      text,
+      resolved: false,
+      replies: [],
+    };
+    this.doc.metadata.comments.push(comment);
+    this.pushHistory();
+    return comment;
+  }
+
+  public addCommentReply(commentId: string, text: string, author: string, authorEmail?: string) {
+    if (!this.doc.metadata.comments) return;
+    const c = this.doc.metadata.comments.find((item) => item.id === commentId);
+    if (c) {
+      c.replies.push({
+        id: `r_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        author,
+        authorEmail,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" }),
+        text,
+      });
+      this.pushHistory();
+    }
+  }
+
+  public resolveComment(commentId: string) {
+    if (!this.doc.metadata.comments) return;
+    const c = this.doc.metadata.comments.find((item) => item.id === commentId);
+    if (c) {
+      c.resolved = !c.resolved;
+      this.pushHistory();
+    }
+  }
+
+  public deleteComment(commentId: string) {
+    if (!this.doc.metadata.comments) return;
+    this.doc.metadata.comments = this.doc.metadata.comments.filter((item) => item.id !== commentId);
+    this.pushHistory();
+  }
+
+  public addSuggestion(
+    blockId: string,
+    type: "insert" | "delete" | "replace",
+    suggestedText: string,
+    originalText: string = "",
+    author: string = "Reviewer",
+    authorEmail?: string
+  ): DocSuggestion {
+    if (!this.doc.metadata.suggestions) this.doc.metadata.suggestions = [];
+    const suggestion: DocSuggestion = {
+      id: `s_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      blockId,
+      author,
+      authorEmail,
+      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" }),
+      type,
+      originalText,
+      suggestedText,
+      status: "pending",
+    };
+    this.doc.metadata.suggestions.push(suggestion);
+    this.pushHistory();
+    return suggestion;
+  }
+
+  public acceptSuggestion(suggestionId: string) {
+    if (!this.doc.metadata.suggestions) return;
+    const s = this.doc.metadata.suggestions.find((item) => item.id === suggestionId);
+    if (!s) return;
+
+    const block = this.doc.blocks.find((b) => b.id === s.blockId);
+    if (block) {
+      if (s.type === "insert") {
+        block.content = block.content ? `${block.content} ${s.suggestedText}` : s.suggestedText;
+      } else if (s.type === "delete" && s.originalText) {
+        block.content = (block.content || "").replace(s.originalText, "");
+      } else if (s.type === "replace") {
+        if (s.originalText && (block.content || "").includes(s.originalText)) {
+          block.content = (block.content || "").replace(s.originalText, s.suggestedText);
+        } else {
+          block.content = s.suggestedText;
+        }
+      }
+    }
+    s.status = "accepted";
+    this.pushHistory();
+  }
+
+  public rejectSuggestion(suggestionId: string) {
+    if (!this.doc.metadata.suggestions) return;
+    const s = this.doc.metadata.suggestions.find((item) => item.id === suggestionId);
+    if (s) {
+      s.status = "rejected";
+      this.pushHistory();
+    }
+  }
+
+  public addSignature(sig: CryptographicSignature) {
+    if (!this.doc.metadata.signatures) this.doc.metadata.signatures = [];
+    this.doc.metadata.signatures.push(sig);
     this.pushHistory();
   }
 }
