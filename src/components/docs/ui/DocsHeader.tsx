@@ -23,6 +23,7 @@ import {
   Link2,
   Bookmark,
   MessageSquare,
+  Menu,
 } from "lucide-react";
 import BrandMark from "../../BrandMark";
 import { WaffleLauncher } from "../../accounts/WaffleLauncher";
@@ -732,14 +733,15 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
       {/* Right: Actions, View Modes, Profile Popover */}
       <div className="pdocs-header-right">
         {/* View mode toggle */}
-        <div style={{ display: "flex", backgroundColor: "#f1f5f9", borderRadius: "10px", padding: "2px" }}>
+        <div className="pdocs-view-toggle-group">
           <button
             className={`pdocs-tool-btn ${viewMode === "paginated" ? "active" : ""}`}
             onClick={() => onViewModeChange("paginated")}
             title="Paginated Print View (Letter/A4)"
             style={{ fontSize: "12px", height: "28px" }}
           >
-            Pages
+            <Layers size={13} className="pdocs-view-mode-icon" />
+            <span className="pdocs-view-mode-label">Pages</span>
           </button>
           <button
             className={`pdocs-tool-btn ${viewMode === "continuous" ? "active" : ""}`}
@@ -747,7 +749,8 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
             title="Continuous Flow Web Canvas"
             style={{ fontSize: "12px", height: "28px" }}
           >
-            Flow
+            <Eye size={13} className="pdocs-view-mode-icon" />
+            <span className="pdocs-view-mode-label">Flow</span>
           </button>
           <button
             className={`pdocs-tool-btn ${viewMode === "markdown" ? "active" : ""}`}
@@ -755,18 +758,19 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
             title="Markdown Source Split View"
             style={{ fontSize: "12px", height: "28px" }}
           >
-            Markdown
+            <FileCode size={13} className="pdocs-view-mode-icon" />
+            <span className="pdocs-view-mode-label">Markdown</span>
           </button>
         </div>
 
-        <button className="pdocs-btn-secondary" onClick={onOpenImport} title="Import from DOCX, ODT, MD, HTML">
+        <button className="pdocs-btn-secondary pdocs-header-btn-import" onClick={onOpenImport} title="Import from DOCX, ODT, MD, HTML">
           <Upload size={15} />
-          Import
+          <span className="pdocs-btn-text">Import</span>
         </button>
 
-        <button className="pdocs-btn-export" onClick={onOpenExport} title="Export to 10 Formats">
+        <button className="pdocs-btn-export pdocs-header-btn-export" onClick={onOpenExport} title="Export to 10 Formats">
           <Download size={15} />
-          Export As
+          <span className="pdocs-btn-text">Export As</span>
         </button>
 
         {/* User Profile Avatar */}

@@ -48,8 +48,13 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [doc, setDoc] = useState<UniversalDoc>(() => UniversalFormatEngine.createDemoDocument());
   const engineRef = useRef<DocumentEngine>(new DocumentEngine(doc));
 
-  const [viewMode, setViewMode] = useState<"paginated" | "continuous" | "markdown">("paginated");
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // On mobile (<768px), default to continuous flow mode and collapsed sidebar for ergonomic reading
+  const isMobileInitial = typeof window !== "undefined" && window.innerWidth < 768;
+  const isTabletInitial = typeof window !== "undefined" && window.innerWidth < 1024;
+  const [viewMode, setViewMode] = useState<"paginated" | "continuous" | "markdown">(
+    isMobileInitial ? "continuous" : "paginated"
+  );
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(isTabletInitial);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState<SupportedFormat>("docx");
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -576,10 +581,19 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
           onOpenNewCommentModal={() => handleOpenNewCommentModal()}
         />
 
+        {/* Mobile Scrim Backdrop for Sidebar drawer */}
+        {!isSidebarCollapsed && (
+          <div
+            className="pdocs-sidebar-scrim"
+            onClick={() => setIsSidebarCollapsed(true)}
+            aria-label="Close sidebar drawer"
+          />
+        )}
+
         {/* Editing Canvas or Markdown Split */}
         {viewMode === "markdown" ? (
-          <div style={{ flex: 1, display: "flex", height: "100%", backgroundColor: "#ffffff" }}>
-            <div style={{ flex: 1, borderRight: "1px solid #e2e8f0", padding: "16px", overflowY: "auto" }}>
+          <div className="pdocs-markdown-split">
+            <div className="pdocs-markdown-editor-pane">
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: 8, textTransform: "uppercase" }}>
                 Markdown Source (CommonMark / GFM)
               </div>
@@ -604,7 +618,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 }}
               />
             </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+            <div className="pdocs-markdown-preview-pane">
               <div style={{ fontSize: "11px", fontWeight: 700, color: "#0f5132", marginBottom: 8, textTransform: "uppercase" }}>
                 Live Document AST Preview
               </div>
