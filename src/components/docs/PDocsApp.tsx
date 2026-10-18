@@ -27,6 +27,7 @@ import { VersionHistoryModal } from "./ui/VersionHistoryModal";
 import { HyperlinkModal } from "./ui/HyperlinkModal";
 import { CryptographicSignatureModal } from "./ui/CryptographicSignatureModal";
 import { NewCommentModal } from "./ui/NewCommentModal";
+import { prewarmTopFonts, ensureFontLoaded } from "./engine/FontCatalog";
 
 interface PDocsAppProps {
   onBackToMail: () => void;
@@ -66,12 +67,13 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [hyperlinkInitialUrl, setHyperlinkInitialUrl] = useState("");
   const [showRuler, setShowRuler] = useState(true);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
-  const [fontFamily, setFontFamily] = useState<"Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono">("Schibsted Grotesk");
+  const [fontFamily, setFontFamily] = useState<string>("Schibsted Grotesk");
   const [fontSize, setFontSize] = useState(15);
   const [markdownSource, setMarkdownSource] = useState("");
 
-  // Restore active document from OPFS on mount
+  // Restore active document from OPFS on mount and prewarm fonts
   useEffect(() => {
+    prewarmTopFonts();
     void (async () => {
       const activeId = OpfsDocStorage.getActiveDocumentId();
       if (activeId) {
@@ -79,6 +81,10 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         if (loaded) {
           engineRef.current.setDocument(loaded);
           setDoc(loaded);
+          if (loaded.metadata?.fontFamily) {
+            setFontFamily(loaded.metadata.fontFamily);
+            void ensureFontLoaded(loaded.metadata.fontFamily);
+          }
         }
       }
     })();
@@ -514,6 +520,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         fontFamily={fontFamily}
         onFontFamilyChange={(f) => {
           setFontFamily(f);
+          engineRef.current.updateFontFamily(f);
           setDoc((prev) => ({
             ...prev,
             metadata: { ...prev.metadata, fontFamily: f },

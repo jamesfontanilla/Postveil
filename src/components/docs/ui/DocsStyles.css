@@ -260,6 +260,21 @@
   cursor: pointer;
 }
 
+/* Font Picker Dropdown & Items */
+.pdocs-font-picker-wrapper {
+  position: relative;
+  z-index: 105;
+}
+
+.pdocs-font-trigger:hover {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+.pdocs-font-item:hover {
+  background-color: #f1f5f9 !important;
+}
+
 /* Workspace Layout */
 .pdocs-workspace {
   display: flex;

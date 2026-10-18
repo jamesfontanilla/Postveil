@@ -206,7 +206,7 @@ export const htmlCodec: DocumentCodec = {
       }
     }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Schibsted Grotesk", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: "${escapeHtml(doc.metadata.fontFamily || "Schibsted Grotesk")}", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       max-width: 820px;
       margin: 40px auto;
       padding: 0 24px;

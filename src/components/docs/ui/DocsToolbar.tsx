@@ -50,6 +50,8 @@ import {
   type MarginPreset,
   type ReviewMode,
 } from "../types";
+import { FontPicker } from "./FontPicker";
+import { ensureFontLoaded } from "../engine/FontCatalog";
 
 interface DocsToolbarProps {
   canUndo: boolean;
@@ -59,7 +61,7 @@ interface DocsToolbarProps {
   onPrint: () => void;
   onInsertBlock: (type: BlockType) => void;
   fontFamily: string;
-  onFontFamilyChange: (font: "Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono") => void;
+  onFontFamilyChange: (font: string) => void;
   fontSize: number;
   onFontSizeChange: (delta: number) => void;
   lineSpacing?: "1.0" | "1.15" | "1.5" | "2.0";
@@ -234,18 +236,20 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         <option value="code">Code Block</option>
       </select>
 
-      {/* Font Family */}
-      <select
-        className="pdocs-select"
-        value={fontFamily}
-        onChange={(e) => onFontFamilyChange(e.target.value as any)}
-        title="Font Family"
-      >
-        <option value="Schibsted Grotesk">Schibsted Grotesk (Default)</option>
-        <option value="Inter">Inter</option>
-        <option value="Merriweather">Merriweather (Serif)</option>
-        <option value="JetBrains Mono">JetBrains Mono (Code)</option>
-      </select>
+      {/* Font Family Rich Picker with Live Typography Preview */}
+      <FontPicker
+        currentFont={fontFamily}
+        onSelectFont={(font) => {
+          void ensureFontLoaded(font);
+          onFontFamilyChange(font);
+          // Also apply font to selected text in contenteditable if selection exists
+          try {
+            document.execCommand("fontName", false, font);
+          } catch (_) {
+            // Ignore if no selection active
+          }
+        }}
+      />
 
       {/* Font Size */}
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>

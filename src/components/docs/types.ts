@@ -30,7 +30,7 @@ export type BlockType =
 export type CalloutVariant = "note" | "tip" | "info" | "warning" | "danger";
 
 export interface InlineMark {
-  type: "bold" | "italic" | "underline" | "strike" | "code" | "highlight" | "link" | "sub" | "sup";
+  type: "bold" | "italic" | "underline" | "strike" | "code" | "highlight" | "link" | "sub" | "sup" | "font";
   value?: string;
 }
 
@@ -99,7 +99,7 @@ export interface DocumentMetadata {
   columnSpacing?: number; // in inches, default 0.5
   columnDivider?: boolean;
   lineSpacing: "1.0" | "1.15" | "1.5" | "2.0";
-  fontFamily: "Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono";
+  fontFamily: string;
   fontSize: number; // in px or pt
   isEncrypted: boolean;
   authorKeyId?: string;

@@ -191,6 +191,12 @@ export class DocumentEngine {
     this.pushHistory();
   }
 
+  public updateFontFamily(fontFamily: string) {
+    this.doc.metadata.fontFamily = fontFamily;
+    this.doc.metadata.updatedAt = new Date().toISOString();
+    this.pushHistory();
+  }
+
   public changeBlockType(id: string, newType: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) {
     const attrs: Partial<DocBlock> = { type: newType };
     if (newType === "heading") {

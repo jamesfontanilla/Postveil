@@ -65,12 +65,12 @@ export class SovereignSchema {
       paragraph: {
         isBlock: true,
         isInline: false,
-        allowedMarks: ["bold", "italic", "underline", "strike", "code", "highlight", "link", "sub", "sup"],
+        allowedMarks: ["bold", "italic", "underline", "strike", "code", "highlight", "link", "sub", "sup", "font"],
       },
       heading: {
         isBlock: true,
         isInline: false,
-        allowedMarks: ["bold", "italic", "underline", "strike", "highlight", "link"],
+        allowedMarks: ["bold", "italic", "underline", "strike", "highlight", "link", "font"],
         defaultAttrs: { level: 2 },
       },
       bulletList: { isBlock: true, isInline: false },
@@ -121,6 +121,7 @@ export class SovereignSchema {
       link: { inclusive: false },
       sub: { inclusive: true },
       sup: { inclusive: true },
+      font: { inclusive: true },
     };
   }
 
