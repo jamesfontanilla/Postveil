@@ -27,8 +27,16 @@ import {
   Edit2,
   X,
   Check,
+  Scissors,
+  RotateCw,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Image as ImageIcon,
+  ListTree,
 } from "lucide-react";
 import { DocsRuler } from "./DocsRuler";
+import { LlmPasteParser } from "../engine/LlmPasteParser";
 
 interface DocsCanvasProps {
   doc: UniversalDoc;
@@ -43,6 +51,9 @@ interface DocsCanvasProps {
   onUpdateTableRows?: (blockId: string, rows: TableRow[]) => void;
   onUpdateCallout?: (blockId: string, variant?: CalloutVariant, title?: string) => void;
   onUpdateMathLatex?: (blockId: string, latex: string) => void;
+  onInsertBlocksAfter?: (afterId: string, blocks: DocBlock[]) => void;
+  onUpdateImage?: (blockId: string, url: string, alt?: string, width?: string, align?: "left" | "center" | "right") => void;
+  onUpdateToc?: (blockId: string, style: "dotted" | "links") => void;
 }
 
 // Paper dimensions in pixels at 96 DPI
@@ -87,6 +98,12 @@ function estimateBlockHeight(block: DocBlock): number {
       return 35;
     case "pageBreak":
       return 0; // Page break forces new page
+    case "columnBreak":
+      return 0; // Column break forces column break
+    case "image":
+      return 260;
+    case "toc":
+      return 150;
     default:
       return 40;
   }
@@ -105,10 +122,15 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   onUpdateTableRows,
   onUpdateCallout,
   onUpdateMathLatex,
+  onInsertBlocksAfter,
+  onUpdateImage,
+  onUpdateToc,
 }) => {
   // Equation Editor state
   const [editingMathBlockId, setEditingMathBlockId] = useState<string | null>(null);
   const [mathLatexInput, setMathLatexInput] = useState("");
+  // TOC refresh ticker to trigger re-index
+  const [, setTocTicker] = useState(0);
 
   const paperSize = doc.metadata.paperSize || "A4";
   const orientation = doc.metadata.orientation || "portrait";
@@ -132,8 +154,10 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       return [doc.blocks];
     }
 
+    const colCount = doc.metadata.columns || 1;
     // Height budget: distance between top margin and bottom margin, with 16px safety buffer
-    const usableHeight = dim.height - topMarginPx - bottomMarginPx - 16;
+    // Multiplied by column count for multi-column documents so columns flow naturally
+    const usableHeight = (dim.height - topMarginPx - bottomMarginPx - 16) * colCount;
     const result: DocBlock[][] = [];
     let currentPage: DocBlock[] = [];
     let currentHeight = 0;
@@ -202,11 +226,35 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
     setEditingMathBlockId(null);
   };
 
+  const handlePaste = (e: React.ClipboardEvent, block: DocBlock) => {
+    const text = e.clipboardData.getData("text/plain");
+    const html = e.clipboardData.getData("text/html");
+
+    if (LlmPasteParser.isLlmContent(text, html)) {
+      e.preventDefault();
+      const parsed = LlmPasteParser.parseToBlocks(text, html);
+      if (onInsertBlocksAfter) {
+        onInsertBlocksAfter(block.id, parsed);
+      } else {
+        let lastId = block.id;
+        for (const pBlock of parsed) {
+          onInsertBlockAfter(lastId, pBlock.type);
+          lastId = pBlock.id;
+        }
+      }
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>, block: DocBlock) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      // Ctrl+Enter or Cmd+Enter: Insert Page Break directly at caret!
       e.preventDefault();
-      onInsertBlockAfter(block.id, "pageBreak");
+      if (e.shiftKey) {
+        // Ctrl+Shift+Enter or Cmd+Shift+Enter: Insert Column Break!
+        onInsertBlockAfter(block.id, "columnBreak");
+      } else {
+        // Ctrl+Enter or Cmd+Enter: Insert Page Break directly at caret!
+        onInsertBlockAfter(block.id, "pageBreak");
+      }
       return;
     }
 
@@ -316,6 +364,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
             {/* Page Body (strictly bounded within the top, bottom, left, and right margins) */}
             <div
               className="pdocs-page-body"
+              data-columns={doc.metadata.columns || 1}
               style={{
                 position: isContinuous ? "static" : "absolute",
                 top: isContinuous ? "auto" : `${topMarginPx}px`,
@@ -324,20 +373,28 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                 right: isContinuous ? "auto" : `${rightMarginPx}px`,
                 overflow: isContinuous ? "visible" : "hidden",
                 boxSizing: "border-box",
+                columnCount: doc.metadata.columns && doc.metadata.columns > 1 ? doc.metadata.columns : undefined,
+                columnGap: doc.metadata.columns && doc.metadata.columns > 1 ? `${(doc.metadata.columnSpacing || 0.5) * 72}px` : undefined,
+                columnRule: doc.metadata.columnDivider ? "1px solid #cbd5e1" : undefined,
               }}
             >
               {pageBlocks.map((block) => (
-                <div key={block.id} id={block.id} className="pdocs-block-row group">
+                <div key={block.id} id={block.id} className="pdocs-block-row group" style={{ breakInside: "avoid" }}>
                   {renderBlock({
                     block,
+                    allBlocks: doc.blocks,
                     onUpdate: onUpdateBlockContent,
                     onToggleTask,
                     onKeyDown: (e) => handleKeyDown(e, block),
+                    onPaste: (e) => handlePaste(e, block),
                     onOpenMathEditor: () =>
                       handleOpenMathEditor(block.id, block.latex || block.content || ""),
                     onUpdateTableRows,
                     onUpdateCallout,
                     onDeleteBlock,
+                    onUpdateImage,
+                    onUpdateToc,
+                    onRefreshToc: () => setTocTicker((prev) => prev + 1),
                   })}
 
                   {/* Hover Quick Actions (strictly hidden until row hover) */}
@@ -556,24 +613,34 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
 
 interface RenderBlockParams {
   block: DocBlock;
+  allBlocks: DocBlock[];
   onUpdate: (id: string, text: string) => void;
   onToggleTask: (id: string) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+  onPaste?: (e: React.ClipboardEvent) => void;
   onOpenMathEditor: () => void;
   onUpdateTableRows?: (blockId: string, rows: TableRow[]) => void;
   onUpdateCallout?: (blockId: string, variant?: CalloutVariant, title?: string) => void;
   onDeleteBlock?: (blockId: string) => void;
+  onUpdateImage?: (blockId: string, url: string, alt?: string, width?: string, align?: "left" | "center" | "right") => void;
+  onUpdateToc?: (blockId: string, style: "dotted" | "links") => void;
+  onRefreshToc?: () => void;
 }
 
 function renderBlock({
   block,
+  allBlocks,
   onUpdate,
   onToggleTask,
   onKeyDown,
+  onPaste,
   onOpenMathEditor,
   onUpdateTableRows,
   onUpdateCallout,
   onDeleteBlock,
+  onUpdateImage,
+  onUpdateToc,
+  onRefreshToc,
 }: RenderBlockParams) {
   switch (block.type) {
     case "heading": {
@@ -586,6 +653,7 @@ function renderBlock({
           className={`pdocs-block-content ${cls}`}
           onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           data-placeholder="Heading..."
         >
           {block.content}
@@ -601,7 +669,8 @@ function renderBlock({
           className="pdocs-block-content pdocs-paragraph"
           onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "")}
           onKeyDown={onKeyDown}
-          data-placeholder="Type '/' or click toolbar to insert content..."
+          onPaste={onPaste}
+          data-placeholder="Type '/' or paste text/math/code from chatbot..."
         >
           {block.content}
         </div>
@@ -947,6 +1016,291 @@ function renderBlock({
             )}
           </div>
           <div className="pdocs-page-break-line" />
+        </div>
+      );
+    }
+
+    case "columnBreak": {
+      return (
+        <div className="pdocs-column-break-indicator" style={{ breakAfter: "column" }}>
+          <div className="pdocs-column-break-line" />
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              background: "#eff6ff",
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "1px dashed #60a5fa",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+              userSelect: "none",
+            }}
+          >
+            <Scissors size={12} color="#2563eb" />
+            <span
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                color: "#1d4ed8",
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+              }}
+            >
+              Column Break
+            </span>
+            {onDeleteBlock && (
+              <button
+                onClick={() => onDeleteBlock(block.id)}
+                title="Remove Column Break"
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "2px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  color: "#dc2626",
+                  borderRadius: "3px",
+                }}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <div className="pdocs-column-break-line" />
+        </div>
+      );
+    }
+
+    case "image": {
+      const width = block.imageWidth || "100%";
+      const align = block.imageAlign || "center";
+      const alignJustify = align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center";
+
+      return (
+        <div
+          className="pdocs-image-block"
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: alignJustify,
+            width: "100%",
+            margin: "14px 0",
+            position: "relative",
+          }}
+        >
+          {/* Image Toolbar on Hover / Focus */}
+          <div className="pdocs-image-toolbar">
+            <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", marginRight: 4 }}>
+              Width:
+            </span>
+            {(["25%", "50%", "75%", "100%"] as const).map((w) => (
+              <button
+                key={w}
+                className={`pdocs-image-btn ${width === w ? "active" : ""}`}
+                onClick={() => onUpdateImage?.(block.id, block.imageUrl || "", block.imageAlt, w, align)}
+              >
+                {w}
+              </button>
+            ))}
+            <div style={{ width: 1, height: 16, background: "#cbd5e1", margin: "0 4px" }} />
+            <span style={{ fontSize: "11px", fontWeight: 600, color: "#64748b", marginRight: 4 }}>
+              Align:
+            </span>
+            <button
+              className={`pdocs-image-btn ${align === "left" ? "active" : ""}`}
+              onClick={() => onUpdateImage?.(block.id, block.imageUrl || "", block.imageAlt, width, "left")}
+              title="Align Left"
+            >
+              <AlignLeft size={13} />
+            </button>
+            <button
+              className={`pdocs-image-btn ${align === "center" ? "active" : ""}`}
+              onClick={() => onUpdateImage?.(block.id, block.imageUrl || "", block.imageAlt, width, "center")}
+              title="Align Center"
+            >
+              <AlignCenter size={13} />
+            </button>
+            <button
+              className={`pdocs-image-btn ${align === "right" ? "active" : ""}`}
+              onClick={() => onUpdateImage?.(block.id, block.imageUrl || "", block.imageAlt, width, "right")}
+              title="Align Right"
+            >
+              <AlignRight size={13} />
+            </button>
+            {onDeleteBlock && (
+              <>
+                <div style={{ width: 1, height: 16, background: "#cbd5e1", margin: "0 4px" }} />
+                <button
+                  className="pdocs-image-btn pdocs-image-btn-danger"
+                  onClick={() => onDeleteBlock(block.id)}
+                  title="Delete Image"
+                >
+                  <X size={13} />
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Rendered Image */}
+          <div
+            style={{
+              width,
+              maxWidth: "100%",
+              borderRadius: "6px",
+              overflow: "hidden",
+              border: "1px solid #e2e8f0",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
+              background: "#f8fafc",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            {block.imageUrl ? (
+              <img
+                src={block.imageUrl}
+                alt={block.imageAlt || "Uploaded image"}
+                style={{
+                  width: "100%",
+                  height: "auto",
+                  display: "block",
+                  objectFit: "contain",
+                }}
+              />
+            ) : (
+              <div style={{ padding: "32px", textAlign: "center", color: "#94a3b8" }}>
+                <ImageIcon size={32} style={{ margin: "0 auto 8px" }} />
+                <p style={{ margin: 0, fontSize: "12px" }}>No image data available</p>
+              </div>
+            )}
+          </div>
+
+          {/* Caption */}
+          <div
+            contentEditable
+            suppressContentEditableWarning
+            className="pdocs-image-caption"
+            style={{
+              fontSize: "12px",
+              color: "#64748b",
+              fontStyle: "italic",
+              marginTop: "6px",
+              textAlign: align,
+              width,
+              outline: "none",
+            }}
+            data-placeholder="Add caption..."
+            onBlur={(e) =>
+              onUpdateImage?.(block.id, block.imageUrl || "", e.currentTarget.textContent || "", width, align)
+            }
+          >
+            {block.imageAlt || block.content || ""}
+          </div>
+        </div>
+      );
+    }
+
+    case "toc": {
+      const style = block.tocStyle || "dotted";
+      // Find all headings from allBlocks
+      const headings = allBlocks.filter((b) => b.type === "heading" && b.content?.trim());
+
+      const handleScrollToHeading = (headingId: string) => {
+        const el = document.getElementById(headingId);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      };
+
+      return (
+        <div className="pdocs-toc-card">
+          <div className="pdocs-toc-header">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <ListTree size={16} color="#0f766e" />
+              <span className="pdocs-toc-title">Table of contents</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {/* Style selector */}
+              <div className="pdocs-toc-style-toggle">
+                <button
+                  className={`pdocs-toc-style-btn ${style === "dotted" ? "active" : ""}`}
+                  onClick={() => onUpdateToc?.(block.id, "dotted")}
+                  title="With page numbers and dotted leaders"
+                >
+                  Numbers
+                </button>
+                <button
+                  className={`pdocs-toc-style-btn ${style === "links" ? "active" : ""}`}
+                  onClick={() => onUpdateToc?.(block.id, "links")}
+                  title="Blue hyperlink style"
+                >
+                  Links
+                </button>
+              </div>
+
+              {/* Refresh button */}
+              <button
+                className="pdocs-toc-action-btn"
+                onClick={onRefreshToc}
+                title="Update table of contents (↺)"
+              >
+                <RotateCw size={13} />
+              </button>
+
+              {/* Delete button */}
+              {onDeleteBlock && (
+                <button
+                  className="pdocs-toc-action-btn pdocs-toc-action-delete"
+                  onClick={() => onDeleteBlock(block.id)}
+                  title="Delete Table of contents"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="pdocs-toc-entries">
+            {headings.length === 0 ? (
+              <p style={{ margin: 0, fontSize: "12px", color: "#94a3b8", fontStyle: "italic", padding: "8px 0" }}>
+                Add headings (H1, H2, H3) to automatically build the table of contents.
+              </p>
+            ) : (
+              headings.map((h, idx) => {
+                const level = h.level || 1;
+                const indentPx = level === 1 ? 0 : level === 2 ? 16 : 28;
+
+                if (style === "links") {
+                  return (
+                    <div
+                      key={h.id}
+                      className="pdocs-toc-item pdocs-toc-item-link"
+                      style={{ paddingLeft: `${indentPx}px` }}
+                      onClick={() => handleScrollToHeading(h.id)}
+                    >
+                      <span className="pdocs-toc-link-text">{h.content}</span>
+                    </div>
+                  );
+                }
+
+                // Dotted leader style
+                return (
+                  <div
+                    key={h.id}
+                    className="pdocs-toc-item pdocs-toc-item-dotted"
+                    style={{ paddingLeft: `${indentPx}px` }}
+                    onClick={() => handleScrollToHeading(h.id)}
+                  >
+                    <span className="pdocs-toc-label">{h.content}</span>
+                    <span className="pdocs-toc-dots" />
+                    <span className="pdocs-toc-page-num">{idx + 1}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       );
     }

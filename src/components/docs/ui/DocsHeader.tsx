@@ -43,6 +43,9 @@ interface DocsHeaderProps {
   onOpenFindReplace?: () => void;
   showRuler?: boolean;
   onToggleRuler?: () => void;
+  columns?: 1 | 2 | 3;
+  columnDivider?: boolean;
+  onColumnsChange?: (columns: 1 | 2 | 3, spacing?: number, divider?: boolean) => void;
   userEmail?: string;
   userName?: string;
 }
@@ -66,6 +69,9 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
   onOpenFindReplace,
   showRuler = true,
   onToggleRuler,
+  columns = 1,
+  columnDivider = false,
+  onColumnsChange,
   userEmail = "user@postveil.app",
   userName = "Postveil Creator",
 }) => {
@@ -423,11 +429,31 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                       className="pdocs-tool-btn"
                       style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
                       onClick={() => {
+                        onInsertBlock?.("toc");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Table of contents
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onInsertBlock?.("columnBreak");
+                        setActiveMenu(null);
+                      }}
+                    >
+                      Column Break (Ctrl+Shift+Enter)
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
                         onInsertBlock?.("pageBreak");
                         setActiveMenu(null);
                       }}
                     >
-                      Page Break (New Sheet)
+                      Page Break (Ctrl+Enter)
                     </button>
                     <button
                       className="pdocs-tool-btn"
@@ -478,6 +504,90 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                       }}
                     >
                       Horizontal Line
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Format Menu */}
+            <div style={{ position: "relative" }}>
+              <button
+                className="pdocs-menu-item"
+                onClick={() => setActiveMenu(activeMenu === "format" ? null : "format")}
+              >
+                Format
+              </button>
+              {activeMenu === "format" && (
+                <>
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 120 }}
+                    onClick={() => setActiveMenu(null)}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "24px",
+                      left: 0,
+                      backgroundColor: "#ffffff",
+                      borderRadius: "10px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "6px",
+                      minWidth: "200px",
+                      zIndex: 130,
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                    }}
+                  >
+                    <div style={{ padding: "6px 12px", fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase" }}>
+                      Columns
+                    </div>
+                    <button
+                      className={`pdocs-tool-btn ${columns === 1 ? "active" : ""}`}
+                      style={{ justifyContent: "space-between", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onColumnsChange?.(1, undefined, columnDivider);
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <span>1 Column (Standard)</span>
+                      {columns === 1 && <Check size={14} color="#0f5132" />}
+                    </button>
+                    <button
+                      className={`pdocs-tool-btn ${columns === 2 ? "active" : ""}`}
+                      style={{ justifyContent: "space-between", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onColumnsChange?.(2, 0.5, columnDivider);
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <span>2 Columns (Dual)</span>
+                      {columns === 2 && <Check size={14} color="#0f5132" />}
+                    </button>
+                    <button
+                      className={`pdocs-tool-btn ${columns === 3 ? "active" : ""}`}
+                      style={{ justifyContent: "space-between", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onColumnsChange?.(3, 0.5, columnDivider);
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <span>3 Columns (Newspaper)</span>
+                      {columns === 3 && <Check size={14} color="#0f5132" />}
+                    </button>
+                    <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "space-between", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onColumnsChange?.(columns, 0.5, !columnDivider);
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <span>Line between columns</span>
+                      {columnDivider && <Check size={14} color="#0f5132" />}
                     </button>
                   </div>
                 </>

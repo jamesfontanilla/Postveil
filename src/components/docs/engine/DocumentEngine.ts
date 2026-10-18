@@ -128,6 +128,51 @@ export class DocumentEngine {
     }
   }
 
+  public insertBlocksAfter(afterId: string, newBlocks: DocBlock[]): DocBlock[] {
+    const index = this.doc.blocks.findIndex((b) => b.id === afterId);
+    if (index >= 0) {
+      this.doc.blocks.splice(index + 1, 0, ...newBlocks);
+    } else {
+      this.doc.blocks.push(...newBlocks);
+    }
+    this.recalculateStats();
+    this.pushHistory();
+    return newBlocks;
+  }
+
+  public updateColumns(columns: 1 | 2 | 3, spacing = 0.5, divider = false) {
+    this.doc.metadata.columns = columns;
+    this.doc.metadata.columnSpacing = spacing;
+    this.doc.metadata.columnDivider = divider;
+    this.doc.metadata.updatedAt = new Date().toISOString();
+    this.pushHistory();
+  }
+
+  public updateImage(
+    blockId: string,
+    imageUrl: string,
+    imageAlt?: string,
+    imageWidth?: string,
+    imageAlign?: "left" | "center" | "right"
+  ) {
+    const block = this.doc.blocks.find((b) => b.id === blockId);
+    if (block) {
+      block.imageUrl = imageUrl;
+      if (imageAlt !== undefined) block.imageAlt = imageAlt;
+      if (imageWidth !== undefined) block.imageWidth = imageWidth;
+      if (imageAlign !== undefined) block.imageAlign = imageAlign;
+      this.pushHistory();
+    }
+  }
+
+  public updateTocStyle(blockId: string, tocStyle: "dotted" | "links") {
+    const block = this.doc.blocks.find((b) => b.id === blockId);
+    if (block) {
+      block.tocStyle = tocStyle;
+      this.pushHistory();
+    }
+  }
+
   public updatePaperSetup(
     paperSize: import("../types").PaperSize,
     orientation: import("../types").Orientation,

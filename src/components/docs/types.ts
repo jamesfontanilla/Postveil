@@ -22,7 +22,10 @@ export type BlockType =
   | "mathBlock"
   | "callout"
   | "divider"
-  | "pageBreak";
+  | "pageBreak"
+  | "columnBreak"
+  | "image"
+  | "toc";
 
 export type CalloutVariant = "note" | "tip" | "info" | "warning" | "danger";
 
@@ -59,6 +62,11 @@ export interface DocBlock {
   calloutTitle?: string;
   latex?: string; // For math blocks
   rows?: TableRow[]; // For tables
+  imageUrl?: string; // For images
+  imageAlt?: string;
+  imageWidth?: string; // e.g. "50%", "100%"
+  imageAlign?: "left" | "center" | "right";
+  tocStyle?: "dotted" | "links"; // For Table of Contents
 }
 export type PaperSize = "A4" | "Letter" | "Legal" | "A3" | "A5" | "Tabloid";
 export type Orientation = "portrait" | "landscape";
@@ -87,6 +95,9 @@ export interface DocumentMetadata {
   orientation: Orientation;
   margins?: DocMargins;
   pageColor?: string;
+  columns?: 1 | 2 | 3;
+  columnSpacing?: number; // in inches, default 0.5
+  columnDivider?: boolean;
   lineSpacing: "1.0" | "1.15" | "1.5" | "2.0";
   fontFamily: "Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono";
   fontSize: number; // in px or pt

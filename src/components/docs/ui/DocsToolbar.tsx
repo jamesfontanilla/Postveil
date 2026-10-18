@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Undo,
   Redo,
@@ -31,6 +31,10 @@ import {
   RemoveFormatting,
   MoveVertical,
   Search,
+  Columns,
+  Image as ImageIcon,
+  ListTree,
+  Check,
 } from "lucide-react";
 import {
   type BlockType,
@@ -60,6 +64,11 @@ interface DocsToolbarProps {
   onMarginsChange?: (margins: DocMargins) => void;
   onOpenPageSetup?: () => void;
   onOpenFindReplace?: () => void;
+  columns?: 1 | 2 | 3;
+  columnSpacing?: number;
+  columnDivider?: boolean;
+  onColumnsChange?: (columns: 1 | 2 | 3, spacing?: number, divider?: boolean) => void;
+  onInsertImageFile?: (file: File) => void;
 }
 
 const TEXT_COLORS = [
@@ -112,12 +121,19 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   onMarginsChange,
   onOpenPageSetup,
   onOpenFindReplace,
+  columns = 1,
+  columnSpacing = 0.5,
+  columnDivider = false,
+  onColumnsChange,
+  onInsertImageFile,
 }) => {
   const [activeTextColor, setActiveTextColor] = useState("#000000");
   const [activeHighlightColor, setActiveHighlightColor] = useState("transparent");
   const [isTextColorOpen, setIsTextColorOpen] = useState(false);
   const [isHighlightOpen, setIsHighlightOpen] = useState(false);
   const [isLineSpacingOpen, setIsLineSpacingOpen] = useState(false);
+  const [isColumnsOpen, setIsColumnsOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const applyTextColor = (color: string) => {
     setActiveTextColor(color);
@@ -625,13 +641,136 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
       >
         <Minus size={16} />
       </button>
+
+      {/* Hidden local image file input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file && onInsertImageFile) {
+            onInsertImageFile(file);
+          }
+          e.target.value = "";
+        }}
+      />
+      <button
+        className="pdocs-tool-btn"
+        onClick={() => fileInputRef.current?.click()}
+        title="Insert Image (Local file to OPFS)"
+      >
+        <ImageIcon size={16} />
+      </button>
+
+      <button
+        className="pdocs-tool-btn"
+        onClick={() => onInsertBlock("toc")}
+        title="Insert Table of contents"
+      >
+        <ListTree size={16} />
+      </button>
+
+      <button
+        className="pdocs-tool-btn"
+        onClick={() => onInsertBlock("columnBreak")}
+        title="Insert Column Break (Ctrl+Shift+Enter)"
+      >
+        <Scissors size={16} style={{ transform: "rotate(90deg)" }} />
+      </button>
+
       <button
         className="pdocs-tool-btn"
         onClick={() => onInsertBlock("pageBreak")}
-        title="Insert Page Break (New Page)"
+        title="Insert Page Break (Ctrl+Enter)"
       >
         <Scissors size={16} />
       </button>
+
+      {/* Columns Layout Selector */}
+      <div style={{ position: "relative" }}>
+        <button
+          className={`pdocs-tool-btn ${columns > 1 ? "active" : ""}`}
+          title="Format columns (1, 2, 3 columns)"
+          onClick={() => {
+            setIsColumnsOpen(!isColumnsOpen);
+            setIsLineSpacingOpen(false);
+            setIsTextColorOpen(false);
+            setIsHighlightOpen(false);
+          }}
+        >
+          <Columns size={16} />
+        </button>
+        {isColumnsOpen && (
+          <>
+            <div
+              style={{ position: "fixed", inset: 0, zIndex: 120 }}
+              onClick={() => setIsColumnsOpen(false)}
+            />
+            <div
+              style={{
+                position: "absolute",
+                top: "34px",
+                left: 0,
+                backgroundColor: "#ffffff",
+                borderRadius: "8px",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+                border: "1px solid #cbd5e1",
+                padding: "6px",
+                zIndex: 130,
+                minWidth: "170px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "2px",
+              }}
+            >
+              <button
+                className={`pdocs-tool-btn ${columns === 1 ? "active" : ""}`}
+                style={{ justifyContent: "flex-start", width: "100%", padding: "6px 10px" }}
+                onClick={() => {
+                  onColumnsChange?.(1, columnSpacing, columnDivider);
+                  setIsColumnsOpen(false);
+                }}
+              >
+                1 Column (Standard)
+              </button>
+              <button
+                className={`pdocs-tool-btn ${columns === 2 ? "active" : ""}`}
+                style={{ justifyContent: "flex-start", width: "100%", padding: "6px 10px" }}
+                onClick={() => {
+                  onColumnsChange?.(2, columnSpacing || 0.5, columnDivider);
+                  setIsColumnsOpen(false);
+                }}
+              >
+                2 Columns (Dual)
+              </button>
+              <button
+                className={`pdocs-tool-btn ${columns === 3 ? "active" : ""}`}
+                style={{ justifyContent: "flex-start", width: "100%", padding: "6px 10px" }}
+                onClick={() => {
+                  onColumnsChange?.(3, columnSpacing || 0.5, columnDivider);
+                  setIsColumnsOpen(false);
+                }}
+              >
+                3 Columns (Newspaper)
+              </button>
+              <div style={{ height: 1, backgroundColor: "#e2e8f0", margin: "4px 0" }} />
+              <button
+                className="pdocs-tool-btn"
+                style={{ justifyContent: "space-between", width: "100%", padding: "6px 10px" }}
+                onClick={() => {
+                  onColumnsChange?.(columns, columnSpacing, !columnDivider);
+                  setIsColumnsOpen(false);
+                }}
+              >
+                <span>Line between columns</span>
+                {columnDivider && <Check size={14} color="#0f5132" />}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
 
       <div className="pdocs-tool-separator" />
 

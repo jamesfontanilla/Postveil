@@ -793,3 +793,216 @@
     display: none;
   }
 }
+
+/* ==========================================================================
+   Sprint 2: Multi-Column, Image Block & Table of Contents
+   ========================================================================== */
+
+/* Column Break Indicator */
+.pdocs-column-break-indicator {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin: 14px 0;
+  gap: 12px;
+}
+
+.pdocs-column-break-line {
+  flex: 1;
+  height: 1px;
+  border-top: 1px dashed #60a5fa;
+}
+
+/* Image Block & Hover Toolbar */
+.pdocs-image-block {
+  transition: all 0.2s ease;
+}
+
+.pdocs-image-toolbar {
+  position: absolute;
+  top: -38px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  padding: 4px 8px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 20;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  transform: translateY(4px);
+}
+
+.pdocs-image-block:hover .pdocs-image-toolbar,
+.pdocs-image-block:focus-within .pdocs-image-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.pdocs-image-btn {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.pdocs-image-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.pdocs-image-btn.active {
+  background: #0f5132;
+  color: #ffffff;
+  border-color: #0f5132;
+}
+
+.pdocs-image-btn-danger:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+/* Table of Contents Card */
+.pdocs-toc-card {
+  width: 100%;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.pdocs-toc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.pdocs-toc-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.02em;
+}
+
+.pdocs-toc-style-toggle {
+  display: inline-flex;
+  background: #e2e8f0;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.pdocs-toc-style-btn {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.pdocs-toc-style-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.pdocs-toc-action-btn {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pdocs-toc-action-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.pdocs-toc-action-delete:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+.pdocs-toc-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pdocs-toc-item {
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  text-decoration: none;
+  font-size: 13px;
+  color: #334155;
+  transition: color 0.15s ease;
+  user-select: none;
+}
+
+.pdocs-toc-item:hover {
+  color: #0f5132;
+}
+
+.pdocs-toc-item-link .pdocs-toc-link-text {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.pdocs-toc-item-link:hover .pdocs-toc-link-text {
+  color: #1d4ed8;
+}
+
+.pdocs-toc-label {
+  white-space: nowrap;
+}
+
+.pdocs-toc-dots {
+  flex: 1;
+  border-bottom: 1px dotted #94a3b8;
+  margin: 0 8px;
+  min-width: 16px;
+}
+
+.pdocs-toc-page-num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #64748b;
+}
+
+/* Responsive multi-column fallback on small viewports */
+@media (max-width: 640px) {
+  .pdocs-page-body[data-columns="2"],
+  .pdocs-page-body[data-columns="3"] {
+    column-count: 1 !important;
+  }
+}
+

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import "./ui/DocsStyles.css";
 import {
   type UniversalDoc,
+  type DocBlock,
   type BlockType,
   type SupportedFormat,
   type PaperSize,
@@ -279,6 +280,55 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     setDoc({ ...engineRef.current.getDocument() });
   };
 
+  const handleInsertBlocksAfter = (afterId: string, blocks: DocBlock[]) => {
+    engineRef.current.insertBlocksAfter(afterId, blocks);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleUpdateImage = (
+    blockId: string,
+    url: string,
+    alt?: string,
+    width?: string,
+    align?: "left" | "center" | "right"
+  ) => {
+    engineRef.current.updateImage(blockId, url, alt, width, align);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleUpdateToc = (blockId: string, style: "dotted" | "links") => {
+    engineRef.current.updateTocStyle(blockId, style);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleColumnsChange = (columns: 1 | 2 | 3, spacing?: number, divider?: boolean) => {
+    engineRef.current.updateColumns(columns, spacing, divider);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleInsertImageFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      if (dataUrl) {
+        const targetId = activeBlockId || doc.blocks[doc.blocks.length - 1]?.id || "";
+        const newBlock: DocBlock = {
+          id: `b_${Date.now()}`,
+          type: "image",
+          content: file.name,
+          imageUrl: dataUrl,
+          imageAlt: file.name,
+          imageWidth: "100%",
+          imageAlign: "center",
+        };
+        engineRef.current.insertBlocksAfter(targetId, [newBlock]);
+        setDoc({ ...engineRef.current.getDocument() });
+        setActiveBlockId(newBlock.id);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="pdocs-container">
       {/* Header */}
@@ -301,6 +351,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onOpenFindReplace={() => setIsFindReplaceOpen(true)}
         showRuler={showRuler}
         onToggleRuler={() => setShowRuler((prev) => !prev)}
+        columns={doc.metadata.columns || 1}
+        columnDivider={doc.metadata.columnDivider || false}
+        onColumnsChange={handleColumnsChange}
         userEmail={userEmail}
         userName={userName}
       />
@@ -330,7 +383,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             metadata: { ...prev.metadata, fontSize: next },
           }));
         }}
-        lineSpacing={doc.metadata.lineSpacing || 1.15}
+        lineSpacing={doc.metadata.lineSpacing || "1.15"}
         onLineSpacingChange={handleLineSpacingChange}
         paperSize={doc.metadata.paperSize}
         orientation={doc.metadata.orientation}
@@ -339,6 +392,11 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onMarginsChange={handleMarginsChange}
         onOpenPageSetup={() => setIsPageSetupOpen(true)}
         onOpenFindReplace={() => setIsFindReplaceOpen(true)}
+        columns={doc.metadata.columns || 1}
+        columnSpacing={doc.metadata.columnSpacing || 0.5}
+        columnDivider={doc.metadata.columnDivider || false}
+        onColumnsChange={handleColumnsChange}
+        onInsertImageFile={handleInsertImageFile}
       />
 
       {/* Main Workspace */}
@@ -398,6 +456,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 onUpdateTableRows={handleUpdateTableRows}
                 onUpdateCallout={handleUpdateCallout}
                 onUpdateMathLatex={handleUpdateMathLatex}
+                onInsertBlocksAfter={handleInsertBlocksAfter}
+                onUpdateImage={handleUpdateImage}
+                onUpdateToc={handleUpdateToc}
               />
             </div>
           </div>
@@ -415,6 +476,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             onUpdateTableRows={handleUpdateTableRows}
             onUpdateCallout={handleUpdateCallout}
             onUpdateMathLatex={handleUpdateMathLatex}
+            onInsertBlocksAfter={handleInsertBlocksAfter}
+            onUpdateImage={handleUpdateImage}
+            onUpdateToc={handleUpdateToc}
           />
         )}
       </div>
