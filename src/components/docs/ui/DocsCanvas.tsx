@@ -171,10 +171,11 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
     left: 1.0,
     right: 1.0,
   };
-  const topMarginPx = Math.round(margins.top * 72);
-  const bottomMarginPx = Math.round(margins.bottom * 72);
-  const leftMarginPx = Math.round(margins.left * 72);
-  const rightMarginPx = Math.round(margins.right * 72);
+  // 1 inch = 96px in the standard 96 DPI screen CSS point scale (matching PAPER_DIMENSIONS and DocsRuler)
+  const topMarginPx = Math.round(margins.top * 96);
+  const bottomMarginPx = Math.round(margins.bottom * 96);
+  const leftMarginPx = Math.round(margins.left * 96);
+  const rightMarginPx = Math.round(margins.right * 96);
 
   // Multi-page partitioning for Paginated View
   const pages = useMemo(() => {
@@ -478,7 +479,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                 overflow: isContinuous ? "visible" : "hidden",
                 boxSizing: "border-box",
                 columnCount: doc.metadata.columns && doc.metadata.columns > 1 ? doc.metadata.columns : undefined,
-                columnGap: doc.metadata.columns && doc.metadata.columns > 1 ? `${(doc.metadata.columnSpacing || 0.5) * 72}px` : undefined,
+                columnGap: doc.metadata.columns && doc.metadata.columns > 1 ? `${(doc.metadata.columnSpacing || 0.5) * 96}px` : undefined,
                 columnRule: doc.metadata.columnDivider ? "1px solid #cbd5e1" : undefined,
               }}
             >

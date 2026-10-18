@@ -16,8 +16,8 @@ export const DocsRuler: React.FC<DocsRulerProps> = ({
   const [draggingHandle, setDraggingHandle] = useState<"left" | "right" | null>(null);
   const [dragCurrentX, setDragCurrentX] = useState<number | null>(null);
 
-  // 1 inch = 72px in the interactive canvas typography point scale
-  const PPI = 72;
+  // 1 inch = 96px in the standard 96 DPI screen CSS point scale (matching PAPER_DIMENSIONS)
+  const PPI = 96;
   const leftPx = Math.round(margins.left * PPI);
   const rightPx = Math.round(margins.right * PPI);
 
