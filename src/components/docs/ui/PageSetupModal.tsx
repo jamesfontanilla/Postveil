@@ -89,9 +89,9 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({
 
         {/* Orientation */}
         <div style={{ marginBottom: 18 }}>
-          <label style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "block", marginBottom: 8 }}>
+          <div style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", marginBottom: 8 }}>
             Orientation
-          </label>
+          </div>
           <div style={{ display: "flex", gap: 12 }}>
             <button
               onClick={() => setOrientation("portrait")}
@@ -140,9 +140,9 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({
 
         {/* Paper Size */}
         <div style={{ marginBottom: 18 }}>
-          <label style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "block", marginBottom: 8 }}>
+          <div style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", marginBottom: 8 }}>
             Paper size
-          </label>
+          </div>
           <select
             className="pdocs-select"
             value={paperSize}
@@ -161,9 +161,9 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({
         {/* Margins */}
         <div style={{ marginBottom: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <label style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b" }}>
+            <div style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b" }}>
               Margins (inches)
-            </label>
+            </div>
             <select
               value={preset}
               onChange={(e) => handlePresetChange(e.target.value as MarginPreset)}
@@ -250,9 +250,9 @@ export const PageSetupModal: React.FC<PageSetupModalProps> = ({
 
         {/* Page Color */}
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", display: "block", marginBottom: 8 }}>
+          <div style={{ fontSize: "12px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "#64748b", marginBottom: 8 }}>
             Page color
-          </label>
+          </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             {[
               { color: "#ffffff", label: "Pure White" },

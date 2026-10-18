@@ -156,26 +156,28 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({
 
   return (
     <div
+      className="pdocs-floating-panel"
       style={{
         position: "fixed",
-        top: "100px",
-        right: "24px",
-        width: "360px",
+        top: "96px",
+        right: "28px",
+        width: "440px",
         backgroundColor: "#ffffff",
         borderRadius: "12px",
-        boxShadow: "0 10px 30px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0,0,0,0.08)",
+        boxShadow: "0 16px 36px -4px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0,0,0,0.06)",
         border: "1px solid #cbd5e1",
         zIndex: 500,
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
+        userSelect: "none",
       }}
       onKeyDown={handleKeyDown}
     >
       {/* Title Bar */}
       <div
         style={{
-          padding: "10px 14px",
+          padding: "12px 18px",
           borderBottom: "1px solid #f1f5f9",
           backgroundColor: "#f8fafc",
           display: "flex",
@@ -183,33 +185,46 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({
           alignItems: "center",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>
-          <Search size={15} color="#0f5132" />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "14px", fontWeight: 700, color: "#0f172a" }}>
+          <Search size={16} color="#0f5132" />
           <span>Find and replace</span>
         </div>
         <button
           onClick={onClose}
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b", padding: 2 }}
+          aria-label="Close"
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "#64748b",
+            padding: "4px",
+            borderRadius: "4px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "background-color 0.15s ease",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#e2e8f0")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
         >
           <X size={16} />
         </button>
       </div>
 
-      {/* Body Inputs */}
-      <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "10px" }}>
-        {/* Find Input */}
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b", marginBottom: 4, fontWeight: 500 }}>
-            <span>Find:</span>
-            <span>
-              {matches.length > 0
-                ? `${activeMatchIndex + 1} of ${matches.length}`
-                : findText.trim()
-                ? "No matches"
-                : ""}
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      {/* Body Content */}
+      <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: "14px" }}>
+        {/* Google Docs-Style 2-Column Form Grid */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "85px 1fr",
+            rowGap: "12px",
+            alignItems: "center",
+          }}
+        >
+          {/* Find Row */}
+          <span style={{ fontSize: "13px", fontWeight: 500, color: "#475569" }}>Find</span>
+          <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
             <input
               type="text"
               autoFocus
@@ -217,45 +232,51 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({
               onChange={(e) => setFindText(e.target.value)}
               placeholder="Text to find..."
               style={{
-                flex: 1,
-                padding: "7px 10px",
+                width: "100%",
+                height: "36px",
+                padding: "0 64px 0 10px",
                 borderRadius: "6px",
                 border: regexError ? "1px solid #ef4444" : "1px solid #cbd5e1",
                 fontSize: "13px",
                 outline: "none",
+                boxSizing: "border-box",
+                transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+              }}
+              onFocus={(e) => {
+                if (!regexError) {
+                  e.currentTarget.style.borderColor = "#0f5132";
+                  e.currentTarget.style.boxShadow = "0 0 0 2px rgba(15, 81, 50, 0.15)";
+                }
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = regexError ? "#ef4444" : "#cbd5e1";
+                e.currentTarget.style.boxShadow = "none";
               }}
             />
-            <button
-              onClick={handlePrev}
-              disabled={matches.length === 0}
-              title="Previous (Shift+Enter)"
-              className="pdocs-tool-btn"
-              style={{ width: 28, height: 28, padding: 0 }}
+            {/* Embedded Match Counter Badge */}
+            <div
+              style={{
+                position: "absolute",
+                right: "8px",
+                fontSize: "11px",
+                fontWeight: 600,
+                color: matches.length > 0 ? "#0f5132" : "#94a3b8",
+                backgroundColor: matches.length > 0 ? "#e8f5e9" : "transparent",
+                padding: matches.length > 0 ? "2px 6px" : "0",
+                borderRadius: "10px",
+                pointerEvents: "none",
+              }}
             >
-              <ChevronUp size={16} />
-            </button>
-            <button
-              onClick={handleNext}
-              disabled={matches.length === 0}
-              title="Next (Enter)"
-              className="pdocs-tool-btn"
-              style={{ width: 28, height: 28, padding: 0 }}
-            >
-              <ChevronDown size={16} />
-            </button>
-          </div>
-          {regexError && (
-            <div style={{ fontSize: "10px", color: "#dc2626", marginTop: 4 }}>
-              Invalid Regex: {regexError}
+              {matches.length > 0
+                ? `${activeMatchIndex + 1} of ${matches.length}`
+                : findText.trim()
+                ? "0 of 0"
+                : ""}
             </div>
-          )}
-        </div>
-
-        {/* Replace Input */}
-        <div>
-          <div style={{ fontSize: "11px", color: "#64748b", marginBottom: 4, fontWeight: 500 }}>
-            Replace with:
           </div>
+
+          {/* Replace Row */}
+          <span style={{ fontSize: "13px", fontWeight: 500, color: "#475569" }}>Replace with</span>
           <input
             type="text"
             value={replaceText}
@@ -263,54 +284,202 @@ export const FindReplaceModal: React.FC<FindReplaceModalProps> = ({
             placeholder="Replacement text..."
             style={{
               width: "100%",
-              padding: "7px 10px",
+              height: "36px",
+              padding: "0 10px",
               borderRadius: "6px",
               border: "1px solid #cbd5e1",
               fontSize: "13px",
               outline: "none",
               boxSizing: "border-box",
+              transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = "#0f5132";
+              e.currentTarget.style.boxShadow = "0 0 0 2px rgba(15, 81, 50, 0.15)";
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = "#cbd5e1";
+              e.currentTarget.style.boxShadow = "none";
             }}
           />
         </div>
 
-        {/* Checkbox Options */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "12px", color: "#475569", cursor: "pointer" }}>
+        {/* Regex Error Helper */}
+        {regexError && (
+          <div style={{ paddingLeft: "85px", fontSize: "11px", color: "#dc2626", marginTop: "-6px" }}>
+            Invalid regex: {regexError}
+          </div>
+        )}
+
+        {/* Indented Checkbox Options Section */}
+        <div
+          style={{
+            paddingLeft: "85px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+          }}
+        >
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "13px",
+              color: "#334155",
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
             <input
               type="checkbox"
               checked={matchCase}
               onChange={(e) => setMatchCase(e.target.checked)}
+              style={{
+                width: "16px",
+                height: "16px",
+                margin: 0,
+                accentColor: "#0f5132",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
             />
-            Match case
+            <span>Match case</span>
           </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "12px", color: "#475569", cursor: "pointer" }}>
+
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "13px",
+              color: "#334155",
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
             <input
               type="checkbox"
               checked={useRegex}
               onChange={(e) => setUseRegex(e.target.checked)}
+              style={{
+                width: "16px",
+                height: "16px",
+                margin: 0,
+                accentColor: "#0f5132",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
             />
-            Match using regular expressions
+            <span>Match using regular expressions</span>
           </label>
         </div>
 
-        {/* Action Buttons */}
-        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-          <button
-            onClick={handleReplaceCurrent}
-            disabled={matches.length === 0}
-            className="pdocs-btn-secondary"
-            style={{ flex: 1, height: "32px", fontSize: "12px", padding: 0, justifyContent: "center" }}
-          >
-            <Replace size={13} /> Replace
-          </button>
-          <button
-            onClick={handleReplaceAll}
-            disabled={matches.length === 0}
-            className="pdocs-btn-primary"
-            style={{ flex: 1, height: "32px", fontSize: "12px", padding: 0, justifyContent: "center" }}
-          >
-            <CheckCheck size={14} /> Replace all
-          </button>
+        {/* Google Docs-Style Split Action Toolbar */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginTop: "6px",
+            paddingTop: "14px",
+            borderTop: "1px solid #f1f5f9",
+          }}
+        >
+          {/* Navigation Group (Left) */}
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button
+              onClick={handlePrev}
+              disabled={matches.length === 0}
+              title="Previous match (Shift+Enter)"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                height: "32px",
+                padding: "0 10px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                backgroundColor: matches.length > 0 ? "#ffffff" : "#f8fafc",
+                color: matches.length > 0 ? "#334155" : "#94a3b8",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: matches.length > 0 ? "pointer" : "not-allowed",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <ChevronUp size={14} /> Previous
+            </button>
+            <button
+              onClick={handleNext}
+              disabled={matches.length === 0}
+              title="Next match (Enter)"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                height: "32px",
+                padding: "0 10px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                backgroundColor: matches.length > 0 ? "#ffffff" : "#f8fafc",
+                color: matches.length > 0 ? "#334155" : "#94a3b8",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: matches.length > 0 ? "pointer" : "not-allowed",
+                transition: "all 0.15s ease",
+              }}
+            >
+              Next <ChevronDown size={14} />
+            </button>
+          </div>
+
+          {/* Execution Group (Right) */}
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              onClick={handleReplaceCurrent}
+              disabled={matches.length === 0}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                height: "32px",
+                padding: "0 12px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                backgroundColor: matches.length > 0 ? "#ffffff" : "#f8fafc",
+                color: matches.length > 0 ? "#334155" : "#94a3b8",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: matches.length > 0 ? "pointer" : "not-allowed",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <Replace size={13} /> Replace
+            </button>
+            <button
+              onClick={handleReplaceAll}
+              disabled={matches.length === 0}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                height: "32px",
+                padding: "0 14px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: matches.length > 0 ? "#0f5132" : "#94a3b8",
+                color: "#ffffff",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: matches.length > 0 ? "pointer" : "not-allowed",
+                boxShadow: matches.length > 0 ? "0 2px 4px rgba(15, 81, 50, 0.2)" : "none",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <CheckCheck size={14} /> Replace all
+            </button>
+          </div>
         </div>
       </div>
     </div>

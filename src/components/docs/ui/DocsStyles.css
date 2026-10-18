@@ -24,6 +24,38 @@
   overflow: hidden;
 }
 
+/* Strict P-Docs Scoped Reset against global root stylesheet leaks */
+.pdocs-container label,
+.pdocs-modal-overlay label,
+.pdocs-modal label,
+.pdocs-floating-panel label {
+  display: flex !important;
+  align-items: center !important;
+  grid-template-columns: none !important;
+  grid-template-rows: none !important;
+  gap: 8px !important;
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  color: #334155 !important;
+  cursor: pointer !important;
+  user-select: none !important;
+}
+
+.pdocs-container input[type="checkbox"],
+.pdocs-modal-overlay input[type="checkbox"],
+.pdocs-modal input[type="checkbox"],
+.pdocs-floating-panel input[type="checkbox"] {
+  width: 16px !important;
+  height: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  accent-color: var(--pdocs-primary) !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+}
+
 /* Header */
 .pdocs-header {
   height: 64px;
