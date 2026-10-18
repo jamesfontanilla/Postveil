@@ -1,0 +1,319 @@
+import React, { useState } from "react";
+import {
+  FileText,
+  Save,
+  Download,
+  Upload,
+  Printer,
+  ChevronDown,
+  LayoutGrid,
+  ShieldCheck,
+  LogOut,
+  Settings2,
+  Mail,
+  Check,
+  Sparkles,
+  Eye,
+  FileCode,
+  Layers,
+} from "lucide-react";
+import BrandMark from "../../BrandMark";
+import { WaffleLauncher } from "../../accounts/WaffleLauncher";
+import { type UniversalDoc, type SupportedFormat } from "../types";
+
+interface DocsHeaderProps {
+  doc: UniversalDoc;
+  viewMode: "paginated" | "continuous" | "markdown";
+  onViewModeChange: (mode: "paginated" | "continuous" | "markdown") => void;
+  onTitleChange: (newTitle: string) => void;
+  onOpenExport: () => void;
+  onOpenImport: () => void;
+  onPrint: () => void;
+  onNewDoc: () => void;
+  onBackToMail: () => void;
+  onSwitchToAccounts: () => void;
+  onSignOut?: () => void;
+  userEmail?: string;
+  userName?: string;
+}
+
+export const DocsHeader: React.FC<DocsHeaderProps> = ({
+  doc,
+  viewMode,
+  onViewModeChange,
+  onTitleChange,
+  onOpenExport,
+  onOpenImport,
+  onPrint,
+  onNewDoc,
+  onBackToMail,
+  onSwitchToAccounts,
+  onSignOut,
+  userEmail = "user@postveil.app",
+  userName = "Postveil Creator",
+}) => {
+  const [isWaffleOpen, setIsWaffleOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+
+  return (
+    <header className="pdocs-header" role="banner">
+      {/* Left: App Logo, Waffle Launcher, Title & Menus */}
+      <div className="pdocs-header-left">
+        <div style={{ position: "relative" }}>
+          <button
+            className="pdocs-tool-btn"
+            title="Postveil Sovereign Suite"
+            onClick={() => {
+              setIsWaffleOpen(!isWaffleOpen);
+              setIsUserMenuOpen(false);
+            }}
+            style={{ width: 34, height: 34, padding: 0 }}
+          >
+            <LayoutGrid size={18} />
+          </button>
+          <WaffleLauncher
+            isOpen={isWaffleOpen}
+            onClose={() => setIsWaffleOpen(false)}
+            anchorOrigin="left"
+            onSwitchToMail={onBackToMail}
+            onSwitchToAccounts={onSwitchToAccounts}
+          />
+        </div>
+
+        <div className="pdocs-logo-brand" onClick={onNewDoc} title="New P-Docs Document">
+          <BrandMark small />
+          <span style={{ fontWeight: 700, fontSize: "16px", color: "var(--pdocs-primary)" }}>
+            P-Docs
+          </span>
+        </div>
+
+        <div className="pdocs-title-wrapper">
+          <input
+            className="pdocs-title-input"
+            value={doc.metadata.title}
+            onChange={(e) => onTitleChange(e.target.value)}
+            placeholder="Untitled Document"
+            title="Rename Document"
+          />
+
+          {/* Menubar */}
+          <div className="pdocs-menubar">
+            <div style={{ position: "relative" }}>
+              <button
+                className="pdocs-menu-item"
+                onClick={() => setActiveMenu(activeMenu === "file" ? null : "file")}
+              >
+                File
+              </button>
+              {activeMenu === "file" && (
+                <>
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 120 }}
+                    onClick={() => setActiveMenu(null)}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "24px",
+                      left: 0,
+                      backgroundColor: "#ffffff",
+                      borderRadius: "10px",
+                      boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                      padding: "6px",
+                      minWidth: "220px",
+                      zIndex: 130,
+                      border: "1px solid #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                    }}
+                  >
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onNewDoc();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <FileText size={15} style={{ marginRight: 8 }} />
+                      New Document
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onOpenImport();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <Upload size={15} style={{ marginRight: 8 }} />
+                      Open / Import (DOCX, ODT, MD...)
+                    </button>
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onOpenExport();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <Download size={15} style={{ marginRight: 8 }} />
+                      Export Document As...
+                    </button>
+                    <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
+                    <button
+                      className="pdocs-tool-btn"
+                      style={{ justifyContent: "flex-start", width: "100%", padding: "8px 12px" }}
+                      onClick={() => {
+                        onPrint();
+                        setActiveMenu(null);
+                      }}
+                    >
+                      <Printer size={15} style={{ marginRight: 8 }} />
+                      Print / Save as PDF
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>Edit</button>
+            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>View</button>
+            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>Insert</button>
+            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>Format</button>
+            <button className="pdocs-menu-item" onClick={() => setActiveMenu(null)}>Tools</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Center: Autosave Status */}
+      <div className="pdocs-status-indicator" title="Origin Private File System Zero-Hostage Storage">
+        <Check size={14} />
+        <span>Saved to local OPFS</span>
+      </div>
+
+      {/* Right: Actions, View Modes, Profile Popover */}
+      <div className="pdocs-header-right">
+        {/* View mode toggle */}
+        <div style={{ display: "flex", backgroundColor: "#f1f5f9", borderRadius: "10px", padding: "2px" }}>
+          <button
+            className={`pdocs-tool-btn ${viewMode === "paginated" ? "active" : ""}`}
+            onClick={() => onViewModeChange("paginated")}
+            title="Paginated Print View (Letter/A4)"
+            style={{ fontSize: "12px", height: "28px" }}
+          >
+            Pages
+          </button>
+          <button
+            className={`pdocs-tool-btn ${viewMode === "continuous" ? "active" : ""}`}
+            onClick={() => onViewModeChange("continuous")}
+            title="Continuous Flow Web Canvas"
+            style={{ fontSize: "12px", height: "28px" }}
+          >
+            Flow
+          </button>
+          <button
+            className={`pdocs-tool-btn ${viewMode === "markdown" ? "active" : ""}`}
+            onClick={() => onViewModeChange("markdown")}
+            title="Markdown Source Split View"
+            style={{ fontSize: "12px", height: "28px" }}
+          >
+            Markdown
+          </button>
+        </div>
+
+        <button className="pdocs-btn-secondary" onClick={onOpenImport} title="Import from DOCX, ODT, MD, HTML">
+          <Upload size={15} />
+          Import
+        </button>
+
+        <button className="pdocs-btn-export" onClick={onOpenExport} title="Export to 10 Formats">
+          <Download size={15} />
+          Export As
+        </button>
+
+        {/* User Profile Avatar */}
+        <div style={{ position: "relative" }}>
+          <button
+            className="pv-acc-avatar-btn"
+            onClick={() => {
+              setIsUserMenuOpen(!isUserMenuOpen);
+              setIsWaffleOpen(false);
+            }}
+            title={userEmail}
+            style={{ cursor: "pointer" }}
+          >
+            <div className="pv-acc-avatar" style={{ width: 34, height: 34, fontSize: 14 }}>
+              {userName.charAt(0).toUpperCase()}
+            </div>
+          </button>
+
+          {isUserMenuOpen && (
+            <>
+              <div
+                style={{ position: "fixed", inset: 0, zIndex: 190 }}
+                onClick={() => setIsUserMenuOpen(false)}
+              />
+              <div className="pv-acc-user-popover" style={{ top: "48px", right: "0px" }}>
+                <div className="pv-acc-user-popover-avatar">
+                  {userName.charAt(0).toUpperCase()}
+                </div>
+                <div style={{ fontSize: "17px", fontWeight: 600 }}>{userName}</div>
+                <div style={{ fontSize: "13px", color: "var(--pv-acc-text-secondary)" }}>
+                  {userEmail}
+                </div>
+
+                <button
+                  className="pv-acc-btn-manage"
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    onSwitchToAccounts();
+                  }}
+                  style={{ textDecoration: "none", cursor: "pointer" }}
+                >
+                  <ShieldCheck size={16} style={{ marginRight: 8, color: "#0f5132" }} />
+                  Manage your Postveil Account
+                </button>
+
+                <div style={{ width: "100%", height: "1px", backgroundColor: "#e2e8f0", margin: "8px 0" }} />
+
+                <button
+                  className="mail-ribbon-menu-item"
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    fontSize: "14px",
+                    color: "#334155",
+                  }}
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    onBackToMail();
+                  }}
+                >
+                  <Mail size={16} />
+                  Open P-Mail Inbox
+                </button>
+
+                {onSignOut && (
+                  <button className="pv-acc-btn-signout" style={{ marginTop: "12px" }} onClick={onSignOut}>
+                    <LogOut size={16} />
+                    Sign out of Postveil
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+};

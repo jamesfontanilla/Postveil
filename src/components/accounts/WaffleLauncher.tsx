@@ -20,6 +20,7 @@ export interface WaffleLauncherProps {
   onSwitchToMail?: () => void;
   onSwitchToAccounts?: () => void;
   onSwitchToCalendar?: () => void;
+  onSwitchToDocs?: () => void;
   onSelectPillar?: (pillar: PillarDetails) => void;
   anchorOrigin?: "left" | "right";
 }
@@ -30,6 +31,7 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
   onSwitchToMail,
   onSwitchToAccounts,
   onSwitchToCalendar,
+  onSwitchToDocs,
   onSelectPillar,
   anchorOrigin = "right",
 }) => {
@@ -106,11 +108,15 @@ export const WaffleLauncher: React.FC<WaffleLauncherProps> = ({
       icon: FileText,
       bg: "#e3f2fd",
       color: "#0d47a1",
-      badge: "Local",
-      isLive: false,
+      badge: "Sovereign Editor",
+      isLive: true,
       onClick: () => {
         onClose();
-        onSelectPillar?.(SOVEREIGN_PILLARS.docs);
+        if (onSwitchToDocs) {
+          onSwitchToDocs();
+        } else {
+          window.location.href = "https://docs.postveil.jamesfontanilla.com/";
+        }
       },
     },
     {

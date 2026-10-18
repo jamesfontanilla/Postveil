@@ -100,6 +100,7 @@ import BrandMark from "./components/BrandMark";
 import PublicHome from "./components/auth/PublicHome";
 import AccountsHub from "./components/accounts/AccountsHub";
 import OAuthConsentCard from "./components/accounts/OAuthConsentCard";
+import PDocsApp from "./components/docs/PDocsApp";
 import "./components/accounts/AccountsStyles.css";
 import { WaffleLauncher } from "./components/accounts/WaffleLauncher";
 import { PillarPreviewModal, SOVEREIGN_PILLARS, type PillarDetails } from "./components/accounts/PillarPreviewModal";
@@ -235,7 +236,7 @@ function detailIdentityForMessage(message: Message, contacts: Contact[], mailbox
 function MailboxApp({ session }: { session: Session }) {
   const { confirm, prompt } = useAppDialog();
   const imagePreferenceKey = `postveil.load_remote_images:${session.user.id}`;
-  const [view, setView] = useState<"mail" | "calendar" | "tasks" | "accounts">(() => {
+  const [view, setView] = useState<"mail" | "calendar" | "tasks" | "accounts" | "docs">(() => {
     const params = new URLSearchParams(window.location.search);
     if (
       params.get("view") === "accounts" ||
@@ -243,6 +244,13 @@ function MailboxApp({ session }: { session: Session }) {
       window.location.pathname.startsWith("/accounts")
     ) {
       return "accounts";
+    }
+    if (
+      params.get("view") === "docs" ||
+      window.location.hostname.startsWith("docs.") ||
+      window.location.pathname.startsWith("/docs")
+    ) {
+      return "docs";
     }
     return "mail";
   });
@@ -1231,6 +1239,24 @@ function MailboxApp({ session }: { session: Session }) {
     setRibbonTab(next);
     window.requestAnimationFrame(() => document.getElementById(`mail-ribbon-tab-${next}`)?.focus());
   }
+  if (view === "docs") {
+    return (
+      <PDocsApp
+        userEmail={session.user.email}
+        userName={displayName(session.user.email || "James")}
+        onBackToMail={() => {
+          setView("mail");
+          const url = new URL(window.location.href);
+          url.searchParams.delete("view");
+          window.history.replaceState({}, "", url.toString());
+        }}
+        onSwitchToAccounts={() => {
+          setView("accounts");
+        }}
+        onSignOut={() => void requireSupabase().auth.signOut()}
+      />
+    );
+  }
   if (view === "accounts") {
     return (
       <AccountsHub
@@ -1241,6 +1267,9 @@ function MailboxApp({ session }: { session: Session }) {
           const url = new URL(window.location.href);
           url.searchParams.delete("view");
           window.history.replaceState({}, "", url.toString());
+        }}
+        onSwitchToDocs={() => {
+          setView("docs");
         }}
         onSignOut={() => void requireSupabase().auth.signOut()}
       />
@@ -1280,6 +1309,10 @@ function MailboxApp({ session }: { session: Session }) {
               }}
               onSwitchToCalendar={() => {
                 setView("calendar");
+                setIsWaffleOpen(false);
+              }}
+              onSwitchToDocs={() => {
+                setView("docs");
                 setIsWaffleOpen(false);
               }}
               onSelectPillar={(pillar) => {

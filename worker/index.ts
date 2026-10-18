@@ -5246,6 +5246,11 @@ export default {
       const accountsAsset = await env.ASSETS.fetch(assetRequest);
       return protectedHeaders(accountsAsset);
     }
+    if (url.pathname === "/docs" || url.pathname === "/docs/" || url.hostname.startsWith("docs.")) {
+      const assetRequest = new Request(new URL("/index.html?view=docs", request.url), request);
+      const docsAsset = await env.ASSETS.fetch(assetRequest);
+      return protectedHeaders(docsAsset);
+    }
     const assetResponse = await env.ASSETS.fetch(request);
     const noStoreAsset = url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest";
     return protectedHeaders(assetResponse, noStoreAsset);

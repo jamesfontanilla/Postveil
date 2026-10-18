@@ -59,3 +59,8 @@ custom_domain = true
 [[routes]]
 pattern = "accounts.postveil.jamesfontanilla.com"
 custom_domain = true
+
+[[routes]]
+pattern = "docs.postveil.jamesfontanilla.com"
+custom_domain = true
+

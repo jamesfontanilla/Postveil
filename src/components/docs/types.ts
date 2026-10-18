@@ -1,0 +1,107 @@
+export type SupportedFormat =
+  | "docx"
+  | "odt"
+  | "pdf"
+  | "md"
+  | "html"
+  | "epub"
+  | "latex"
+  | "rtf"
+  | "txt"
+  | "pdoc";
+
+export type BlockType =
+  | "paragraph"
+  | "heading"
+  | "bulletList"
+  | "orderedList"
+  | "taskList"
+  | "blockquote"
+  | "codeBlock"
+  | "table"
+  | "mathBlock"
+  | "callout"
+  | "divider"
+  | "pageBreak";
+
+export type CalloutVariant = "note" | "tip" | "info" | "warning" | "danger";
+
+export interface InlineMark {
+  type: "bold" | "italic" | "underline" | "strike" | "code" | "highlight" | "link" | "sub" | "sup";
+  value?: string;
+}
+
+export interface InlineSpan {
+  text: string;
+  marks?: InlineMark[];
+}
+
+export interface TableCell {
+  id: string;
+  content: string;
+  isHeader?: boolean;
+}
+
+export interface TableRow {
+  id: string;
+  cells: TableCell[];
+}
+
+export interface DocBlock {
+  id: string;
+  type: BlockType;
+  content?: string;
+  level?: 1 | 2 | 3 | 4 | 5 | 6; // For headings
+  spans?: InlineSpan[]; // For rich inline marks
+  checked?: boolean; // For task items
+  language?: string; // For code blocks
+  calloutVariant?: CalloutVariant; // For callouts
+  calloutTitle?: string;
+  latex?: string; // For math blocks
+  rows?: TableRow[]; // For tables
+}
+
+export interface DocumentMetadata {
+  id: string;
+  title: string;
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+  wordCount: number;
+  charCount: number;
+  readingTimeMinutes: number;
+  paperSize: "A4" | "Letter" | "Legal";
+  orientation: "portrait" | "landscape";
+  lineSpacing: "1.0" | "1.15" | "1.5" | "2.0";
+  fontFamily: "Schibsted Grotesk" | "Inter" | "Merriweather" | "JetBrains Mono";
+  fontSize: number; // in px or pt
+  isEncrypted: boolean;
+  authorKeyId?: string;
+}
+
+export interface UniversalDoc {
+  metadata: DocumentMetadata;
+  blocks: DocBlock[];
+}
+
+export interface FormatSpecification {
+  id: SupportedFormat;
+  name: string;
+  extension: string;
+  mimeType: string;
+  category: "Word Processor" | "Open Standard" | "Markup / Code" | "Publication" | "Plaintext" | "Sovereign Native";
+  giantCompetitor: string;
+  description: string;
+  isLossless: boolean;
+  supportsMath: boolean;
+  supportsTables: boolean;
+}
+
+export interface ExportOptions {
+  format: SupportedFormat;
+  includeMetadata?: boolean;
+  paperSize?: "A4" | "Letter";
+  mathEngine?: "latex" | "mathml" | "unicode";
+  styleTheme?: "modern" | "classic" | "academic" | "minimal";
+}

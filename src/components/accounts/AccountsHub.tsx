@@ -39,6 +39,7 @@ interface AccountsHubProps {
   currentUserEmail?: string;
   currentUserName?: string;
   onBackToMail: () => void;
+  onSwitchToDocs?: () => void;
   onSignOut: () => void;
 }
 
@@ -48,6 +49,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
   currentUserEmail = "james@jamesfontanilla.com",
   currentUserName = "James Fontanilla",
   onBackToMail,
+  onSwitchToDocs,
   onSignOut,
 }) => {
   const [activeTab, setActiveTab] = useState<TabKey>("home");
@@ -318,6 +320,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
               isOpen={isWaffleOpen}
               onClose={() => setIsWaffleOpen(false)}
               onSwitchToMail={onBackToMail}
+              onSwitchToDocs={onSwitchToDocs}
               onSelectPillar={setSelectedPillar}
             />
           </div>
