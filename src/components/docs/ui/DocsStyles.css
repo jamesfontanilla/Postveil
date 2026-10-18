@@ -811,12 +811,77 @@
 }
 
 @media (max-width: 1024px) {
-  .pdocs-toolbar {
-    overflow-x: auto;
-    scrollbar-width: none;
+  .pdocs-header {
+    height: 56px;
+    padding: 0 12px;
+    gap: 8px;
+    overflow: hidden;
   }
-  .pdocs-toolbar::-webkit-scrollbar {
+  .pdocs-header-left {
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+  .pdocs-title-wrapper {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .pdocs-title-input {
+    font-size: 15px;
+    max-width: 200px;
+    min-width: 80px;
+    text-overflow: ellipsis;
+  }
+  /* On medium tablet screens (768px-1024px), hide menubar to preserve clean single-row header */
+  .pdocs-menubar {
     display: none;
+  }
+  /* Compact autosave badge */
+  .pdocs-status-indicator {
+    padding: 3px 8px;
+    font-size: 11px;
+    max-width: 150px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pdocs-header-right {
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .pdocs-view-mode-label {
+    display: none;
+  }
+  .pdocs-view-mode-icon {
+    display: inline-block;
+  }
+  .pdocs-view-toggle-group {
+    display: inline-flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    padding: 2px !important;
+    gap: 1px !important;
+    flex-shrink: 0 !important;
+  }
+  .pdocs-view-toggle-group .pdocs-tool-btn {
+    padding: 0 6px !important;
+    height: 28px !important;
+    width: 28px !important;
+    min-width: 28px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  .pdocs-toolbar {
+    height: 40px;
+    padding: 0 10px;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 0;
   }
   .pdocs-sidebar {
     position: absolute;
