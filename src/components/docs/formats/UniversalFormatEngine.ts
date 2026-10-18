@@ -12,6 +12,9 @@ import { latexCodec } from "./latexCodec";
 import { docxCodec } from "./docxCodec";
 import { odtCodec } from "./odtCodec";
 import { nativePdocCodec } from "./nativePdocCodec";
+import { pdfCodec } from "./pdfCodec";
+import { rtfCodec } from "./rtfCodec";
+import { epubCodec } from "./epubCodec";
 
 export interface DocumentCodec {
   id: SupportedFormat;
@@ -152,9 +155,9 @@ export class UniversalFormatEngine {
     docx: docxCodec,
     odt: odtCodec,
     pdoc: nativePdocCodec,
-    pdf: htmlCodec, // PDF exports via clean paginated HTML print dialog
-    epub: htmlCodec,
-    rtf: plainTextCodec,
+    pdf: pdfCodec,
+    epub: epubCodec,
+    rtf: rtfCodec,
   };
 
   public static getSupportedFormats(): FormatSpecification[] {

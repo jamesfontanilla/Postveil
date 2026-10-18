@@ -30,6 +30,8 @@
     "@types/katex": "^0.16.8",
     "@xmldom/xmldom": "^0.8.11",
     "dompurify": "^3.4.14",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.2",
     "katex": "^0.19.0",
     "lucide-react": "^0.468.0",
     "postal-mime": "^2.4.4",
@@ -39,6 +41,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260820.1",
+    "@types/jszip": "^3.4.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
