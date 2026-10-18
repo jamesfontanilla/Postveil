@@ -176,6 +176,8 @@ export interface DocVersionSnapshot {
   doc: UniversalDoc;
 }
 
+export type AutosaveStatus = "saved" | "saving" | "unsaved" | "error";
+
 export interface UniversalDoc {
   metadata: DocumentMetadata;
   blocks: DocBlock[];

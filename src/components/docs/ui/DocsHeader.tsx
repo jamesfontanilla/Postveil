@@ -24,10 +24,13 @@ import {
   Bookmark,
   MessageSquare,
   Menu,
+  Cloud,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import BrandMark from "../../BrandMark";
 import { WaffleLauncher } from "../../accounts/WaffleLauncher";
-import { type UniversalDoc, type SupportedFormat, type BlockType } from "../types";
+import { type UniversalDoc, type SupportedFormat, type BlockType, type AutosaveStatus } from "../types";
 
 interface DocsHeaderProps {
   doc: UniversalDoc;
@@ -58,6 +61,9 @@ interface DocsHeaderProps {
   onColumnsChange?: (columns: 1 | 2 | 3, spacing?: number, divider?: boolean) => void;
   userEmail?: string;
   userName?: string;
+  autosaveStatus?: AutosaveStatus;
+  lastSavedAt?: Date | null;
+  onManualSave?: () => void;
 }
 
 export const DocsHeader: React.FC<DocsHeaderProps> = ({
@@ -89,6 +95,9 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
   onColumnsChange,
   userEmail = "user@postveil.app",
   userName = "Postveil Creator",
+  autosaveStatus = "saved",
+  lastSavedAt,
+  onManualSave,
 }) => {
   const [isWaffleOpen, setIsWaffleOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -724,10 +733,42 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
         </div>
       </div>
 
-      {/* Center: Autosave Status */}
-      <div className="pdocs-status-indicator" title="Origin Private File System Zero-Hostage Storage">
-        <Check size={14} />
-        <span>Saved to local OPFS</span>
+      {/* Center: Live Real-Time Autosave Status */}
+      <div
+        className={`pdocs-status-indicator status-${autosaveStatus}`}
+        onClick={onManualSave}
+        title={
+          autosaveStatus === "saving"
+            ? "Writing changes to local OPFS & persistent storage..."
+            : autosaveStatus === "unsaved"
+            ? "Unsaved edits (saving shortly... click to save now)"
+            : autosaveStatus === "error"
+            ? "Error saving to storage. Click to retry."
+            : `All changes saved to local OPFS vault${lastSavedAt ? ` (${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })})` : ""}. Click to force save.`
+        }
+        style={{ cursor: "pointer", transition: "all 0.2s ease" }}
+      >
+        {autosaveStatus === "saving" ? (
+          <>
+            <RefreshCw size={13} className="pdocs-spin" style={{ color: "#2563eb" }} />
+            <span style={{ color: "#1d4ed8" }}>Saving changes...</span>
+          </>
+        ) : autosaveStatus === "unsaved" ? (
+          <>
+            <Cloud size={13} style={{ color: "#d97706" }} />
+            <span style={{ color: "#b45309" }}>Unsaved changes...</span>
+          </>
+        ) : autosaveStatus === "error" ? (
+          <>
+            <AlertCircle size={13} style={{ color: "#dc2626" }} />
+            <span style={{ color: "#b91c1c" }}>Save error (click to retry)</span>
+          </>
+        ) : (
+          <>
+            <Check size={13} style={{ color: "#15803d" }} />
+            <span>Saved to local OPFS</span>
+          </>
+        )}
       </div>
 
       {/* Right: Actions, View Modes, Profile Popover */}

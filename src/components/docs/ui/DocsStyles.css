@@ -149,6 +149,39 @@
   border-radius: 12px;
   border: 1px solid #bbf7d0;
   font-weight: 500;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.pdocs-status-indicator:hover {
+  filter: brightness(0.97);
+}
+
+.pdocs-status-indicator.status-saving {
+  background-color: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.pdocs-status-indicator.status-unsaved {
+  background-color: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.pdocs-status-indicator.status-error {
+  background-color: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+.pdocs-spin {
+  animation: pdocs-spin-anim 0.8s linear infinite;
+}
+
+@keyframes pdocs-spin-anim {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* Header Right */

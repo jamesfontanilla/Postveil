@@ -10,6 +10,7 @@ import {
   type DocMargins,
   type ReviewMode,
   type CryptographicSignature,
+  type AutosaveStatus,
 } from "./types";
 import { UniversalFormatEngine } from "./formats/UniversalFormatEngine";
 import { DocumentEngine } from "./engine/DocumentEngine";
@@ -130,13 +131,100 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeBlockId, doc]);
 
-  // Auto-save to local OPFS on change
+  const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("saved");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(new Date());
+  const docRef = useRef<UniversalDoc>(doc);
+  docRef.current = doc;
+  const isFirstMount = useRef(true);
+
+  // Manual save flush (can be triggered by user clicking indicator or pressing Ctrl+S)
+  const handleManualSave = async () => {
+    setAutosaveStatus("saving");
+    const currentDoc = docRef.current;
+    currentDoc.metadata.updatedAt = new Date().toISOString();
+    const success = await OpfsDocStorage.saveDocumentLocally(currentDoc);
+    if (success) {
+      setAutosaveStatus("saved");
+      setLastSavedAt(new Date());
+    } else {
+      setAutosaveStatus("error");
+    }
+  };
+
+  // Keyboard shortcut Ctrl+S / Cmd+S manual save trigger
   useEffect(() => {
-    const timer = setTimeout(() => {
-      void OpfsDocStorage.saveDocumentLocally(doc);
-    }, 500);
+    const handleSaveShortcut = (e: KeyboardEvent) => {
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const modKey = isMac ? e.metaKey : e.ctrlKey;
+      if (modKey && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        void handleManualSave();
+      }
+    };
+    window.addEventListener("keydown", handleSaveShortcut);
+    return () => window.removeEventListener("keydown", handleSaveShortcut);
+  }, []);
+
+  // Life-cycle save flush: flush instantly to local storage on visibility hidden or page unload
+  useEffect(() => {
+    const handleFlushOnExit = () => {
+      const currentDoc = docRef.current;
+      void OpfsDocStorage.saveDocumentLocally(currentDoc);
+    };
+
+    window.addEventListener("beforeunload", handleFlushOnExit);
+    window.addEventListener("pagehide", handleFlushOnExit);
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        handleFlushOnExit();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleFlushOnExit);
+      window.removeEventListener("pagehide", handleFlushOnExit);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, []);
+
+  // Real-time responsive autosave engine:
+  // - Instantly marks status as "unsaved" on keystroke
+  // - Debounces write by 400ms of user typing idle
+  // - Shows "Saving changes..." spinner while persisting to OPFS and localStorage
+  // - Marks status as "Saved to local OPFS" with timestamp on completion
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
+    setAutosaveStatus("unsaved");
+
+    const timer = setTimeout(async () => {
+      setAutosaveStatus("saving");
+      const currentDoc = docRef.current;
+      currentDoc.metadata.updatedAt = new Date().toISOString();
+      const success = await OpfsDocStorage.saveDocumentLocally(currentDoc);
+      if (success) {
+        setAutosaveStatus("saved");
+        setLastSavedAt(new Date());
+      } else {
+        setAutosaveStatus("error");
+      }
+    }, 450);
+
     return () => clearTimeout(timer);
   }, [doc]);
+
+  // Periodic safety checkpoint: every 30 seconds, ensure any pending updates or version snapshots are secured
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const currentDoc = docRef.current;
+      void OpfsDocStorage.saveDocumentLocally(currentDoc);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Update markdown source if in split view
   useEffect(() => {
@@ -512,6 +600,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onColumnsChange={handleColumnsChange}
         userEmail={userEmail}
         userName={userName}
+        autosaveStatus={autosaveStatus}
+        lastSavedAt={lastSavedAt}
+        onManualSave={handleManualSave}
       />
 
       {/* Formatting Toolbar */}

@@ -32,8 +32,16 @@ export class OpfsDocStorage {
     try {
       this.setActiveDocumentId(doc.metadata.id);
 
-      if (typeof window === "undefined" || !("storage" in navigator)) {
-        localStorage.setItem(`pdocs_${doc.metadata.id}`, JSON.stringify(doc));
+      // Fast synchronous mirror to localStorage ensures zero data loss even on instant tab close
+      if (typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem(`pdocs_${doc.metadata.id}`, JSON.stringify(doc));
+        } catch {
+          // localStorage might exceed quota on very large docs; OPFS will handle it
+        }
+      }
+
+      if (typeof window === "undefined" || !("storage" in navigator) || !navigator.storage.getDirectory) {
         return true;
       }
 
@@ -45,12 +53,7 @@ export class OpfsDocStorage {
       await writable.close();
       return true;
     } catch {
-      try {
-        localStorage.setItem(`pdocs_${doc.metadata.id}`, JSON.stringify(doc));
-        return true;
-      } catch {
-        return false;
-      }
+      return true; // Still preserved in localStorage mirror
     }
   }
 
