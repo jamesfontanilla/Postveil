@@ -7,6 +7,9 @@ import {
   type DocSuggestion,
   type CryptographicSignature,
 } from "../types";
+import { SovereignEditorState } from "./SovereignEditorState";
+import { SovereignTransaction } from "./SovereignDocTransform";
+import { SovereignNode } from "./SovereignDocModel";
 
 export interface DocOutlineItem {
   id: string;
@@ -14,14 +17,20 @@ export interface DocOutlineItem {
   text: string;
 }
 
+/**
+ * Sovereign Document Engine
+ * Manages document hierarchy, state transitions, undo/redo transactions, and statistics
+ */
 export class DocumentEngine {
   private doc: UniversalDoc;
+  private state: SovereignEditorState;
   private history: UniversalDoc[] = [];
   private historyIndex = -1;
   private maxHistory = 50;
 
   constructor(initialDoc: UniversalDoc) {
     this.doc = JSON.parse(JSON.stringify(initialDoc));
+    this.state = SovereignEditorState.fromUniversalDoc(this.doc);
     this.recalculateStats();
     this.pushHistory();
   }
@@ -34,8 +43,21 @@ export class DocumentEngine {
     };
   }
 
+  public getState(): SovereignEditorState {
+    return this.state;
+  }
+
+  public dispatch(tr: SovereignTransaction) {
+    this.state = this.state.apply(tr);
+    this.doc.blocks = this.state.toDocBlocks();
+    this.recalculateStats();
+    this.doc.metadata.updatedAt = new Date().toISOString();
+    this.pushHistory();
+  }
+
   public setDocument(newDoc: UniversalDoc) {
     this.doc = JSON.parse(JSON.stringify(newDoc));
+    this.state = SovereignEditorState.fromUniversalDoc(this.doc);
     this.recalculateStats();
     this.pushHistory();
   }
@@ -46,24 +68,23 @@ export class DocumentEngine {
   }
 
   public updateBlockContent(id: string, content: string) {
-    const block = this.doc.blocks.find((b) => b.id === id);
-    if (block) {
-      block.content = content;
-      this.recalculateStats();
-      this.doc.metadata.updatedAt = new Date().toISOString();
-    }
+    const tr = this.state.tr().updateContent(id, content);
+    this.state = this.state.apply(tr);
+    this.doc.blocks = this.state.toDocBlocks();
+    this.recalculateStats();
+    this.doc.metadata.updatedAt = new Date().toISOString();
   }
 
   public toggleTaskItem(id: string) {
-    const block = this.doc.blocks.find((b) => b.id === id);
-    if (block && block.type === "taskList") {
-      block.checked = !block.checked;
-      this.pushHistory();
+    const node = this.state.doc.findNode(id);
+    if (node && node.type === "taskList") {
+      const nextChecked = !node.checked;
+      const tr = this.state.tr().updateAttrs(id, { checked: nextChecked });
+      this.dispatch(tr);
     }
   }
 
   public insertBlockAfter(afterId: string, type: BlockType = "paragraph", content = ""): DocBlock {
-    const index = this.doc.blocks.findIndex((b) => b.id === afterId);
     const newBlock: DocBlock = {
       id: `b_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       type,
@@ -71,80 +92,60 @@ export class DocumentEngine {
       level: type === "heading" ? 2 : undefined,
     };
 
-    if (index >= 0) {
-      this.doc.blocks.splice(index + 1, 0, newBlock);
-    } else {
-      this.doc.blocks.push(newBlock);
-    }
-
-    this.recalculateStats();
-    this.pushHistory();
+    const node = new SovereignNode(newBlock);
+    const tr = this.state.tr().insertNode(afterId, node);
+    this.dispatch(tr);
     return newBlock;
   }
 
   public deleteBlock(id: string) {
     if (this.doc.blocks.length <= 1) return; // Keep at least one block
-    this.doc.blocks = this.doc.blocks.filter((b) => b.id !== id);
-    this.recalculateStats();
-    this.pushHistory();
+    const tr = this.state.tr().deleteNode(id);
+    this.dispatch(tr);
   }
 
   public splitBlock(currentId: string, currentContent: string, newContent: string, newType: BlockType = "paragraph"): DocBlock {
-    const blockIndex = this.doc.blocks.findIndex((b) => b.id === currentId);
-    if (blockIndex >= 0) {
-      this.doc.blocks[blockIndex].content = currentContent;
-    }
     const newBlock: DocBlock = {
       id: `b_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       type: newType,
       content: newContent,
     };
-    if (blockIndex >= 0) {
-      this.doc.blocks.splice(blockIndex + 1, 0, newBlock);
-    } else {
-      this.doc.blocks.push(newBlock);
-    }
-    this.recalculateStats();
-    this.pushHistory();
+
+    const node = new SovereignNode(newBlock);
+    const tr = this.state.tr()
+      .updateContent(currentId, currentContent)
+      .insertNode(currentId, node);
+
+    this.dispatch(tr);
     return newBlock;
   }
 
   public updateTableRows(blockId: string, rows: import("../types").TableRow[]) {
-    const block = this.doc.blocks.find((b) => b.id === blockId);
-    if (block) {
-      block.rows = rows;
-      this.recalculateStats();
-      this.pushHistory();
-    }
+    const tr = this.state.tr().updateAttrs(blockId, { rows });
+    this.dispatch(tr);
   }
 
   public updateCallout(blockId: string, variant?: CalloutVariant, title?: string) {
-    const block = this.doc.blocks.find((b) => b.id === blockId);
-    if (block) {
-      if (variant) block.calloutVariant = variant;
-      if (title !== undefined) block.calloutTitle = title;
-      this.pushHistory();
-    }
+    const attrs: Partial<DocBlock> = {};
+    if (variant) attrs.calloutVariant = variant;
+    if (title !== undefined) attrs.calloutTitle = title;
+    const tr = this.state.tr().updateAttrs(blockId, attrs);
+    this.dispatch(tr);
   }
 
   public updateMathLatex(blockId: string, latex: string) {
-    const block = this.doc.blocks.find((b) => b.id === blockId);
-    if (block) {
-      block.latex = latex;
-      block.content = latex;
-      this.pushHistory();
-    }
+    const tr = this.state.tr().updateAttrs(blockId, { latex, content: latex });
+    this.dispatch(tr);
   }
 
   public insertBlocksAfter(afterId: string, newBlocks: DocBlock[]): DocBlock[] {
-    const index = this.doc.blocks.findIndex((b) => b.id === afterId);
-    if (index >= 0) {
-      this.doc.blocks.splice(index + 1, 0, ...newBlocks);
-    } else {
-      this.doc.blocks.push(...newBlocks);
+    const tr = this.state.tr();
+    let currentAfter = afterId;
+    for (const b of newBlocks) {
+      tr.insertNode(currentAfter, new SovereignNode(b));
+      currentAfter = b.id;
     }
-    this.recalculateStats();
-    this.pushHistory();
+    this.dispatch(tr);
     return newBlocks;
   }
 
@@ -163,22 +164,17 @@ export class DocumentEngine {
     imageWidth?: string,
     imageAlign?: "left" | "center" | "right"
   ) {
-    const block = this.doc.blocks.find((b) => b.id === blockId);
-    if (block) {
-      block.imageUrl = imageUrl;
-      if (imageAlt !== undefined) block.imageAlt = imageAlt;
-      if (imageWidth !== undefined) block.imageWidth = imageWidth;
-      if (imageAlign !== undefined) block.imageAlign = imageAlign;
-      this.pushHistory();
-    }
+    const attrs: Partial<DocBlock> = { imageUrl };
+    if (imageAlt !== undefined) attrs.imageAlt = imageAlt;
+    if (imageWidth !== undefined) attrs.imageWidth = imageWidth;
+    if (imageAlign !== undefined) attrs.imageAlign = imageAlign;
+    const tr = this.state.tr().updateAttrs(blockId, attrs);
+    this.dispatch(tr);
   }
 
   public updateTocStyle(blockId: string, tocStyle: "dotted" | "links") {
-    const block = this.doc.blocks.find((b) => b.id === blockId);
-    if (block) {
-      block.tocStyle = tocStyle;
-      this.pushHistory();
-    }
+    const tr = this.state.tr().updateAttrs(blockId, { tocStyle });
+    this.dispatch(tr);
   }
 
   public updatePaperSetup(
@@ -196,21 +192,19 @@ export class DocumentEngine {
   }
 
   public changeBlockType(id: string, newType: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) {
-    const block = this.doc.blocks.find((b) => b.id === id);
-    if (block) {
-      block.type = newType;
-      if (newType === "heading") {
-        block.level = level || 2;
-      }
-      if (newType === "taskList") {
-        block.checked = false;
-      }
-      if (newType === "callout") {
-        block.calloutVariant = "note";
-        block.calloutTitle = "NOTE";
-      }
-      this.pushHistory();
+    const attrs: Partial<DocBlock> = { type: newType };
+    if (newType === "heading") {
+      attrs.level = level || 2;
     }
+    if (newType === "taskList") {
+      attrs.checked = false;
+    }
+    if (newType === "callout") {
+      attrs.calloutVariant = "note";
+      attrs.calloutTitle = "NOTE";
+    }
+    const tr = this.state.tr().updateAttrs(id, attrs);
+    this.dispatch(tr);
   }
 
   public getOutline(): DocOutlineItem[] {
@@ -228,26 +222,42 @@ export class DocumentEngine {
   }
 
   public canUndo(): boolean {
-    return this.historyIndex > 0;
+    return this.state.canUndo() || this.historyIndex > 0;
   }
 
   public canRedo(): boolean {
-    return this.historyIndex < this.history.length - 1;
+    return this.state.canRedo() || this.historyIndex < this.history.length - 1;
   }
 
   public undo(): UniversalDoc | null {
-    if (this.canUndo()) {
+    const undoneState = this.state.undo();
+    if (undoneState) {
+      this.state = undoneState;
+      this.doc.blocks = this.state.toDocBlocks();
+      this.recalculateStats();
+      return this.doc;
+    }
+    if (this.historyIndex > 0) {
       this.historyIndex--;
       this.doc = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
+      this.state = SovereignEditorState.fromUniversalDoc(this.doc);
       return this.doc;
     }
     return null;
   }
 
   public redo(): UniversalDoc | null {
-    if (this.canRedo()) {
+    const redoneState = this.state.redo();
+    if (redoneState) {
+      this.state = redoneState;
+      this.doc.blocks = this.state.toDocBlocks();
+      this.recalculateStats();
+      return this.doc;
+    }
+    if (this.historyIndex < this.history.length - 1) {
       this.historyIndex++;
       this.doc = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
+      this.state = SovereignEditorState.fromUniversalDoc(this.doc);
       return this.doc;
     }
     return null;

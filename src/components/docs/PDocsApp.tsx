@@ -276,6 +276,11 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     }, 30);
   };
 
+  const handleChangeBlockType = (blockId: string, newType: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) => {
+    engineRef.current.changeBlockType(blockId, newType, level);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
   const handleUpdateTableRows = (blockId: string, rows: import("./types").TableRow[]) => {
     engineRef.current.updateTableRows(blockId, rows);
     setDoc({ ...engineRef.current.getDocument() });
@@ -619,6 +624,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 onOpenHyperlinkModal={handleOpenHyperlinkModal}
                 reviewMode={reviewMode}
                 onOpenNewCommentModal={handleOpenNewCommentModal}
+                onChangeBlockType={handleChangeBlockType}
               />
             </div>
           </div>
@@ -646,6 +652,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             onOpenHyperlinkModal={handleOpenHyperlinkModal}
             reviewMode={reviewMode}
             onOpenNewCommentModal={handleOpenNewCommentModal}
+            onChangeBlockType={handleChangeBlockType}
           />
         )}
       </div>

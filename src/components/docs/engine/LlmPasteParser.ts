@@ -37,8 +37,8 @@ export class LlmPasteParser {
       return true;
     }
 
-    // Check HTML signatures for KaTeX or code blocks
-    if (html && (html.includes("class=\"katex\"") || html.includes("<pre><code") || html.includes("<table"))) {
+    // Check HTML signatures for symbolic math or code blocks
+    if (html && (html.includes("class=\"katex\"") || html.includes("class=\"math\"") || html.includes("<pre><code") || html.includes("<table"))) {
       return true;
     }
 

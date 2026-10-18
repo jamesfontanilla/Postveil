@@ -319,7 +319,7 @@ export class UniversalFormatEngine {
               { id: "c4_1", content: "Markdown (.md)" },
               { id: "c4_2", content: "CommonMark + GFM" },
               { id: "c4_3", content: "Obsidian / Notion" },
-              { id: "c4_4", content: "YAML frontmatter + KaTeX math" },
+              { id: "c4_4", content: "YAML frontmatter + Symbolic math" },
             ],
           },
           {

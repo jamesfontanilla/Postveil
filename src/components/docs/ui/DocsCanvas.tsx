@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
-import katex from "katex";
+import { SovereignMathEngine } from "../engine/SovereignMathEngine";
+import { SovereignInputRules } from "../engine/SovereignInputRules";
 import {
   type UniversalDoc,
   type DocBlock,
@@ -66,6 +67,7 @@ interface DocsCanvasProps {
   onOpenHyperlinkModal?: (initialText?: string, initialUrl?: string) => void;
   reviewMode?: ReviewMode;
   onOpenNewCommentModal?: (blockId: string, quotedText?: string) => void;
+  onChangeBlockType?: (blockId: string, type: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) => void;
 }
 
 // Paper dimensions in pixels at 96 DPI
@@ -144,6 +146,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   onOpenHyperlinkModal,
   reviewMode = "editing",
   onOpenNewCommentModal,
+  onChangeBlockType,
 }) => {
   // Equation Editor state
   const [editingMathBlockId, setEditingMathBlockId] = useState<string | null>(null);
@@ -294,6 +297,27 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
         onInsertBlockAfter(block.id, "pageBreak");
       }
       return;
+    }
+
+    if (e.key === " " && block.type === "paragraph") {
+      const text = e.currentTarget.innerText || "";
+      const rule = SovereignInputRules.test(text);
+      if (rule.matched && rule.targetType) {
+        e.preventDefault();
+        onUpdateBlockContent(block.id, rule.cleanText || "");
+        if (rule.targetType === "heading" && rule.level) {
+          onChangeBlockType?.(block.id, "heading", rule.level);
+        } else if (rule.targetType) {
+          onChangeBlockType?.(block.id, rule.targetType);
+          if (rule.targetType === "callout" && onUpdateCallout) {
+            onUpdateCallout(block.id, rule.calloutVariant, rule.calloutTitle);
+          }
+          if (rule.targetType === "mathBlock" && onUpdateMathLatex) {
+            onUpdateMathLatex(block.id, rule.cleanText || "");
+          }
+        }
+        return;
+      }
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
@@ -761,33 +785,24 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
               <div style={{ fontSize: "11px", color: "#64748b", marginBottom: 6, fontWeight: 500 }}>
                 Insert Symbol:
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {[
-                  { label: "∂", code: "\\partial " },
-                  { label: "∇", code: "\\nabla " },
-                  { label: "×", code: "\\times " },
-                  { label: "∫", code: "\\int " },
-                  { label: "∑", code: "\\sum " },
-                  { label: "a/b", code: "\\frac{a}{b} " },
-                  { label: "√x", code: "\\sqrt{x} " },
-                  { label: "π", code: "\\pi " },
-                  { label: "∞", code: "\\infty " },
-                  { label: "±", code: "\\pm " },
-                  { label: "≈", code: "\\approx " },
-                  { label: "ε₀", code: "\\varepsilon_0 " },
-                  { label: "μ₀", code: "\\mu_0 " },
-                ].map((sym) => (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: "110px", overflowY: "auto", padding: "4px" }}>
+                {SovereignMathEngine.getSymbolPalette().map((sym) => (
                   <button
                     key={sym.label}
-                    onClick={() => setMathLatexInput((prev) => prev + sym.code)}
+                    onClick={() => setMathLatexInput((prev) => (prev ? prev + " " : "") + sym.symbol)}
+                    title={sym.tooltip}
                     style={{
                       background: "#f1f5f9",
                       border: "1px solid #e2e8f0",
                       borderRadius: "4px",
-                      padding: "2px 8px",
+                      padding: "3px 8px",
                       fontSize: "12px",
                       cursor: "pointer",
                       fontFamily: "serif",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: "28px",
                     }}
                   >
                     {sym.label}
@@ -796,7 +811,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
               </div>
             </div>
 
-            {/* Live KaTeX Preview */}
+            {/* Live Symbolic Equation Preview */}
             <div style={{ marginBottom: "18px" }}>
               <div style={{ fontSize: "11px", color: "#64748b", marginBottom: 4, fontWeight: 500 }}>
                 Live Compiled Preview:
@@ -814,16 +829,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                   justifyContent: "center",
                 }}
                 dangerouslySetInnerHTML={{
-                  __html: (() => {
-                    try {
-                      return katex.renderToString(mathLatexInput || "\\text{Empty equation}", {
-                        displayMode: true,
-                        throwOnError: false,
-                      });
-                    } catch {
-                      return `<span style="color:#dc2626;">Invalid LaTeX</span>`;
-                    }
-                  })(),
+                  __html: SovereignMathEngine.renderDisplay(mathLatexInput || "\\text{Empty equation}"),
                 }}
               />
             </div>
@@ -1119,17 +1125,12 @@ function renderBlock({
 
     case "mathBlock": {
       const latex = block.latex || block.content || "";
-      let compiledHtml = "";
-      try {
-        compiledHtml = katex.renderToString(latex, { displayMode: true, throwOnError: false });
-      } catch {
-        compiledHtml = `<span style="color:#dc2626;">${latex}</span>`;
-      }
+      const compiledHtml = SovereignMathEngine.renderDisplay(latex);
 
       return (
         <div className="pdocs-math-block" onClick={onOpenMathEditor} title="Click to edit formula">
           <div className="pdocs-math-header">
-            <span>LaTeX Math Equation (Click to edit)</span>
+            <span>Symbolic Mathematical Equation (Click to edit)</span>
             <Edit2 size={13} color="#64748b" />
           </div>
           <div dangerouslySetInnerHTML={{ __html: compiledHtml }} />

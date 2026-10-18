@@ -105,9 +105,9 @@ Postveil is not a loose bundle of micro-apps. It is a unified **Autonomous Compa
 * **Functional Specifications:**
   * **Local-First Speed:** Keystrokes render in <4ms. Document state saves continuously to browser Origin Private File System (OPFS).
   * **Real-Time Multiplayer CRDTs:** Multi-user live editing, cursor tracking, and conflict-free text merging powered by Yjs over WebSockets.
-  * **Block-Level Flexibility:** Slash commands (`/h1`, `/table`, `/code`, `/callout`, `/kanban`, `/math` KaTeX).
+  * **Block-Level Flexibility:** Slash commands (`/h1`, `/table`, `/code`, `/callout`, `/kanban`, `/math` symbolic equations).
   * **Universal Interoperability:** Native import and export for `.docx`, `.md` (with YAML frontmatter), `.html`, and vector `.pdf`.
-* **Technical Engine:** TipTap / ProseMirror core, Yjs CRDTs, WebAssembly OpenXML parser, OPFS.
+* **Technical Engine:** Sovereign Document State Engine, Yjs CRDTs, WebAssembly OpenXML parser, OPFS.
 * **Format & Storage:** `.pdoc` (Open zipped container with CRDT history), `.docx`, `.md`.
 * **Economics:** \$0.00. 100% client-side compute; server only broadcasts lightweight binary CRDT deltas.
 

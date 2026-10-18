@@ -267,7 +267,7 @@ export const htmlCodec: DocumentCodec = {
       border-radius: 8px;
       text-align: center;
       margin: 1.5em 0;
-      font-family: "KaTeX_Main", "Times New Roman", serif;
+      font-family: "SovereignMath_Main", "Times New Roman", serif;
       font-size: 1.2rem;
     }
     @media print {
