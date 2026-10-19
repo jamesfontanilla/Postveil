@@ -2232,7 +2232,7 @@ async function handleD1Mfa(request: Request, env: Env): Promise<Response | null>
     if (!challenge) return error("That verification attempt is invalid or expired", 401);
     const secret = await decryptTotpSecret(env.MFA_ENCRYPTION_KEY || "", challenge.secret_iv, challenge.secret_ciphertext);
     const currentTime = Date.now();
-    const valid = await Promise.all([-1, 0, 1].map((offset) => totpCode(secret, currentTime + offset * 30_000))).then((codes) => codes.some((candidate) => mfaConstantTimeEqual(candidate, code)));
+    const valid = await Promise.all([-2, -1, 0, 1, 2].map((offset) => totpCode(secret, currentTime + offset * 30_000))).then((codes) => codes.some((candidate) => mfaConstantTimeEqual(candidate, code)));
     if (!valid) {
       await env.DB.prepare("UPDATE pv_mfa_challenges SET attempts = attempts + 1 WHERE id = ?1 AND used_at IS NULL").bind(challenge.id).run();
       return error("That authenticator code was not accepted", 401);
