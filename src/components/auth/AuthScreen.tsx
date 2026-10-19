@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Check, Mail, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Globe2, Loader2, Mail, ShieldCheck, Sparkles, XCircle } from "lucide-react";
 import BrandMark from "../BrandMark";
 import { TURNSTILE_SITE_KEY } from "../../types/mail";
 import { publicApiFetch, recordExplicitSignIn } from "../../lib/api";
 import { requireSupabase } from "../../lib/auth";
+
+type SignupIdentityType = "sovereign" | "custom";
 
 export default function AuthScreen({
   initialMode = "signin",
@@ -15,18 +17,27 @@ export default function AuthScreen({
   onBack?: () => void;
 }) {
   const [mode, setMode] = useState<"signin" | "signup" | "forgot" | "recovery">(initialMode);
-  const [email, setEmail] = useState(() => {
+  const [identityType, setIdentityType] = useState<SignupIdentityType>("sovereign");
+  const [sovereignHandle, setSovereignHandle] = useState(() => {
     try {
       const claimed = sessionStorage.getItem("postveil_claimed_handle");
-      if (claimed && initialMode === "signup") {
-        const handleOnly = claimed.replace(/\.postveil\.me$/i, "");
-        return `${handleOnly}@postveil.me`;
+      if (claimed) {
+        return claimed
+          .replace(/\.postveil\.me$/i, "")
+          .replace(/@postveil\.me$/i, "")
+          .toLowerCase()
+          .replace(/[^a-z0-9._-]/g, "");
       }
     } catch {
       // Ignore storage access errors
     }
     return "";
   });
+  const [displayName, setDisplayName] = useState("");
+  const [handleStatus, setHandleStatus] = useState<"idle" | "checking" | "available" | "unavailable">("idle");
+  const [handleReason, setHandleReason] = useState<string>("");
+
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,6 +61,47 @@ export default function AuthScreen({
     const timer = window.setInterval(() => setResendCooldown((current) => Math.max(0, current - 1)), 1000);
     return () => window.clearInterval(timer);
   }, [resendCooldown]);
+
+  useEffect(() => {
+    if (mode !== "signup" || identityType !== "sovereign") return undefined;
+    const clean = sovereignHandle.trim().toLowerCase();
+    if (!clean) {
+      setHandleStatus("idle");
+      setHandleReason("");
+      return undefined;
+    }
+    if (clean.length < 3) {
+      setHandleStatus("unavailable");
+      setHandleReason("Handle must be at least 3 characters");
+      return undefined;
+    }
+    setHandleStatus("checking");
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await publicApiFetch<{ available: boolean; reason?: string | null }>(
+          `/api/auth/check-handle?handle=${encodeURIComponent(clean)}`,
+        );
+        if (cancelled) return;
+        if (res.available) {
+          setHandleStatus("available");
+          setHandleReason("");
+        } else {
+          setHandleStatus("unavailable");
+          setHandleReason(res.reason || `@${clean}.postveil.me is unavailable`);
+        }
+      } catch {
+        if (!cancelled) {
+          setHandleStatus("available");
+          setHandleReason("");
+        }
+      }
+    }, 280);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sovereignHandle, mode, identityType]);
 
   useEffect(() => {
     if (mode !== "signup") return undefined;
@@ -107,18 +159,49 @@ export default function AuthScreen({
       } else if (mode === "recovery") {
         await publicApiFetch("/api/auth/mfa-recovery", { method: "POST", body: JSON.stringify({ email, code: recoveryCode }) });
         setNotice("If the details are valid, a recovery link will arrive shortly. Check your inbox.");
-      } else {
-        if (mode === "signup" && !captchaToken) throw new Error("Complete the security check before creating an account");
-        const result =
-          mode === "signin"
-            ? await client.auth.signInWithPassword({ email, password })
-            : await client.auth.signUp({ email, password, options: { captchaToken } });
+      } else if (mode === "signin") {
+        const result = await client.auth.signInWithPassword({ email: email.trim(), password });
         if (result.error) throw result.error;
-        if (mode === "signin") await recordExplicitSignIn(result.data.session, "password");
-        if (mode === "signup" && !result.data.session) {
-          setVerificationEmail(email.trim());
-          setVerificationPending(true);
-          setResendCooldown(45);
+        await recordExplicitSignIn(result.data.session, "password");
+      } else {
+        if (!captchaToken) throw new Error("Complete the security check before creating an account");
+        if (identityType === "sovereign") {
+          const clean = sovereignHandle.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+          if (clean.length < 3) throw new Error("Choose a handle of at least 3 characters");
+          const targetEmail = `${clean}@postveil.me`;
+          const result = await client.auth.signUp({
+            email: targetEmail,
+            password,
+            options: {
+              handle: clean,
+              displayName: displayName.trim() || clean,
+              captchaToken,
+            },
+          });
+          if (result.error) throw result.error;
+          try {
+            sessionStorage.removeItem("postveil_claimed_handle");
+          } catch {
+            // ignore
+          }
+          if (result.data.session) {
+            await recordExplicitSignIn(result.data.session, "password");
+          }
+        } else {
+          const result = await client.auth.signUp({
+            email: email.trim(),
+            password,
+            options: {
+              displayName: displayName.trim(),
+              captchaToken,
+            },
+          });
+          if (result.error) throw result.error;
+          if (!result.data.session) {
+            setVerificationEmail(email.trim());
+            setVerificationPending(true);
+            setResendCooldown(45);
+          }
         }
       }
     } catch (authError) {
@@ -135,7 +218,7 @@ export default function AuthScreen({
     try {
       const result = await publicApiFetch<{ message?: string }>("/api/auth/resend-verification", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: verificationEmail || email, password }),
       });
       setNotice(result.message || "If the account can receive mail, a verification link will arrive shortly.");
       setResendCooldown(45);
@@ -248,6 +331,8 @@ export default function AuthScreen({
       </main>
     );
 
+  const previewHandle = sovereignHandle.trim().toLowerCase() || "yourname";
+
   return (
     <main className="auth-shell">
       <section className="auth-card">
@@ -259,34 +344,229 @@ export default function AuthScreen({
         <BrandMark />
         {mode === "signup" && (
           <div className="auth-journey" aria-label="Signup progress">
-            <span className="active">Account</span>
-            <span>Verify</span>
-            <span>Set up</span>
+            <span className="active">Identity</span>
+            <span className={identityType === "sovereign" ? "active" : ""}>
+              {identityType === "sovereign" ? "Auto-Verified" : "Verify"}
+            </span>
+            <span className={identityType === "sovereign" ? "active" : ""}>Suite Ready</span>
           </div>
         )}
-        <p className="eyebrow">PRIVATE MAIL / {new Date().getFullYear()}</p>
-        <h1>{mode === "signup" ? "Start with your account." : mode === "forgot" || mode === "recovery" ? "Get back in safely." : "Keep your address close."}</h1>
+        <p className="eyebrow">SOVEREIGN SUITE / {new Date().getFullYear()}</p>
+        <h1>
+          {mode === "signup"
+            ? identityType === "sovereign"
+              ? "Claim your sovereign handle."
+              : "Connect with an existing email."
+            : mode === "forgot" || mode === "recovery"
+            ? "Get back in safely."
+            : "Sign in to your workspace."}
+        </h1>
         <p className="auth-copy">
           {mode === "signup"
-            ? "Create your Postveil account first. We’ll verify your email, then guide you through connecting a domain."
+            ? identityType === "sovereign"
+              ? "No external email required. Claim your free @postveil.me mailbox and wildcard *.postveil.me subdomain — provisioned and verified immediately."
+              : "Use an existing email address to manage your account and connect a custom domain via DNS."
             : mode === "forgot"
             ? "We’ll send a one-time reset link to your sign-in address or a verified recovery email."
             : mode === "recovery"
             ? "Use one unused recovery code to request a one-time password reset link."
-            : "A focused mailbox for your custom domain. Sign in to open messages across desktop and mobile."}
+            : "Enter your sovereign handle (e.g. alex, alex@postveil.me, or alex.postveil.me) or custom domain email."}
         </p>
+
+        {mode === "signup" && (
+          <div
+            role="tablist"
+            aria-label="Identity type"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "6px",
+              padding: "4px",
+              background: "rgba(15, 41, 30, 0.06)",
+              borderRadius: "10px",
+              marginBottom: "16px",
+            }}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={identityType === "sovereign"}
+              onClick={() => {
+                setIdentityType("sovereign");
+                setError("");
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                padding: "9px 10px",
+                borderRadius: "8px",
+                border: identityType === "sovereign" ? "1px solid rgba(15, 41, 30, 0.14)" : "1px solid transparent",
+                background: identityType === "sovereign" ? "#ffffff" : "transparent",
+                color: identityType === "sovereign" ? "#0f291e" : "#52615b",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                boxShadow: identityType === "sovereign" ? "0 2px 6px rgba(15, 41, 30, 0.06)" : "none",
+              }}
+            >
+              <Sparkles size={14} />
+              <span>Free .postveil.me Handle</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={identityType === "custom"}
+              onClick={() => {
+                setIdentityType("custom");
+                setError("");
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "6px",
+                padding: "9px 10px",
+                borderRadius: "8px",
+                border: identityType === "custom" ? "1px solid rgba(15, 41, 30, 0.14)" : "1px solid transparent",
+                background: identityType === "custom" ? "#ffffff" : "transparent",
+                color: identityType === "custom" ? "#0f291e" : "#52615b",
+                fontWeight: 600,
+                fontSize: "13px",
+                cursor: "pointer",
+                boxShadow: identityType === "custom" ? "0 2px 6px rgba(15, 41, 30, 0.06)" : "none",
+              }}
+            >
+              <Globe2 size={14} />
+              <span>Bring Custom Email</span>
+            </button>
+          </div>
+        )}
+
         <form onSubmit={submit} className="auth-form">
-          <label>
-            Email address
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
-          </label>
+          {mode === "signup" && identityType === "sovereign" ? (
+            <>
+              <label>
+                Your Sovereign Handle
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    border: "1px solid #c5d2cb",
+                    borderRadius: "10px",
+                    background: "#ffffff",
+                    overflow: "hidden",
+                    marginTop: "6px",
+                  }}
+                >
+                  <input
+                    type="text"
+                    required
+                    value={sovereignHandle}
+                    onChange={(event) =>
+                      setSovereignHandle(
+                        event.target.value
+                          .toLowerCase()
+                          .replace(/\.postveil\.me$/i, "")
+                          .replace(/@postveil\.me$/i, "")
+                          .replace(/[^a-z0-9._-]/g, "")
+                          .slice(0, 32),
+                      )
+                    }
+                    placeholder="yourname"
+                    autoComplete="username"
+                    style={{
+                      border: "none",
+                      outline: "none",
+                      flex: 1,
+                      padding: "11px 12px",
+                      fontSize: "15px",
+                      fontWeight: 600,
+                      background: "transparent",
+                    }}
+                  />
+                  <span
+                    style={{
+                      padding: "0 12px",
+                      color: "#3b5249",
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      background: "#f3f7f4",
+                      borderLeft: "1px solid #dce6e0",
+                      height: "42px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    .postveil.me
+                  </span>
+                </div>
+              </label>
+
+              <div
+                style={{
+                  background: "#f4f8f5",
+                  border: "1px solid #d7e4dc",
+                  borderRadius: "10px",
+                  padding: "10px 12px",
+                  fontSize: "12.5px",
+                  color: "#2b3e36",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                  <span>
+                    Primary Inbox: <strong>{previewHandle}@postveil.me</strong>
+                  </span>
+                  {handleStatus === "checking" && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#52615b" }}>
+                      <Loader2 size={12} className="spin" /> Checking…
+                    </span>
+                  )}
+                  {handleStatus === "available" && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#15803d", fontWeight: 600 }}>
+                      <Check size={13} /> Available
+                    </span>
+                  )}
+                  {handleStatus === "unavailable" && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#b91c1c", fontWeight: 600 }}>
+                      <XCircle size={13} /> {handleReason || "Unavailable"}
+                    </span>
+                  )}
+                </div>
+                <span style={{ color: "#4d6158" }}>
+                  Wildcard Subdomain: <strong>*@{previewHandle}.postveil.me</strong> (Unlimited aliases included)
+                </span>
+              </div>
+
+              <label>
+                Display Name (optional)
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value.slice(0, 80))}
+                  placeholder="Alex Rivera"
+                  autoComplete="name"
+                />
+              </label>
+            </>
+          ) : (
+            <label>
+              {mode === "signin" ? "Sovereign handle or email address" : "Email address"}
+              <input
+                type={mode === "signin" ? "text" : "email"}
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder={mode === "signin" ? "alex, alex@postveil.me, or you@domain.com" : "you@yourdomain.com"}
+                autoComplete="username"
+              />
+            </label>
+          )}
           {mode !== "forgot" && mode !== "recovery" && (
             <label>
               Password
@@ -340,8 +620,21 @@ export default function AuthScreen({
           )}
           {error && <div className="form-error">{error}</div>}
           {notice && <div className="form-notice">{notice}</div>}
-          <button className="primary-button" disabled={busy}>
-            {busy ? "Working…" : mode === "forgot" ? "Send reset link" : mode === "recovery" ? "Request recovery link" : mode === "signin" ? "Open mailbox" : "Create account"}
+          <button
+            className="primary-button"
+            disabled={busy || (mode === "signup" && identityType === "sovereign" && handleStatus === "unavailable")}
+          >
+            {busy
+              ? "Provisioning…"
+              : mode === "forgot"
+              ? "Send reset link"
+              : mode === "recovery"
+              ? "Request recovery link"
+              : mode === "signin"
+              ? "Open workspace"
+              : identityType === "sovereign"
+              ? `Claim ${previewHandle}.postveil.me & Open Suite`
+              : "Create account"}
           </button>
           {mode === "signup" && notice && (
             <button type="button" className="text-button auth-link" onClick={() => void resendVerification()} disabled={busy}>
@@ -402,7 +695,7 @@ export default function AuthScreen({
               setNotice("");
             }}
           >
-            {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Create one"}
+            {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Claim a free .postveil.me handle"}
           </button>
         )}
         {(mode === "forgot" || mode === "recovery") && (
@@ -421,10 +714,12 @@ export default function AuthScreen({
       </section>
       <aside className="auth-aside">
         <div className="aside-note">
-          <span className="status-dot" /> system ready
+          <span className="status-dot" /> sovereign edge ready
         </div>
-        <p className="aside-quote">“The inbox is the room where your attention either gathers or scatters.”</p>
-        <p className="aside-meta">Your messages stay private, organized, and addressed to the names you chose.</p>
+        <p className="aside-quote">“One sovereign identity. Twenty private pillars. Zero corporate surveillance.”</p>
+        <p className="aside-meta">
+          Every <strong>username.postveil.me</strong> handle includes an instant primary inbox, unlimited wildcard aliases, and local-first OPFS encryption.
+        </p>
       </aside>
     </main>
   );

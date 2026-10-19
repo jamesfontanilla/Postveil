@@ -9,6 +9,7 @@ import {
   Mail,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import BrandMark from "../BrandMark";
 import type {
@@ -23,7 +24,7 @@ import type { JsonRecord, Session } from "../../lib/auth";
 
 const ONBOARDING_STEPS = [
   { label: "Purpose", note: "Choose your starting point" },
-  { label: "Domain", note: "Name the address you own" },
+  { label: "Domain", note: "Claim handle or connect domain" },
   { label: "DNS check", note: "Connect mail safely" },
   { label: "Address", note: "Create your first mailbox" },
   { label: "Done", note: "Your next step is clear" },
@@ -100,9 +101,27 @@ const DNS_PROVIDER_GUIDES: Record<string, { path: string; where: string; note: s
 export default function OnboardingWizard({ session, onComplete }: { session: Session; onComplete: () => void }) {
   const [step, setStep] = useState<OnboardingStep>(0);
   const [goal, setGoal] = useState<OnboardingState["goal"]>("personal");
+  const [domainMode, setDomainMode] = useState<"sovereign" | "custom">("sovereign");
+  const [sovereignHandle, setSovereignHandle] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("postveil_claimed_handle");
+      if (saved) return saved.toLowerCase().replace(/[^a-z0-9-]/g, "");
+    } catch {
+      // ignore
+    }
+    const emailLocal = (session.user.email || "").split("@")[0] || "";
+    return emailLocal.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 24);
+  });
+  const [handleStatus, setHandleStatus] = useState<{
+    checking: boolean;
+    available: boolean | null;
+    reason?: string;
+  }>({ checking: false, available: null });
   const [domain, setDomain] = useState("");
   const [mailboxLocal, setMailboxLocal] = useState("hello");
-  const [displayName, setDisplayName] = useState("My mailbox");
+  const [displayName, setDisplayName] = useState(() =>
+    String(session.user.user_metadata?.display_name || session.user.email?.split("@")[0] || "My mailbox"),
+  );
   const [dnsProvider, setDnsProvider] = useState<string>("Namecheap");
   const [domainStatus, setDomainStatus] = useState<OnboardingState["domainStatus"]>("pending");
   const [mailboxAddress, setMailboxAddress] = useState("");
@@ -113,6 +132,38 @@ export default function OnboardingWizard({ session, onComplete }: { session: Ses
   const [copiedRecord, setCopiedRecord] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (step !== 1 || domainMode !== "sovereign") return;
+    const clean = sovereignHandle.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+    if (!clean || clean.length < 2) {
+      setHandleStatus({ checking: false, available: false, reason: "Handle must be at least 2 characters." });
+      return;
+    }
+    setHandleStatus({ checking: true, available: null });
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/auth/check-handle?handle=${encodeURIComponent(clean)}`);
+        const data = (await res.json()) as { available?: boolean; reason?: string };
+        if (!cancelled) {
+          setHandleStatus({
+            checking: false,
+            available: Boolean(data.available),
+            reason: data.reason,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setHandleStatus({ checking: false, available: true });
+        }
+      }
+    }, 240);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [step, domainMode, sovereignHandle]);
 
   useEffect(() => {
     let active = true;
@@ -200,6 +251,54 @@ export default function OnboardingWizard({ session, onComplete }: { session: Ses
       onComplete();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Setup could not be skipped");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function claimSovereignHandle() {
+    const clean = sovereignHandle.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+    if (!clean || clean.length < 2) {
+      setError("Choose a handle with at least 2 characters (letters, numbers, or hyphens).");
+      return;
+    }
+    if (handleStatus.available === false) {
+      setError(handleStatus.reason || "That handle is already taken. Try another one.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const created = await apiFetch<{ address?: string; sovereignDomain?: string }>("/api/mailboxes", {
+        method: "POST",
+        body: JSON.stringify({
+          sovereignHandle: clean,
+          displayName: displayName.trim() || clean,
+        }),
+      });
+      const createdAddress = created.address || `${clean}@postveil.me`;
+      const createdDomain = created.sovereignDomain || `${clean}.postveil.me`;
+      setMailboxAddress(createdAddress);
+      setDomain(createdDomain);
+      setDomainStatus("ready");
+      await persist({
+        step: 4,
+        completed: true,
+        goal,
+        domain: createdDomain,
+        mailboxLocal: clean,
+        displayName: displayName.trim() || clean,
+        mailboxAddress: createdAddress,
+        domainStatus: "ready",
+      });
+      try {
+        sessionStorage.removeItem("postveil_claimed_handle");
+      } catch {
+        // ignore
+      }
+      onComplete();
+    } catch (claimError) {
+      setError(claimError instanceof Error ? claimError.message : "Could not claim sovereign handle");
     } finally {
       setBusy(false);
     }
@@ -322,7 +421,7 @@ export default function OnboardingWizard({ session, onComplete }: { session: Ses
               <em>properly addressed.</em>
             </h1>
             <p>
-              Bring the name you already own. Postveil turns it into a calm, private mailbox in a few deliberate steps.
+              Claim your free <strong>username.postveil.me</strong> sovereign identity in one click, or connect a custom domain you already own.
             </p>
           </div>
           <div className="onboarding-rail-foot">
@@ -405,28 +504,113 @@ export default function OnboardingWizard({ session, onComplete }: { session: Ses
             {step === 1 && (
               <>
                 <p className="eyebrow">THE NAME PEOPLE WILL USE</p>
-                <h2>Which domain should Postveil connect?</h2>
-                <p className="onboarding-lede">Use a domain you control. We’ll show the exact handoff for your DNS provider next.</p>
-                <label className="onboarding-field">
-                  Your domain
-                  <input
-                    autoFocus
-                    value={domain}
-                    onChange={(event) => {
-                      setDomain(normalizeDomain(event.target.value));
-                      setDomainStatusData(null);
-                      setDomainStatus("pending");
+                <h2>Choose your address path</h2>
+                <p className="onboarding-lede">
+                  Claim a free <strong>.postveil.me</strong> sovereign subdomain instantly (zero DNS setup required), or connect a custom domain you control.
+                </p>
+
+                <div className="onboarding-choice-grid" role="radiogroup" aria-label="Domain path" style={{ marginBottom: 18 }}>
+                  <button
+                    type="button"
+                    className={`onboarding-choice${domainMode === "sovereign" ? " selected" : ""}`}
+                    onClick={() => {
+                      setDomainMode("sovereign");
+                      setError("");
                     }}
-                    placeholder="yourcompany.com"
-                    autoComplete="url"
-                  />
-                </label>
-                <div className="onboarding-hint">
-                  <Globe2 size={17} />
-                  <span>
-                    Example: if your address is <strong>hello@acme.com</strong>, enter <strong>acme.com</strong>.
-                  </span>
+                  >
+                    <Sparkles size={20} />
+                    <span>
+                      <strong>Free .postveil.me Identity (Instant)</strong>
+                      <small>Includes username@postveil.me + *@username.postveil.me wildcard routing.</small>
+                    </span>
+                    {domainMode === "sovereign" && <Check size={17} aria-hidden="true" />}
+                  </button>
+                  <button
+                    type="button"
+                    className={`onboarding-choice${domainMode === "custom" ? " selected" : ""}`}
+                    onClick={() => {
+                      setDomainMode("custom");
+                      setError("");
+                    }}
+                  >
+                    <Globe2 size={20} />
+                    <span>
+                      <strong>Connect Custom Domain</strong>
+                      <small>Bring yourcompany.com via guided MX, SPF, DKIM & DMARC records.</small>
+                    </span>
+                    {domainMode === "custom" && <Check size={17} aria-hidden="true" />}
+                  </button>
                 </div>
+
+                {domainMode === "sovereign" ? (
+                  <>
+                    <label className="onboarding-field">
+                      Claim your handle
+                      <div className="email-composer">
+                        <input
+                          autoFocus
+                          value={sovereignHandle}
+                          onChange={(event) => {
+                            setSovereignHandle(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 32));
+                            setError("");
+                          }}
+                          placeholder="yourname"
+                          autoComplete="username"
+                        />
+                        <span>.postveil.me</span>
+                      </div>
+                    </label>
+                    <label className="onboarding-field">
+                      Display name
+                      <input
+                        value={displayName}
+                        onChange={(event) => setDisplayName(event.target.value.slice(0, 120))}
+                        placeholder="Your name or studio"
+                        autoComplete="name"
+                      />
+                    </label>
+                    <div className="onboarding-hint">
+                      <ShieldCheck size={17} />
+                      <span>
+                        {handleStatus.checking ? (
+                          <>Checking availability for <strong>{sovereignHandle || "yourname"}.postveil.me</strong>…</>
+                        ) : handleStatus.available ? (
+                          <>
+                            <strong>{sovereignHandle}.postveil.me</strong> is available! You’ll immediately receive{" "}
+                            <strong>{sovereignHandle}@postveil.me</strong> and wildcard{" "}
+                            <strong>*@{sovereignHandle}.postveil.me</strong>.
+                          </>
+                        ) : (
+                          <>{handleStatus.reason || "Enter at least 2 characters to check availability."}</>
+                        )}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <label className="onboarding-field">
+                      Your domain
+                      <input
+                        autoFocus
+                        value={domain}
+                        onChange={(event) => {
+                          setDomain(normalizeDomain(event.target.value));
+                          setDomainStatusData(null);
+                          setDomainStatus("pending");
+                        }}
+                        placeholder="yourcompany.com"
+                        autoComplete="url"
+                      />
+                    </label>
+                    <div className="onboarding-hint">
+                      <Globe2 size={17} />
+                      <span>
+                        Example: if your address is <strong>hello@acme.com</strong>, enter <strong>acme.com</strong>.
+                      </span>
+                    </div>
+                  </>
+                )}
+
                 {error && (
                   <div className="form-error" role="alert">
                     {error}
@@ -436,20 +620,32 @@ export default function OnboardingWizard({ session, onComplete }: { session: Ses
                   <button className="secondary-button" type="button" onClick={() => setStep(0)}>
                     <ArrowLeft size={16} /> Back
                   </button>
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={() => {
-                      if (!cleanDomain || !cleanDomain.includes(".")) {
-                        setError("Enter a domain such as yourcompany.com.");
-                        return;
-                      }
-                      void advance(2, { domain: cleanDomain });
-                    }}
-                    disabled={busy}
-                  >
-                    Review connection <ArrowRight size={16} />
-                  </button>
+                  {domainMode === "sovereign" ? (
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => void claimSovereignHandle()}
+                      disabled={busy || handleStatus.checking || handleStatus.available === false}
+                    >
+                      {busy ? "Provisioning inbox…" : `Claim ${sovereignHandle || "handle"}.postveil.me & Open Inbox`}{" "}
+                      <ArrowRight size={16} />
+                    </button>
+                  ) : (
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => {
+                        if (!cleanDomain || !cleanDomain.includes(".")) {
+                          setError("Enter a domain such as yourcompany.com.");
+                          return;
+                        }
+                        void advance(2, { domain: cleanDomain });
+                      }}
+                      disabled={busy}
+                    >
+                      Review connection <ArrowRight size={16} />
+                    </button>
+                  )}
                 </div>
               </>
             )}

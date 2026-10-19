@@ -543,10 +543,260 @@ function domainOf(address: string): string {
   return cleanAddress(address).split("@")[1] || "unknown";
 }
 
+const RESERVED_SOVEREIGN_HANDLES = new Set([
+  "admin", "postmaster", "support", "noreply", "no-reply", "docs", "accounts",
+  "mail", "root", "system", "security", "abuse", "hostmaster", "webmaster",
+  "api", "www", "status", "billing", "help", "info", "contact", "legal",
+  "privacy", "sales", "team", "official", "postveil", "dmarc", "bounce", "bounces",
+]);
+
+function normalizeSovereignHandle(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\.postveil\.me$/i, "")
+    .replace(/@postveil\.me$/i, "")
+    .replace(/[^a-z0-9._-]/g, "");
+}
+
+function isValidSovereignHandle(handle: string): { valid: boolean; reason?: string } {
+  const clean = normalizeSovereignHandle(handle);
+  if (!clean || clean.length < 3) return { valid: false, reason: "Handle must be at least 3 characters long" };
+  if (clean.length > 32) return { valid: false, reason: "Handle must be 32 characters or fewer" };
+  if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(clean)) return { valid: false, reason: "Handle can only use letters, numbers, dots, hyphens, or underscores" };
+  if (RESERVED_SOVEREIGN_HANDLES.has(clean)) return { valid: false, reason: "This system handle is reserved" };
+  return { valid: true };
+}
+
+async function isSovereignHandleAvailable(env: Env, handle: string, excludeUserId?: string): Promise<boolean> {
+  const clean = normalizeSovereignHandle(handle);
+  const check = isValidSovereignHandle(clean);
+  if (!check.valid) return false;
+  const appDomain = configuredAppDomain(env);
+  const primaryAddress = `${clean}@${appDomain}`;
+  const existingUser = await getUserByEmail(env, primaryAddress);
+  if (existingUser && (!excludeUserId || String(existingUser.id) !== excludeUserId)) return false;
+  const existingMailboxes = await d1Request<Mailbox[]>(env, `mailboxes?address=eq.${encodeURIComponent(primaryAddress)}&limit=1`).catch(() => []);
+  if (existingMailboxes[0] && (!excludeUserId || existingMailboxes[0].owner_id !== excludeUserId)) return false;
+  return true;
+}
+
+async function provisionSovereignIdentity(
+  env: Env,
+  user: { id: string; email?: string; user_metadata?: JsonRecord },
+  handleInput: string,
+  displayNameInput?: string,
+): Promise<{ mailbox: Mailbox; handle: string; subdomain: string; primaryAddress: string }> {
+  const clean = normalizeSovereignHandle(handleInput);
+  const validation = isValidSovereignHandle(clean);
+  if (!validation.valid) throw new Error(validation.reason || "Invalid handle");
+  const available = await isSovereignHandleAvailable(env, clean, user.id);
+  if (!available) throw new Error(`@${clean}.postveil.me is already taken. Try another handle.`);
+
+  const appDomain = configuredAppDomain(env);
+  const primaryAddress = `${clean}@${appDomain}`;
+  const subdomain = `${clean}.${appDomain}`;
+  const displayName = (displayNameInput || String(user.user_metadata?.display_name || "") || clean).trim().slice(0, 120) || clean;
+  const nowIso = new Date().toISOString();
+
+  await dbRequest(env, "profiles", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ id: user.id, display_name: displayName }),
+  }).catch(() => undefined);
+
+  const onboardingState = {
+    step: 4,
+    completed: true,
+    goal: "personal",
+    domain: subdomain,
+    mailboxLocal: clean,
+    displayName,
+    dnsProvider: "Postveil Sovereign Edge",
+    domainStatus: "ready",
+    mailboxAddress: primaryAddress,
+  };
+
+  await dbRequest(env, "user_settings", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      owner_id: user.id,
+      onboarding_state: onboardingState,
+      onboarding_completed_at: nowIso,
+      updated_at: nowIso,
+    }),
+  }).catch(() => undefined);
+
+  const organization = await ensureOrganization(env, { id: user.id, email: primaryAddress, user_metadata: { display_name: displayName } });
+
+  await env.DB.prepare(
+    `INSERT INTO pv_domain_verifications(id,user_id,domain,provider,status,zone_id,account_id,dns_ready,verified_at,last_checked_at,created_at,updated_at)
+     VALUES (?1,?2,?3,'cloudflare','verified','sovereign-edge',NULL,1,?4,?4,?4,?4)
+     ON CONFLICT(user_id,domain) DO UPDATE SET status='verified',dns_ready=1,verified_at=excluded.verified_at,last_checked_at=excluded.last_checked_at,updated_at=excluded.updated_at`
+  ).bind(crypto.randomUUID(), user.id, subdomain, nowIso).run().catch(() => undefined);
+
+  await dbRequest(env, "domains", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      id: `dom_${clean}`,
+      owner_id: user.id,
+      domain: subdomain,
+      status: "verified",
+      dkim: "verified",
+      spf: "verified",
+      dmarc: "verified",
+      mx: "verified",
+      catchAll: true,
+      created_at: nowIso,
+    }),
+  }).catch(() => undefined);
+
+  const existingBox = await getMailbox(env, user.id, primaryAddress);
+  let mailbox: Mailbox;
+  const mailboxSettings = {
+    sovereign_handle: clean,
+    sovereign_subdomain: subdomain,
+    wildcard_enabled: true,
+    domain_verification_status: "verified",
+    domain_verification_provider: "cloudflare",
+    mx_target_verified: true,
+  };
+
+  if (existingBox) {
+    const updated = await dbRequest<Mailbox[]>(env, `mailboxes?id=eq.${encodeURIComponent(existingBox.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        display_name: displayName,
+        is_default: true,
+        can_send: true,
+        can_receive: true,
+        settings: { ...objectValue(existingBox.settings), ...mailboxSettings },
+      }),
+    });
+    mailbox = updated[0] || { ...existingBox, can_send: true, can_receive: true, is_default: true, settings: mailboxSettings };
+  } else {
+    const currentDefault = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&is_default=eq.true&limit=1`).catch(() => []);
+    const isDefault = !currentDefault[0];
+    const createdRows = await dbRequest<Mailbox[]>(env, "mailboxes", {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        owner_id: user.id,
+        address: primaryAddress,
+        display_name: displayName,
+        is_default: isDefault,
+        can_send: true,
+        can_receive: true,
+        settings: mailboxSettings,
+      }),
+    });
+    mailbox = createdRows[0];
+  }
+
+  if (mailbox) {
+    await dbRequest(env, "mailbox_admin_settings", {
+      method: "POST",
+      headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+      body: JSON.stringify({
+        mailbox_id: mailbox.id,
+        organization_id: organization.id,
+        status: "active",
+        quota_bytes: 5 * 1024 * 1024 * 1024,
+        sending_limit_daily: 250,
+        inactivity_days: 90,
+        last_activity_at: nowIso,
+      }),
+    }).catch(() => undefined);
+
+    const existingMessages = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
+    if (!existingMessages.length) {
+      const welcomeSubject = `Welcome to your Sovereign Identity (${subdomain})`;
+      const threadId = await findOrCreateThread(env, user.id, welcomeSubject).catch(() => crypto.randomUUID());
+      const welcomeText = [
+        `Welcome to Postveil, ${displayName}!`,
+        ``,
+        `Your sovereign identity and cryptographically isolated workspace are now live:`,
+        `• Primary Mailbox: ${primaryAddress}`,
+        `• Unlimited Wildcard Subdomain: *@${subdomain} (e.g. bank@${subdomain}, github@${subdomain}, newsletters@${subdomain})`,
+        `• 20-Pillar Suite Access: P-Mail, P-Docs, Accounts & Identity Hub, P-Calendar, and P-Tasks`,
+        ``,
+        `Any email sent to ${primaryAddress} or to any alias at *@${subdomain} routes automatically to this inbox with full SPF, DKIM, and DMARC protection.`,
+        ``,
+        `— The Postveil Sovereign Suite`,
+      ].join("\n");
+      const welcomeHtml = `<div style="font-family:system-ui,-apple-system,sans-serif;line-height:1.6;color:#14231d;max-width:600px">
+        <h2 style="margin:0 0 12px;color:#0f291e">Welcome to Postveil, ${htmlEscape(displayName)}!</h2>
+        <p>Your sovereign identity and cryptographically isolated workspace are now active and verified:</p>
+        <div style="background:#f3f7f4;border:1px solid #d5e2da;border-radius:12px;padding:16px;margin:16px 0">
+          <p style="margin:0 0 8px"><strong>Primary Address:</strong> <code>${htmlEscape(primaryAddress)}</code></p>
+          <p style="margin:0 0 8px"><strong>Wildcard Subdomain:</strong> <code>*@${htmlEscape(subdomain)}</code></p>
+          <p style="margin:0;font-size:13px;color:#4a5d54">Use on-the-fly aliases like <code>github@${htmlEscape(subdomain)}</code> or <code>shopping@${htmlEscape(subdomain)}</code> anywhere online — they route straight here automatically.</p>
+        </div>
+        <p>Use the 9-dot App Launcher in the top bar to switch between <strong>P-Mail</strong>, <strong>P-Docs</strong>, and your <strong>Accounts &amp; Identity Hub</strong>.</p>
+        <p style="color:#52615b;font-size:13px;margin-top:24px">— The Postveil Sovereign Suite</p>
+      </div>`;
+      await dbRequest(env, "messages", {
+        method: "POST",
+        body: JSON.stringify({
+          id: crypto.randomUUID(),
+          owner_id: user.id,
+          thread_id: threadId,
+          mailbox_id: mailbox.id,
+          direction: "inbound",
+          folder: "inbox",
+          status: "received",
+          delivery_status: "received",
+          screening_status: "approved",
+          screening_decision_source: "system",
+          from_name: "Postveil Sovereign Suite",
+          from_address: `welcome@${appDomain}`,
+          to_addresses: [primaryAddress],
+          cc_addresses: [],
+          reply_to: `support@${appDomain}`,
+          subject: welcomeSubject,
+          text_body: welcomeText,
+          html_body: welcomeHtml,
+          snippet: snippet(welcomeText),
+          message_id_header: `<welcome-${user.id}@${appDomain}>`,
+          has_attachment: false,
+          is_read: false,
+          is_starred: true,
+          is_pinned: true,
+          is_flagged: false,
+          is_important: true,
+          priority: 1,
+          spam_score: 0,
+          spam_reasons: ["authentication passed", "sovereign system welcome"],
+          focused_score: 1,
+          focused_category: "focused",
+          auth_spf: "pass",
+          auth_dkim: "pass",
+          auth_dmarc: "pass",
+          trust_score: 1,
+          received_at: nowIso,
+        }),
+      }).catch(() => undefined);
+    }
+  }
+
+  return { mailbox, handle: clean, subdomain, primaryAddress };
+}
+
 async function isVerifiedMailboxDomain(env: Env, userId: string, domain: string): Promise<boolean> {
   const normalized = normalizeProviderDomain(domain);
   if (!normalized) return false;
+  const appDomain = configuredAppDomain(env);
   if (configuredSenderDomains(env).includes(normalized)) return true;
+  if (normalized.endsWith(`.${appDomain}`)) {
+    const subHandle = normalized.slice(0, -(appDomain.length + 1));
+    if (subHandle && !subHandle.includes(".")) {
+      const ownerBox = await getMailbox(env, userId, `${subHandle}@${appDomain}`);
+      if (ownerBox) return true;
+    }
+  }
   const row = await env.DB.prepare(`SELECT v.id
     FROM pv_domain_verifications v
     LEFT JOIN pv_domain_integrations i ON i.user_id = v.user_id AND i.domain = v.domain
@@ -1184,12 +1434,68 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
   if (googleResponse) return googleResponse;
   const mfaResponse = await handleD1Mfa(request, env);
   if (mfaResponse) return mfaResponse;
+  if (url.pathname === "/api/auth/check-handle" && request.method === "GET") {
+    const rawHandle = url.searchParams.get("handle") || "";
+    const clean = normalizeSovereignHandle(rawHandle);
+    const validation = isValidSovereignHandle(clean);
+    if (!validation.valid) {
+      return json({ available: false, handle: clean, reason: validation.reason });
+    }
+    const available = await isSovereignHandleAvailable(env, clean);
+    const appDomain = configuredAppDomain(env);
+    return json({
+      available,
+      handle: clean,
+      subdomain: `${clean}.${appDomain}`,
+      primaryAddress: `${clean}@${appDomain}`,
+      reason: available ? null : `@${clean}.${appDomain} is already registered`,
+    });
+  }
   if (url.pathname === "/api/auth/signup" && request.method === "POST") {
     try {
       const body = await request.json() as JsonRecord;
       const captcha = await verifyTurnstileToken(request, env, String(body.captchaToken || ""));
       if (!captcha.ok) return json({ data: { user: null, session: null }, error: { message: captcha.reason || "Complete the security check before creating an account", code: "captcha_required" } }, 400);
-      const created = await createD1User(env, String(body.email || ""), String(body.password || ""), String(body.displayName || ""));
+
+      const appDomain = configuredAppDomain(env);
+      let rawEmail = String(body.email || "").trim().toLowerCase();
+      const rawHandle = String(body.handle || "").trim().toLowerCase();
+      let sovereignHandle = "";
+
+      if (rawHandle) {
+        sovereignHandle = normalizeSovereignHandle(rawHandle);
+        rawEmail = `${sovereignHandle}@${appDomain}`;
+      } else if (!rawEmail.includes("@")) {
+        sovereignHandle = normalizeSovereignHandle(rawEmail);
+        rawEmail = `${sovereignHandle}@${appDomain}`;
+      } else if (rawEmail.endsWith(`@${appDomain}`)) {
+        sovereignHandle = normalizeSovereignHandle(rawEmail.slice(0, -(appDomain.length + 1)));
+      } else if (rawEmail.endsWith(`.${appDomain}`)) {
+        const atIdx = rawEmail.indexOf("@");
+        const subPart = atIdx !== -1 ? rawEmail.slice(atIdx + 1, -(appDomain.length + 1)) : rawEmail.slice(0, -(appDomain.length + 1));
+        sovereignHandle = normalizeSovereignHandle(subPart);
+        rawEmail = `${sovereignHandle}@${appDomain}`;
+      }
+
+      if (sovereignHandle) {
+        const check = isValidSovereignHandle(sovereignHandle);
+        if (!check.valid) return json({ data: { user: null, session: null }, error: { message: check.reason || "Invalid handle" } }, 400);
+        if (!(await isSovereignHandleAvailable(env, sovereignHandle))) {
+          return json({ data: { user: null, session: null }, error: { message: `@${sovereignHandle}.${appDomain} is already taken. Please choose another handle.` } }, 409);
+        }
+        const displayName = String(body.displayName || sovereignHandle).trim();
+        const created = await createD1User(env, `${sovereignHandle}@${appDomain}`, String(body.password || ""), displayName, { emailVerified: true });
+        try {
+          await provisionSovereignIdentity(env, created.user, sovereignHandle, displayName);
+        } catch (provError) {
+          await deleteD1User(env, created.user.id).catch(() => undefined);
+          throw provError;
+        }
+        await recordD1AuthEvent(env, { ...authContext, userId: created.user.id, email: created.user.email, eventType: "signup_sovereign_completed" });
+        return json({ data: { user: created.user, session: created.session, verificationRequired: false }, error: null }, 201);
+      }
+
+      const created = await createD1User(env, rawEmail, String(body.password || ""), String(body.displayName || ""));
       try {
         const token = await createD1EmailVerificationToken(env, created.user.id);
         const verificationUrl = `https://${configuredAppDomain(env)}/?verify_email=${encodeURIComponent(token)}`;
@@ -1214,14 +1520,25 @@ async function handleD1Auth(request: Request, env: Env): Promise<Response | null
   if (url.pathname === "/api/auth/signin" && request.method === "POST") {
     try {
       const body = await request.json() as JsonRecord;
-      const existing = await getUserByEmail(env, String(body.email || ""));
-      const result = await verifyD1Password(env, String(body.email || ""), String(body.password || ""));
+      const appDomain = configuredAppDomain(env);
+      let signInEmail = String(body.email || "").trim().toLowerCase();
+      if (signInEmail && !signInEmail.includes("@")) {
+        const clean = normalizeSovereignHandle(signInEmail);
+        if (clean) signInEmail = `${clean}@${appDomain}`;
+      } else if (signInEmail.endsWith(`.${appDomain}`)) {
+        const atIdx = signInEmail.indexOf("@");
+        const subPart = atIdx !== -1 ? signInEmail.slice(atIdx + 1, -(appDomain.length + 1)) : signInEmail.slice(0, -(appDomain.length + 1));
+        const clean = normalizeSovereignHandle(subPart);
+        if (clean) signInEmail = `${clean}@${appDomain}`;
+      }
+      const existing = await getUserByEmail(env, signInEmail);
+      const result = await verifyD1Password(env, signInEmail, String(body.password || ""));
       if (!result) {
-        const failure = await recordD1SignInFailure(env, String(body.email || ""));
+        const failure = await recordD1SignInFailure(env, signInEmail);
         await recordD1AuthEvent(env, {
           ...authContext,
           userId: existing?.id ? String(existing.id) : undefined,
-          email: String(body.email || ""),
+          email: signInEmail,
           eventType: failure.locked ? "signin_locked" : "signin_failed",
         });
         if (failure.locked) return json({ data: { user: null, session: null }, error: { message: "Too many unsuccessful attempts. Try again in about 15 minutes.", code: "account_temporarily_locked" } }, 429);
@@ -2174,6 +2491,16 @@ async function getInboundMailbox(env: Env, address: string): Promise<Mailbox | n
   const normalized = cleanAddress(address);
   const globalRows = await dbRequest<Mailbox[]>(env, `mailboxes?address=eq.${encodeURIComponent(normalized)}&can_receive=eq.true&limit=1`).catch(() => []);
   if (globalRows[0]) return globalRows[0];
+  const appDomain = configuredAppDomain(env);
+  const domainPart = domainOf(normalized);
+  if (domainPart.endsWith(`.${appDomain}`)) {
+    const subHandle = domainPart.slice(0, -(appDomain.length + 1));
+    if (subHandle && !subHandle.includes(".")) {
+      const primaryAddress = `${subHandle}@${appDomain}`;
+      const sovereignRows = await dbRequest<Mailbox[]>(env, `mailboxes?address=eq.${encodeURIComponent(primaryAddress)}&can_receive=eq.true&limit=1`).catch(() => []);
+      if (sovereignRows[0]) return sovereignRows[0];
+    }
+  }
   if (env.OWNER_USER_ID) return getMailbox(env, env.OWNER_USER_ID, normalized);
   return null;
 }
@@ -3762,14 +4089,14 @@ async function handleAccountsApi(request: Request, env: Env, url: URL): Promise<
     ).all().catch(() => ({ results: [] }));
     const domains = (domainsResult.results || []).map((r: any) => {
       try { return JSON.parse(r.data); } catch { return null; }
-    }).filter(Boolean);
+    }).filter((d: any) => Boolean(d) && (!d.owner_id || d.owner_id === user.id));
 
     const mailboxesResult = await env.DB.prepare(
       "SELECT data FROM pv_records WHERE table_name = 'mailboxes' ORDER BY created_at DESC"
     ).all().catch(() => ({ results: [] }));
     const mailboxes = (mailboxesResult.results || []).map((r: any) => {
       try { return JSON.parse(r.data); } catch { return null; }
-    }).filter(Boolean);
+    }).filter((m: any) => Boolean(m) && (!m.owner_id || m.owner_id === user.id));
 
     const passkeysResult = await env.DB.prepare(
       "SELECT data FROM pv_records WHERE table_name = 'passkeys' AND record_id LIKE ? ORDER BY created_at DESC"
@@ -4225,17 +4552,37 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "GET" && url.pathname === "/api/mailboxes") return json(await accessibleMailboxes(env, user.id));
   if (request.method === "POST" && url.pathname === "/api/mailboxes") {
     const body = (await request.json()) as JsonRecord;
+    if (body.sovereignHandle) {
+      try {
+        const provisioned = await provisionSovereignIdentity(env, user, String(body.sovereignHandle), typeof body.displayName === "string" ? body.displayName : undefined);
+        return json({ ...provisioned.mailbox, subdomain: provisioned.subdomain, primaryAddress: provisioned.primaryAddress, handle: provisioned.handle }, 201);
+      } catch (claimErr) {
+        return error(claimErr instanceof Error ? claimErr.message : "Could not claim sovereign handle", 400);
+      }
+    }
     const address = cleanAddress(String(body.address || ""));
     if (!isValidEmailAddress(address)) return error("Enter a valid email address");
+    const appDomain = configuredAppDomain(env);
+    if (domainOf(address) === appDomain) {
+      try {
+        const handlePart = address.split("@")[0];
+        const provisioned = await provisionSovereignIdentity(env, user, handlePart, typeof body.displayName === "string" ? body.displayName : undefined);
+        return json({ ...provisioned.mailbox, subdomain: provisioned.subdomain, primaryAddress: provisioned.primaryAddress, handle: provisioned.handle }, 201);
+      } catch (claimErr) {
+        return error(claimErr instanceof Error ? claimErr.message : "Could not claim sovereign handle", 400);
+      }
+    }
     const organization = await ensureOrganization(env, user);
     const verified = await isVerifiedMailboxDomain(env, user.id, domainOf(address));
+    const existingDefault = await dbRequest<Mailbox[]>(env, `mailboxes?owner_id=eq.${encodeURIComponent(user.id)}&is_default=eq.true&limit=1`).catch(() => []);
+    const isDefault = !existingDefault[0];
     const settings = verified
       ? {}
       : { domain_verification_status: "pending", domain_verification_message: "Connect Cloudflare to verify this domain before sending or receiving mail." };
     const rows = await dbRequest<Mailbox[]>(env, "mailboxes", {
       method: "POST",
       headers: { Prefer: "return=representation" },
-      body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: false, can_send: verified, can_receive: verified, settings }),
+      body: JSON.stringify({ owner_id: user.id, address, display_name: String(body.displayName || address.split("@")[0]), is_default: isDefault, can_send: verified, can_receive: verified, settings }),
     });
     let mailbox = rows[0];
     if (mailbox) {

@@ -75,9 +75,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<AuthRes
     });
     const payload = await response.json().catch(() => ({})) as JsonRecord;
     const payloadError = payload.error;
-    const errorMessage = payloadError && typeof payloadError === "object" && "message" in payloadError
-      ? String((payloadError as JsonRecord).message)
-      : String(payloadError ?? payload.message ?? `Request failed (${response.status})`);
+    if (!response.ok || payloadError) {
+      const errorMessage = payloadError && typeof payloadError === "object" && "message" in payloadError
+        ? String((payloadError as JsonRecord).message)
+        : String(payloadError ?? payload.message ?? `Request failed (${response.status})`);
+      return { data: {} as T, error: authError(errorMessage, response.status) };
+    }
     // Worker auth endpoints return standard { data, error } envelopes.
     // Unwrap payload data before auth methods read session/user.
     const data = Object.prototype.hasOwnProperty.call(payload, "data") ? payload.data : payload;
@@ -147,9 +150,19 @@ const auth = {
     })();
     return inFlightSessionPromise;
   },
-  async signUp({ email, password, options }: { email: string; password: string; options?: JsonRecord }): Promise<AuthResponse<{ user: PostveilUser | null; session: Session | null }>> {
-    const result = await request<{ user: PostveilUser; session: Session | null }>("/api/auth/signup", { method: "POST", body: JSON.stringify({ email, password, data: options?.data ?? {}, captchaToken: options?.captchaToken ?? null }) });
-    if (!result.error) {
+  async signUp({ email, password, options }: { email: string; password: string; options?: JsonRecord }): Promise<AuthResponse<{ user: PostveilUser | null; session: Session | null; verificationRequired?: boolean }>> {
+    const result = await request<{ user: PostveilUser; session: Session | null; verificationRequired?: boolean }>("/api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        password,
+        displayName: options?.displayName ?? (options?.data as JsonRecord | undefined)?.display_name ?? "",
+        handle: options?.handle ?? "",
+        data: options?.data ?? {},
+        captchaToken: options?.captchaToken ?? null,
+      }),
+    });
+    if (!result.error && result.data.session) {
       writeSession(result.data.session);
       emit("SIGNED_IN", result.data.session);
     }
