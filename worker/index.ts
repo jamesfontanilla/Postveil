@@ -711,6 +711,39 @@ async function provisionSovereignIdentity(
       }),
     }).catch(() => undefined);
 
+    const subdomainAddress = `${clean}@${subdomain}`;
+    const existingSubBox = await getMailbox(env, user.id, subdomainAddress);
+    if (!existingSubBox) {
+      const createdSubRows = await dbRequest<Mailbox[]>(env, "mailboxes", {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          owner_id: user.id,
+          address: subdomainAddress,
+          display_name: displayName,
+          is_default: false,
+          can_send: true,
+          can_receive: true,
+          settings: mailboxSettings,
+        }),
+      }).catch(() => []);
+      if (createdSubRows[0]) {
+        await dbRequest(env, "mailbox_admin_settings", {
+          method: "POST",
+          headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+          body: JSON.stringify({
+            mailbox_id: createdSubRows[0].id,
+            organization_id: organization.id,
+            status: "active",
+            quota_bytes: 5 * 1024 * 1024 * 1024,
+            sending_limit_daily: 250,
+            inactivity_days: 90,
+            last_activity_at: nowIso,
+          }),
+        }).catch(() => undefined);
+      }
+    }
+
     const existingMessages = await dbRequest<Array<{ id: string }>>(env, `messages?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`).catch(() => []);
     if (!existingMessages.length) {
       const welcomeSubject = `Welcome to your Sovereign Identity (${subdomain})`;
@@ -2548,6 +2581,17 @@ async function delegatedMailboxForSend(env: Env, actorId: string, address: strin
   const normalized = cleanAddress(address);
   const owned = await getMailbox(env, actorId, normalized);
   if (owned) return { mailbox: owned, delegation: null };
+  const appDomain = configuredAppDomain(env);
+  const domainPart = domainOf(normalized);
+  if (domainPart.endsWith(`.${appDomain}`)) {
+    const subHandle = domainPart.slice(0, -(appDomain.length + 1));
+    if (subHandle && !subHandle.includes(".")) {
+      const sovereignPrimary = await getMailbox(env, actorId, `${subHandle}@${appDomain}`);
+      if (sovereignPrimary && sovereignPrimary.can_send) {
+        return { mailbox: { ...sovereignPrimary, address: normalized }, delegation: null };
+      }
+    }
+  }
   const candidates = await dbRequest<Mailbox[]>(env, `mailboxes?address=eq.${encodeURIComponent(normalized)}&can_send=eq.true&limit=20`);
   for (const mailbox of candidates) {
     const grants = await dbRequest<MailboxDelegation[]>(env, `mailbox_delegations?mailbox_id=eq.${encodeURIComponent(mailbox.id)}&member_id=eq.${encodeURIComponent(actorId)}&status=eq.active&limit=1`);
@@ -5614,4 +5658,4 @@ export default {
     catch (ingestError) { message.setReject(ingestError instanceof Error ? ingestError.message.slice(0, 180) : "Inbound processing failed"); }
   },
 };
-
+

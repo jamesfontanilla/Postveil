@@ -214,20 +214,31 @@ async function sendSes(env: DeliveryEnvironment, input: DeliveryInput, config: R
   assertCredential("ses", Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY), "Amazon SES credentials are not configured");
   const region = String(config.region || env.AWS_SES_REGION || env.AWS_REGION || "us-east-1");
   const client = new SESv2Client({ region, credentials: { accessKeyId: env.AWS_ACCESS_KEY_ID!, secretAccessKey: env.AWS_SECRET_ACCESS_KEY! } });
-  const command = new SendEmailCommand({
-    FromEmailAddress: input.fromAddress,
-    Destination: { ToAddresses: input.to, CcAddresses: input.cc, BccAddresses: input.bcc },
-    ReplyToAddresses: input.replyTo ? [input.replyTo] : undefined,
-    ConfigurationSetName: typeof config.configurationSetName === "string" ? config.configurationSetName : env.SES_CONFIGURATION_SET_NAME || undefined,
-    Content: { Simple: { Subject: { Data: input.subject || "(no subject)" }, Body: { Text: { Data: input.text || "" }, Html: input.html ? { Data: input.html } : undefined }, Headers: Object.entries(receiptHeaders(input)).map(([Name, Value]) => ({ Name, Value })), Attachments: (input.attachments || []).map((attachment) => ({ FileName: attachment.filename, ContentType: attachment.contentType, RawContent: attachment.bytes, ContentDisposition: "ATTACHMENT" })) } },
-  });
+  const buildCommand = (fromEmail: string, replyToList?: string[]) =>
+    new SendEmailCommand({
+      FromEmailAddress: fromEmail,
+      Destination: { ToAddresses: input.to, CcAddresses: input.cc, BccAddresses: input.bcc },
+      ReplyToAddresses: replyToList ?? (input.replyTo ? [input.replyTo] : undefined),
+      ConfigurationSetName: typeof config.configurationSetName === "string" ? config.configurationSetName : env.SES_CONFIGURATION_SET_NAME || undefined,
+      Content: { Simple: { Subject: { Data: input.subject || "(no subject)" }, Body: { Text: { Data: input.text || "" }, Html: input.html ? { Data: input.html } : undefined }, Headers: Object.entries(receiptHeaders(input)).map(([Name, Value]) => ({ Name, Value })), Attachments: (input.attachments || []).map((attachment) => ({ FileName: attachment.filename, ContentType: attachment.contentType, RawContent: attachment.bytes, ContentDisposition: "ATTACHMENT" })) } },
+    });
   const started = Date.now();
   try {
-    const result = await client.send(command);
+    const result = await client.send(buildCommand(input.fromAddress));
     return { provider: "ses", providerMessageId: result.MessageId, responseStatus: 200, latencyMs: Date.now() - started };
   } catch (sendError) {
-    const name = sendError instanceof Error ? sendError.name : "ses_error";
     const message = sendError instanceof Error ? sendError.message : "Amazon SES rejected the message";
+    const matchSub = input.fromAddress.match(/^([^@]+)@([^@]+)\.postveil\.me$/i);
+    if (matchSub && /not verified|Email address is not verified|Identity/i.test(message)) {
+      try {
+        const fallbackFrom = `${matchSub[2]}@postveil.me`;
+        const fallbackResult = await client.send(buildCommand(fallbackFrom, [input.fromAddress]));
+        return { provider: "ses", providerMessageId: fallbackResult.MessageId, responseStatus: 200, latencyMs: Date.now() - started };
+      } catch {
+        // fall through to throw original error
+      }
+    }
+    const name = sendError instanceof Error ? sendError.name : "ses_error";
     const status = Number((sendError as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode || 500);
     throw new ProviderDeliveryError("ses", status, name, message.slice(0, 500), isRetryableStatus(status) || /throttl|timeout|temporar/i.test(message));
   }
