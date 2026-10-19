@@ -381,11 +381,11 @@ export default function AuthScreen({
             style={{
               display: "grid",
               gridTemplateColumns: "1fr 1fr",
-              gap: "6px",
-              padding: "4px",
+              gap: "4px",
+              padding: "3px",
               background: "rgba(15, 41, 30, 0.06)",
-              borderRadius: "10px",
-              marginBottom: "16px",
+              borderRadius: "9px",
+              marginBottom: "10px",
             }}
           >
             <button
@@ -400,19 +400,19 @@ export default function AuthScreen({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: "6px",
-                padding: "9px 10px",
-                borderRadius: "8px",
+                gap: "5px",
+                padding: "7px 8px",
+                borderRadius: "7px",
                 border: identityType === "sovereign" ? "1px solid rgba(15, 41, 30, 0.14)" : "1px solid transparent",
                 background: identityType === "sovereign" ? "#ffffff" : "transparent",
                 color: identityType === "sovereign" ? "#0f291e" : "#52615b",
                 fontWeight: 600,
-                fontSize: "13px",
+                fontSize: "12px",
                 cursor: "pointer",
-                boxShadow: identityType === "sovereign" ? "0 2px 6px rgba(15, 41, 30, 0.06)" : "none",
+                boxShadow: identityType === "sovereign" ? "0 1px 4px rgba(15, 41, 30, 0.05)" : "none",
               }}
             >
-              <Sparkles size={14} />
+              <Sparkles size={13} />
               <span>Free .postveil.me Handle</span>
             </button>
             <button
@@ -427,19 +427,19 @@ export default function AuthScreen({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: "6px",
-                padding: "9px 10px",
-                borderRadius: "8px",
+                gap: "5px",
+                padding: "7px 8px",
+                borderRadius: "7px",
                 border: identityType === "custom" ? "1px solid rgba(15, 41, 30, 0.14)" : "1px solid transparent",
                 background: identityType === "custom" ? "#ffffff" : "transparent",
                 color: identityType === "custom" ? "#0f291e" : "#52615b",
                 fontWeight: 600,
-                fontSize: "13px",
+                fontSize: "12px",
                 cursor: "pointer",
-                boxShadow: identityType === "custom" ? "0 2px 6px rgba(15, 41, 30, 0.06)" : "none",
+                boxShadow: identityType === "custom" ? "0 1px 4px rgba(15, 41, 30, 0.05)" : "none",
               }}
             >
-              <Globe2 size={14} />
+              <Globe2 size={13} />
               <span>Bring Custom Email</span>
             </button>
           </div>
@@ -455,10 +455,10 @@ export default function AuthScreen({
                     display: "flex",
                     alignItems: "center",
                     border: "1px solid #c5d2cb",
-                    borderRadius: "10px",
+                    borderRadius: "9px",
                     background: "#ffffff",
                     overflow: "hidden",
-                    marginTop: "6px",
+                    marginTop: "3px",
                   }}
                 >
                   <input
@@ -481,21 +481,22 @@ export default function AuthScreen({
                       border: "none",
                       outline: "none",
                       flex: 1,
-                      padding: "11px 12px",
-                      fontSize: "15px",
+                      padding: "8px 10px",
+                      fontSize: "14px",
                       fontWeight: 600,
                       background: "transparent",
+                      minHeight: "38px",
                     }}
                   />
                   <span
                     style={{
-                      padding: "0 12px",
+                      padding: "0 10px",
                       color: "#3b5249",
-                      fontSize: "13px",
+                      fontSize: "12.5px",
                       fontWeight: 600,
                       background: "#f3f7f4",
                       borderLeft: "1px solid #dce6e0",
-                      height: "42px",
+                      height: "38px",
                       display: "inline-flex",
                       alignItems: "center",
                       whiteSpace: "nowrap",
@@ -510,38 +511,34 @@ export default function AuthScreen({
                 style={{
                   background: "#f4f8f5",
                   border: "1px solid #d7e4dc",
-                  borderRadius: "10px",
-                  padding: "10px 12px",
-                  fontSize: "12.5px",
+                  borderRadius: "8px",
+                  padding: "6px 10px",
+                  fontSize: "11.5px",
                   color: "#2b3e36",
                   display: "flex",
-                  flexDirection: "column",
-                  gap: "4px",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "6px",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                  <span>
-                    Primary Inbox: <strong>{previewHandle}@postveil.me</strong>
-                  </span>
-                  {handleStatus === "checking" && (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#52615b" }}>
-                      <Loader2 size={12} className="spin" /> Checking…
-                    </span>
-                  )}
-                  {handleStatus === "available" && (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#15803d", fontWeight: 600 }}>
-                      <Check size={13} /> Available
-                    </span>
-                  )}
-                  {handleStatus === "unavailable" && (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#b91c1c", fontWeight: 600 }}>
-                      <XCircle size={13} /> {handleReason || "Unavailable"}
-                    </span>
-                  )}
-                </div>
-                <span style={{ color: "#4d6158" }}>
-                  Wildcard Subdomain: <strong>*@{previewHandle}.postveil.me</strong> (Unlimited aliases included)
+                <span>
+                  Inbox: <strong>{previewHandle}@postveil.me</strong> (includes <strong>*@{previewHandle}.postveil.me</strong>)
                 </span>
+                {handleStatus === "checking" && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", color: "#52615b" }}>
+                    <Loader2 size={11} className="spin" /> Checking…
+                  </span>
+                )}
+                {handleStatus === "available" && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", color: "#15803d", fontWeight: 600 }}>
+                    <Check size={12} /> Available
+                  </span>
+                )}
+                {handleStatus === "unavailable" && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", color: "#b91c1c", fontWeight: 600 }}>
+                    <XCircle size={12} /> {handleReason || "Unavailable"}
+                  </span>
+                )}
               </div>
 
               <label>
@@ -552,6 +549,7 @@ export default function AuthScreen({
                   onChange={(event) => setDisplayName(event.target.value.slice(0, 80))}
                   placeholder="Alex Rivera"
                   autoComplete="name"
+                  style={{ minHeight: "38px", padding: "8px 10px" }}
                 />
               </label>
             </>
