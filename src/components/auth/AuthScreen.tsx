@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type FormEvent } from "react";
-import { ArrowLeft, ArrowRight, Check, Globe2, Loader2, Mail, ShieldCheck, Sparkles, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Eye, EyeOff, Globe2, KeyRound, Loader2, Mail, ShieldAlert, ShieldCheck, Sparkles, XCircle } from "lucide-react";
 import BrandMark from "../BrandMark";
 import { TURNSTILE_SITE_KEY } from "../../types/mail";
 import { publicApiFetch, recordExplicitSignIn } from "../../lib/api";
@@ -18,6 +18,7 @@ export default function AuthScreen({
 }) {
   const [mode, setMode] = useState<"signin" | "signup" | "forgot" | "recovery">(initialMode);
   const [identityType, setIdentityType] = useState<SignupIdentityType>("sovereign");
+  const [showPassword, setShowPassword] = useState(false);
   const [sovereignHandle, setSovereignHandle] = useState(() => {
     try {
       const claimed = sessionStorage.getItem("postveil_claimed_handle");
@@ -569,16 +570,43 @@ export default function AuthScreen({
           )}
           {mode !== "forgot" && mode !== "recovery" && (
             <label>
-              Password
-              <input
-                type="password"
-                required
-                minLength={mode === "signup" ? 12 : 6}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder={mode === "signup" ? "12+ characters with a number" : "Your password"}
-                autoComplete={mode === "signin" ? "current-password" : "new-password"}
-              />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Password</span>
+                {mode === "signin" && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    style={{ padding: 0, fontSize: "11.5px", fontWeight: 500 }}
+                    onClick={() => {
+                      setMode("forgot");
+                      setError("");
+                      setNotice("");
+                    }}
+                  >
+                    Forgot password?
+                  </button>
+                )}
+              </div>
+              <div className="auth-input-wrap">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={mode === "signup" ? 12 : 6}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={mode === "signup" ? "12+ characters with a number" : "Your password"}
+                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                />
+                <button
+                  type="button"
+                  className="auth-input-action"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  title={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
               {mode === "signup" && (
                 <span className="auth-password-checks" aria-live="polite">
                   <span className={passwordChecks.length ? "met" : ""}>
@@ -596,45 +624,65 @@ export default function AuthScreen({
           )}
           {mode === "recovery" && (
             <label>
-              Recovery code
-              <input
-                value={recoveryCode}
-                onChange={(event) =>
-                  setRecoveryCode(
-                    event.target.value
-                      .toUpperCase()
-                      .replace(/[^A-Z2-9-]/g, "")
-                      .slice(0, 14),
-                  )
-                }
-                placeholder="ABCD-EFGH-JKLM"
-                autoComplete="one-time-code"
-              />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Master Recovery Code</span>
+                <span style={{ fontSize: "11px", color: "#667c71" }}>12 or 14-character key</span>
+              </div>
+              <div className="auth-input-wrap">
+                <input
+                  value={recoveryCode}
+                  onChange={(event) => {
+                    const raw = event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
+                    const formatted = raw.match(/.{1,4}/g)?.join("-") || raw;
+                    setRecoveryCode(formatted);
+                  }}
+                  placeholder="ABCD-EFGH-JKLM"
+                  autoComplete="one-time-code"
+                  style={{ fontFamily: "var(--font-mono, monospace)", letterSpacing: "0.08em", fontWeight: 600 }}
+                />
+              </div>
+              <small style={{ color: "#687a72", fontSize: "11px", lineHeight: 1.4 }}>
+                Enter the emergency recovery code provided when you created or secured your account.
+              </small>
             </label>
           )}
           {mode === "signup" && (
             <div className="auth-turnstile">
               <div ref={captchaRef} />
-              <small>Protected by Cloudflare Turnstile. We use it only to reduce automated signups.</small>
+              <small>Protected by Cloudflare Turnstile. We use it only to prevent automated bot registrations.</small>
             </div>
           )}
-          {error && <div className="form-error">{error}</div>}
-          {notice && <div className="form-notice">{notice}</div>}
+          {error && (
+            <div className="form-error" role="alert">
+              <ShieldAlert size={16} style={{ flexShrink: 0, marginTop: "1px" }} />
+              <span>{error}</span>
+            </div>
+          )}
+          {notice && (
+            <div className="form-notice" role="status">
+              <Check size={16} style={{ flexShrink: 0, marginTop: "1px" }} />
+              <span>{notice}</span>
+            </div>
+          )}
           <button
             className="primary-button"
             disabled={busy || (mode === "signup" && identityType === "sovereign" && handleStatus === "unavailable")}
           >
-            {busy
-              ? "Provisioning…"
-              : mode === "forgot"
-              ? "Send reset link"
-              : mode === "recovery"
-              ? "Request recovery link"
-              : mode === "signin"
-              ? "Open workspace"
-              : identityType === "sovereign"
-              ? `Claim ${previewHandle}.postveil.me & Open Suite`
-              : "Create account"}
+            {busy ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <Loader2 size={16} className="spin" /> Processing…
+              </span>
+            ) : mode === "forgot" ? (
+              "Send cryptographic reset link"
+            ) : mode === "recovery" ? (
+              "Verify recovery code & restore access"
+            ) : mode === "signin" ? (
+              "Open workspace"
+            ) : identityType === "sovereign" ? (
+              `Claim ${previewHandle}.postveil.me & Open Suite`
+            ) : (
+              "Create account"
+            )}
           </button>
           {mode === "signup" && notice && (
             <button type="button" className="text-button auth-link" onClick={() => void resendVerification()} disabled={busy}>
@@ -645,7 +693,7 @@ export default function AuthScreen({
         {(mode === "signin" || mode === "signup") && (
           <>
             <div className="oauth-divider">
-              <span>or</span>
+              <span>or continue with</span>
             </div>
             <button
               type="button"
@@ -658,68 +706,82 @@ export default function AuthScreen({
               <span className="google-g" aria-hidden="true">
                 G
               </span>
-              Continue with Google
+              Continue with Google Workspace
             </button>
           </>
         )}
-        {mode === "signin" && (
-          <button
-            className="text-button auth-link"
-            onClick={() => {
-              setMode("forgot");
-              setError("");
-              setNotice("");
-            }}
-          >
-            Forgot your password?
-          </button>
-        )}
-        {mode === "signin" && (
-          <button
-            className="text-button auth-link"
-            onClick={() => {
-              setMode("recovery");
-              setError("");
-              setNotice("");
-            }}
-          >
-            Use a recovery code
-          </button>
-        )}
-        {mode !== "forgot" && mode !== "recovery" && (
-          <button
-            className="text-button"
-            onClick={() => {
-              setMode(mode === "signup" ? "signin" : "signup");
-              setError("");
-              setNotice("");
-            }}
-          >
-            {mode === "signup" ? "Already have an account? Sign in" : "Need an account? Claim a free .postveil.me handle"}
-          </button>
-        )}
-        {(mode === "forgot" || mode === "recovery") && (
-          <button
-            className="text-button"
-            onClick={() => {
-              setMode("signin");
-              setError("");
-              setNotice("");
-              setRecoveryCode("");
-            }}
-          >
-            Back to sign in
-          </button>
-        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "18px", textAlign: "center" }}>
+          {mode === "signin" && (
+            <button
+              type="button"
+              className="text-button"
+              style={{ fontSize: "12px", color: "#61756d" }}
+              onClick={() => {
+                setMode("recovery");
+                setError("");
+                setNotice("");
+              }}
+            >
+              Have a sovereign recovery code? Use it here
+            </button>
+          )}
+          {mode !== "forgot" && mode !== "recovery" && (
+            <button
+              type="button"
+              className="text-button"
+              style={{ fontSize: "13px", fontWeight: 600 }}
+              onClick={() => {
+                setMode(mode === "signup" ? "signin" : "signup");
+                setError("");
+                setNotice("");
+              }}
+            >
+              {mode === "signup" ? "Already have an account? Sign in" : "Need an identity? Claim a free .postveil.me handle"}
+            </button>
+          )}
+          {(mode === "forgot" || mode === "recovery") && (
+            <button
+              type="button"
+              className="text-button"
+              style={{ fontSize: "13px", fontWeight: 600 }}
+              onClick={() => {
+                setMode("signin");
+                setError("");
+                setNotice("");
+                setRecoveryCode("");
+              }}
+            >
+              ← Back to sign in
+            </button>
+          )}
+        </div>
       </section>
       <aside className="auth-aside">
         <div className="aside-note">
-          <span className="status-dot" /> sovereign edge ready
+          <span className="status-dot" /> Sovereign Edge Ready
         </div>
         <p className="aside-quote">“One sovereign identity. Twenty private pillars. Zero corporate surveillance.”</p>
         <p className="aside-meta">
-          Every <strong>username.postveil.me</strong> handle includes an instant primary inbox, unlimited wildcard aliases, and local-first OPFS encryption.
+          Every <strong>username.postveil.me</strong> handle comes with an instant primary mailbox, unlimited wildcard aliases, and local-first browser OPFS encryption.
         </p>
+        <div className="aside-pillars-preview">
+          <div className="aside-pillar-pill">
+            <img src="/brand/pillars/p-mail.svg" alt="" aria-hidden="true" />
+            <span>P-Mail</span>
+          </div>
+          <div className="aside-pillar-pill">
+            <img src="/brand/pillars/p-docs.svg" alt="" aria-hidden="true" />
+            <span>P-Docs</span>
+          </div>
+          <div className="aside-pillar-pill">
+            <img src="/brand/pillars/p-sheets.svg" alt="" aria-hidden="true" />
+            <span>P-Sheets</span>
+          </div>
+          <div className="aside-pillar-pill">
+            <img src="/brand/pillars/p-drive.svg" alt="" aria-hidden="true" />
+            <span>P-Drive</span>
+          </div>
+        </div>
       </aside>
     </main>
   );
