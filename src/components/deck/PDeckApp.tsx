@@ -2,7 +2,46 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   ParentSuiteRibbon,
   RibbonShell,
+  HistoryGroup,
+  TextStyleGroup,
+  AlignmentGroup,
+  FontControlGroup,
 } from "../platform/ribbon";
+import {
+  Play,
+  FileDown,
+  FileUp,
+  Plus,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  Sliders,
+  MessageSquare,
+  Sparkles,
+  Layout,
+  Code2,
+  Eye,
+  Columns,
+  Image,
+  Quote,
+  List,
+  CheckSquare,
+} from "lucide-react";
+import {
+  DeckPresentation,
+  DeckSlide,
+  SlideTheme,
+  SlideTransition,
+} from "./deckTypes";
+import {
+  parseSovereignDeckMarkdown,
+  serializeSovereignDeckMarkdown,
+  createDemoPresentation,
+  createDefaultSlide,
+} from "./deckParser";
+import "./DeckStyles.css";
 
 interface RibbonGroupProps {
   title: string;
@@ -51,37 +90,6 @@ const RibbonButton: React.FC<RibbonButtonProps> = ({ icon, label, onClick, disab
     <span style={{ fontSize: "11px", fontWeight: active ? 600 : 500 }}>{label}</span>
   </button>
 );
-import {
-  Play,
-  FileDown,
-  FileUp,
-  Plus,
-  Trash2,
-  ChevronLeft,
-  ChevronRight,
-  Maximize2,
-  Minimize2,
-  Sliders,
-  MessageSquare,
-  Sparkles,
-  Layout,
-  Code2,
-  Eye,
-  Columns,
-} from "lucide-react";
-import {
-  DeckPresentation,
-  DeckSlide,
-  SlideTheme,
-  SlideTransition,
-} from "./deckTypes";
-import {
-  parseSovereignDeckMarkdown,
-  serializeSovereignDeckMarkdown,
-  createDemoPresentation,
-  createDefaultSlide,
-} from "./deckParser";
-import "./DeckStyles.css";
 
 export default function PDeckApp() {
   const [presentation, setPresentation] = useState<DeckPresentation>(() => {
@@ -103,8 +111,22 @@ export default function PDeckApp() {
   const [showNotes, setShowNotes] = useState(false);
   const [notice, setNotice] = useState<string>("");
 
+  // Shared ribbon typography & formatting states
+  const [fontFamily, setFontFamily] = useState<string>("Schibsted Grotesk");
+  const [fontSize, setFontSize] = useState<number>(18);
+  const [textColor, setTextColor] = useState<string>("#0f5132");
+  const [isTextColorOpen, setIsTextColorOpen] = useState(false);
+  const [highlightColor, setHighlightColor] = useState<string>("transparent");
+  const [isHighlightOpen, setIsHighlightOpen] = useState(false);
+  const [alignment, setAlignment] = useState<"left" | "center" | "right" | "justify">("left");
+
+  // Undo/Redo history stack for slides
+  const [history, setHistory] = useState<DeckPresentation[]>([]);
+  const [future, setFuture] = useState<DeckPresentation[]>([]);
+
   const stageRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const currentSlide: DeckSlide =
     presentation.slides[currentSlideIndex] || presentation.slides[0];
@@ -225,6 +247,88 @@ export default function PDeckApp() {
       slides: newSlides,
       updatedAt: new Date().toISOString(),
     });
+  };
+
+  // Undo / Redo history handlers
+  const handleUndo = () => {
+    if (history.length === 0) return;
+    const previous = history[history.length - 1];
+    setHistory((prev) => prev.slice(0, prev.length - 1));
+    setFuture((prev) => [presentation, ...prev]);
+    setPresentation(previous);
+    showEphemeralNotice("Undo");
+  };
+
+  const handleRedo = () => {
+    if (future.length === 0) return;
+    const next = future[0];
+    setFuture((prev) => prev.slice(1));
+    setHistory((prev) => [...prev, presentation]);
+    setPresentation(next);
+    showEphemeralNotice("Redo");
+  };
+
+  const recordPresentationChange = (newPres: DeckPresentation) => {
+    setHistory((prev) => [...prev.slice(-30), presentation]);
+    setFuture([]);
+    setPresentation(newPres);
+  };
+
+  // Helper to insert markdown formatting at cursor position in textarea
+  const insertMarkdownSnippet = (before: string, after: string = "", defaultText: string = "") => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = currentSlide.markdown;
+    const selected = text.substring(start, end) || defaultText;
+    const replacement = `${before}${selected}${after}`;
+    const newMarkdown = text.substring(0, start) + replacement + text.substring(end);
+    handleUpdateCurrentSlideMarkdown(newMarkdown);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + before.length, start + before.length + selected.length);
+    }, 10);
+  };
+
+  const handleFormatText = (cmd: string) => {
+    switch (cmd) {
+      case "bold":
+        insertMarkdownSnippet("**", "**", "bold text");
+        break;
+      case "italic":
+        insertMarkdownSnippet("*", "*", "italic text");
+        break;
+      case "underline":
+        insertMarkdownSnippet("<u>", "</u>", "underlined text");
+        break;
+      case "strikeThrough":
+        insertMarkdownSnippet("~~", "~~", "strikethrough text");
+        break;
+    }
+  };
+
+  const handleInsertBlockSnippet = (type: "heading" | "bullet" | "quote" | "checklist" | "image" | "code") => {
+    switch (type) {
+      case "heading":
+        insertMarkdownSnippet("\n## ", "\n", "Slide Section Heading");
+        break;
+      case "bullet":
+        insertMarkdownSnippet("\n- ", "\n", "Key takeaway bullet point");
+        break;
+      case "quote":
+        insertMarkdownSnippet("\n> ", "\n", "High-assurance sovereign principle");
+        break;
+      case "checklist":
+        insertMarkdownSnippet("\n- [ ] ", "\n", "Action milestone item");
+        break;
+      case "image":
+        insertMarkdownSnippet("\n![Slide Visual](https://postveil.me/brand/pillars/p-deck.svg)\n");
+        break;
+      case "code":
+        insertMarkdownSnippet("\n```typescript\n", "\n```\n", "// Code block");
+        break;
+    }
   };
 
   const handleThemeChange = (theme: SlideTheme) => {
@@ -403,7 +507,7 @@ export default function PDeckApp() {
       {/* Universal Parent Masthead Ribbon */}
       <ParentSuiteRibbon currentPillarId="p-deck" />
 
-      {/* P-Deck Formatting Ribbon */}
+      {/* P-Deck Sovereign Formatting Ribbon */}
       <RibbonShell
         activeTabId={activeTab}
         onTabChange={(tab) => setActiveTab(tab as typeof activeTab)}
@@ -416,6 +520,19 @@ export default function PDeckApp() {
       >
         {activeTab === "home" && (
           <>
+            {/* 1. History Group (Undo / Redo / Print) */}
+            <div style={{ display: "flex", alignItems: "center", gap: "2px", paddingRight: "8px", borderRight: "1px solid #e2e8f0" }}>
+              <HistoryGroup
+                canUndo={history.length > 0}
+                canRedo={future.length > 0}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+                onPrint={() => window.print()}
+                printTitle="Print Presentation (Ctrl+P)"
+              />
+            </div>
+
+            {/* 2. Slide Management */}
             <RibbonGroup title="Slide Management">
               <RibbonButton
                 icon={<Plus size={16} />}
@@ -430,6 +547,87 @@ export default function PDeckApp() {
               />
             </RibbonGroup>
 
+            {/* 3. Typography & Font Control Group */}
+            <RibbonGroup title="Font & Scale">
+              <FontControlGroup
+                fontFamily={fontFamily}
+                onFontFamilyChange={(f) => {
+                  setFontFamily(f);
+                  showEphemeralNotice(`Slide Font: ${f}`);
+                }}
+                fontSize={fontSize}
+                onFontSizeChange={(delta) => setFontSize((prev) => Math.max(12, Math.min(36, prev + delta)))}
+              />
+            </RibbonGroup>
+
+            {/* 4. Text Styling & Microsoft Word-style Color Palettes */}
+            <RibbonGroup title="Text Styles">
+              <TextStyleGroup
+                onFormatText={handleFormatText}
+                activeTextColor={textColor}
+                onTextColorChange={(color) => {
+                  setTextColor(color);
+                  setIsTextColorOpen(false);
+                  insertMarkdownSnippet(`<span style="color: ${color}">`, "</span>", "colored text");
+                }}
+                isTextColorOpen={isTextColorOpen}
+                onToggleTextColor={() => setIsTextColorOpen(!isTextColorOpen)}
+                onCloseTextColor={() => setIsTextColorOpen(false)}
+                activeHighlightColor={highlightColor}
+                onHighlightColorChange={(color) => {
+                  setHighlightColor(color);
+                  setIsHighlightOpen(false);
+                  insertMarkdownSnippet(`<mark style="background-color: ${color}">`, "</mark>", "highlighted text");
+                }}
+                isHighlightOpen={isHighlightOpen}
+                onToggleHighlight={() => setIsHighlightOpen(!isHighlightOpen)}
+                onCloseHighlight={() => setIsHighlightOpen(false)}
+                showHighlight={true}
+                showStrikethrough={true}
+              />
+            </RibbonGroup>
+
+            {/* 5. Alignment Group */}
+            <RibbonGroup title="Paragraph Alignment">
+              <AlignmentGroup
+                activeAlignment={alignment}
+                onAlign={(align) => {
+                  setAlignment(align);
+                  insertMarkdownSnippet(`<div style="text-align: ${align}">\n`, "\n</div>\n", "Aligned block");
+                }}
+              />
+            </RibbonGroup>
+
+            {/* 6. Quick Insert Content Elements */}
+            <RibbonGroup title="Insert Elements">
+              <RibbonButton
+                icon={<Quote size={16} />}
+                label="Callout"
+                onClick={() => handleInsertBlockSnippet("quote")}
+              />
+              <RibbonButton
+                icon={<List size={16} />}
+                label="Bullets"
+                onClick={() => handleInsertBlockSnippet("bullet")}
+              />
+              <RibbonButton
+                icon={<CheckSquare size={16} />}
+                label="Checklist"
+                onClick={() => handleInsertBlockSnippet("checklist")}
+              />
+              <RibbonButton
+                icon={<Code2 size={16} />}
+                label="Code"
+                onClick={() => handleInsertBlockSnippet("code")}
+              />
+              <RibbonButton
+                icon={<Image size={16} />}
+                label="Visual"
+                onClick={() => handleInsertBlockSnippet("image")}
+              />
+            </RibbonGroup>
+
+            {/* 7. Presentation Play */}
             <RibbonGroup title="Presentation Play">
               <RibbonButton
                 icon={<Play size={16} color="#0f5132" />}
@@ -444,6 +642,7 @@ export default function PDeckApp() {
               />
             </RibbonGroup>
 
+            {/* 8. Storage & Export */}
             <RibbonGroup title="Storage & Export">
               <RibbonButton
                 icon={<FileDown size={16} />}
@@ -611,6 +810,7 @@ export default function PDeckApp() {
               <span style={{ fontSize: "11px", color: "#94a3b8" }}>Markdown + HTML comments</span>
             </div>
             <textarea
+              ref={textareaRef}
               value={currentSlide.markdown}
               onChange={(e) => handleUpdateCurrentSlideMarkdown(e.target.value)}
               placeholder="Write your slide content in Markdown..."
