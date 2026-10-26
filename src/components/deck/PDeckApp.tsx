@@ -727,6 +727,7 @@ export default function PDeckApp() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
         {/* Left Thumbnails Strip */}
         <div
+          className="pv-deck-thumbnails-col"
           style={{
             width: "160px",
             borderRight: "1px solid #e2e8f0",

@@ -242,3 +242,35 @@
   max-height: 180px;
   overflow-y: auto;
 }
+
+/* Responsive Viewport Rules (Tablet & Mobile Parity) */
+@media (max-width: 1024px) {
+  .pv-deck-stage {
+    max-width: 96vw;
+    max-height: 75vh;
+  }
+}
+
+@media (max-width: 768px) {
+  .pv-deck-thumbnails-col {
+    display: none !important;
+  }
+  .pv-deck-stage {
+    border-radius: 4px;
+    max-width: 98vw;
+    max-height: 60vh;
+  }
+  .pv-deck-slide {
+    padding: 24px 28px !important;
+  }
+  .pv-deck-slide h1 {
+    font-size: 24px !important;
+  }
+  .pv-deck-slide h2 {
+    font-size: 20px !important;
+  }
+  .pv-deck-slide p,
+  .pv-deck-slide li {
+    font-size: 14px !important;
+  }
+}
