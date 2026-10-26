@@ -1,0 +1,6 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { pdfImportBoundary, isUniversalDoc, exportPdfSnapshot } from "../src/components/pdf/pdfOperations.ts";
+const doc = { metadata: { id: "doc-1", title: "Current", author: "User", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z", version: 1, wordCount: 1, charCount: 1, readingTimeMinutes: 1, paperSize: "A4", orientation: "portrait", lineSpacing: "1.15", fontFamily: "Helvetica", fontSize: 12, isEncrypted: false }, blocks: [{ id: "b1", type: "paragraph", content: "unsaved" }] } as any;
+test("PDF import boundary is setup-required and does not parse bytes", () => { assert.equal(pdfImportBoundary().available, false); assert.match(pdfImportBoundary().message, /does not parse arbitrary PDF bytes/); assert.equal(isUniversalDoc(new Uint8Array([1, 2])), false); });
+test("snapshot export validates source and does not mutate it on failure", async () => { const before = JSON.stringify(doc); assert.equal((await exportPdfSnapshot(new Uint8Array() as any)).ok, false); assert.equal(JSON.stringify(doc), before); const result = await exportPdfSnapshot(doc); assert.equal(result.ok, true); assert.equal(JSON.stringify(doc), before); });

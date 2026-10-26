@@ -65,6 +65,10 @@ pattern = "docs.postveil.me"
 custom_domain = true
 
 [[routes]]
+pattern = "deck.postveil.me"
+custom_domain = true
+
+[[routes]]
 pattern = "postveil.jamesfontanilla.com"
 custom_domain = true
 

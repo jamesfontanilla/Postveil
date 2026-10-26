@@ -5,7 +5,7 @@ import {
   type CalloutVariant,
   type DocComment,
   type DocSuggestion,
-  type CryptographicSignature,
+  type SignatureMetadata,
 } from "../types";
 import { SovereignEditorState } from "./SovereignEditorState";
 import { SovereignTransaction } from "./SovereignDocTransform";
@@ -463,7 +463,7 @@ export class DocumentEngine {
     }
   }
 
-  public addSignature(sig: CryptographicSignature) {
+  public addSignature(sig: SignatureMetadata) {
     if (!this.doc.metadata.signatures) this.doc.metadata.signatures = [];
     this.doc.metadata.signatures.push(sig);
     this.pushHistory();

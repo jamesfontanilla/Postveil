@@ -9,8 +9,9 @@ import {
   type Orientation,
   type DocMargins,
   type ReviewMode,
-  type CryptographicSignature,
+  type SignatureMetadata,
   type AutosaveStatus,
+  type SaveResult,
 } from "./types";
 import { UniversalFormatEngine } from "./formats/UniversalFormatEngine";
 import { DocumentEngine } from "./engine/DocumentEngine";
@@ -36,6 +37,7 @@ interface PDocsAppProps {
   onSignOut?: () => void;
   userEmail?: string;
   userName?: string;
+  onOpenPdf: (snapshot: UniversalDoc) => void;
 }
 
 export const PDocsApp: React.FC<PDocsAppProps> = ({
@@ -44,6 +46,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   onSignOut,
   userEmail = "idezjames14@gmail.com",
   userName = "IdesJames",
+  onOpenPdf,
 }) => {
   // Initialize with demo document showcasing 10 formats and math/tables
   const [doc, setDoc] = useState<UniversalDoc>(() => UniversalFormatEngine.createDemoDocument());
@@ -131,24 +134,37 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeBlockId, doc]);
 
-  const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("saved");
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(new Date());
+  const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("unknown");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [lastSaveResult, setLastSaveResult] = useState<SaveResult | null>(null);
   const docRef = useRef<UniversalDoc>(doc);
   docRef.current = doc;
   const isFirstMount = useRef(true);
+  const saveRequestRef = useRef(0);
 
-  // Manual save flush (can be triggered by user clicking indicator or pressing Ctrl+S)
-  const handleManualSave = async () => {
-    setAutosaveStatus("saving");
-    const currentDoc = docRef.current;
-    currentDoc.metadata.updatedAt = new Date().toISOString();
-    const success = await OpfsDocStorage.saveDocumentLocally(currentDoc);
-    if (success) {
+  const handleSaveResult = (result: SaveResult, requestId: number, source: string) => {
+    if (requestId !== saveRequestRef.current || source === "beforeunload") return;
+    setLastSaveResult(result);
+    if (result.status === "saved") {
       setAutosaveStatus("saved");
-      setLastSavedAt(new Date());
+      setLastSavedAt(new Date(result.savedAt));
     } else {
       setAutosaveStatus("error");
+      setLastSavedAt(null);
     }
+  };
+
+  const saveCurrentDocument = async (source: string, observable = true) => {
+    const requestId = ++saveRequestRef.current;
+    if (observable) setAutosaveStatus("saving");
+    const currentDoc = { ...docRef.current, metadata: { ...docRef.current.metadata, updatedAt: new Date().toISOString() } };
+    const result = await OpfsDocStorage.saveDocumentLocally(currentDoc);
+    handleSaveResult(result, requestId, observable ? source : "beforeunload");
+    return result;
+  };
+
+  const handleManualSave = async () => {
+    await saveCurrentDocument("manual");
   };
 
   // Keyboard shortcut Ctrl+S / Cmd+S manual save trigger
@@ -165,22 +181,13 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     return () => window.removeEventListener("keydown", handleSaveShortcut);
   }, []);
 
-  // Life-cycle save flush: flush instantly to local storage on visibility hidden or page unload
+  // Life-cycle save flush: initiate a best-effort write, but never claim success during unload.
   useEffect(() => {
-    const handleFlushOnExit = () => {
-      const currentDoc = docRef.current;
-      void OpfsDocStorage.saveDocumentLocally(currentDoc);
-    };
-
+    const handleFlushOnExit = () => { void saveCurrentDocument("lifecycle", false); };
     window.addEventListener("beforeunload", handleFlushOnExit);
     window.addEventListener("pagehide", handleFlushOnExit);
-    const handleVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        handleFlushOnExit();
-      }
-    };
+    const handleVisibility = () => { if (document.visibilityState === "hidden") void saveCurrentDocument("visibility"); };
     document.addEventListener("visibilitychange", handleVisibility);
-
     return () => {
       window.removeEventListener("beforeunload", handleFlushOnExit);
       window.removeEventListener("pagehide", handleFlushOnExit);
@@ -188,41 +195,20 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     };
   }, []);
 
-  // Real-time responsive autosave engine:
-  // - Instantly marks status as "unsaved" on keystroke
-  // - Debounces write by 400ms of user typing idle
-  // - Shows "Saving changes..." spinner while persisting to OPFS and localStorage
-  // - Marks status as "Saved to local OPFS" with timestamp on completion
+  // Debounced autosave uses the same stale-result-safe handler as manual and lifecycle saves.
   useEffect(() => {
     if (isFirstMount.current) {
       isFirstMount.current = false;
       return;
     }
-
     setAutosaveStatus("unsaved");
-
-    const timer = setTimeout(async () => {
-      setAutosaveStatus("saving");
-      const currentDoc = docRef.current;
-      currentDoc.metadata.updatedAt = new Date().toISOString();
-      const success = await OpfsDocStorage.saveDocumentLocally(currentDoc);
-      if (success) {
-        setAutosaveStatus("saved");
-        setLastSavedAt(new Date());
-      } else {
-        setAutosaveStatus("error");
-      }
-    }, 450);
-
+    const timer = setTimeout(() => { void saveCurrentDocument("debounce"); }, 450);
     return () => clearTimeout(timer);
   }, [doc]);
 
-  // Periodic safety checkpoint: every 30 seconds, ensure any pending updates or version snapshots are secured
+  // Periodic safety checkpoint awaits its result so failures remain observable.
   useEffect(() => {
-    const interval = setInterval(() => {
-      const currentDoc = docRef.current;
-      void OpfsDocStorage.saveDocumentLocally(currentDoc);
-    }, 30000);
+    const interval = setInterval(() => { void saveCurrentDocument("interval"); }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -563,13 +549,14 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     setDoc({ ...engineRef.current.getDocument() });
   };
 
-  const handleAddSignature = (sig: CryptographicSignature) => {
+  const handleAddSignature = (sig: SignatureMetadata) => {
     engineRef.current.addSignature(sig);
     setDoc({ ...engineRef.current.getDocument() });
   };
 
   return (
     <div className="pdocs-container">
+      <button type="button" onClick={() => onOpenPdf(doc)} style={{ position: "fixed", right: 18, bottom: 18, zIndex: 30 }}>Open current snapshot in P-PDF</button>
       {/* Header */}
       <DocsHeader
         doc={doc}
@@ -602,6 +589,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         userName={userName}
         autosaveStatus={autosaveStatus}
         lastSavedAt={lastSavedAt}
+        saveResult={lastSaveResult}
         onManualSave={handleManualSave}
       />
 

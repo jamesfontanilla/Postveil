@@ -103,7 +103,7 @@ import OAuthConsentCard from "./components/accounts/OAuthConsentCard";
 import PDocsApp from "./components/docs/PDocsApp";
 import "./components/accounts/AccountsStyles.css";
 import { WaffleLauncher } from "./components/accounts/WaffleLauncher";
-import { PillarPreviewModal, SOVEREIGN_PILLARS, type PillarDetails } from "./components/accounts/PillarPreviewModal";
+import { PillarPreviewModal, type PillarDetails } from "./components/accounts/PillarPreviewModal";
 import PasswordResetScreen from "./components/auth/PasswordResetScreen";
 import AuthScreen from "./components/auth/AuthScreen";
 import { MfaSetupRequiredScreen, MfaChallengeScreen } from "./components/auth/MfaScreens";
@@ -123,6 +123,20 @@ import {
   formatBytes,
 } from "./lib/format";
 import { AppDialogProvider, useAppDialog } from "./context/AppDialogContext";
+import { normalizeNavigationTarget, navigationForPillar, readNavigationLocation, subscribeToNavigation, writeNavigation, type NavigationTarget } from "./lib/navigation";
+import SuiteDashboard from "./components/platform/SuiteDashboard";
+import SuiteNav from "./components/platform/SuiteNav";
+import PillarBoundary from "./components/platform/PillarBoundary";
+import PDriveApp from "./components/drive/PDriveApp";
+import PSheetsApp from "./components/sheets/PSheetsApp";
+import PDeckApp from "./components/deck/PDeckApp";
+import PDrawApp from "./components/draw/PDrawApp";
+import PFormsApp from "./components/forms/PFormsApp";
+import PCRMApp from "./components/crm/PCRMApp";
+import PPdfApp from "./components/pdf/PPdfApp";
+import PVoiceApp from "./components/voice/PVoiceApp";
+import PRecordApp from "./components/record/PRecordApp";
+import "./components/platform/PlatformStyles.css";
 import Compose from "./components/modals/ComposeModal";
 import SettingsPanel from "./components/modals/SettingsModal";
 import TrustLensModal from "./components/modals/TrustLensModal";
@@ -233,10 +247,10 @@ function detailIdentityForMessage(message: Message, contacts: Contact[], mailbox
 }
 
 
-function MailboxApp({ session }: { session: Session }) {
+function MailboxApp({ session, onOpenPdf }: { session: Session; onOpenPdf: (snapshot: import("./components/docs/types").UniversalDoc) => void }) {
   const { confirm, prompt } = useAppDialog();
   const imagePreferenceKey = `postveil.load_remote_images:${session.user.id}`;
-  const [view, setView] = useState<"mail" | "calendar" | "tasks" | "accounts" | "docs">(() => {
+  const [view, setViewState] = useState<"mail" | "calendar" | "tasks" | "accounts" | "docs">(() => {
     const params = new URLSearchParams(window.location.search);
     if (
       params.get("view") === "accounts" ||
@@ -254,6 +268,13 @@ function MailboxApp({ session }: { session: Session }) {
     }
     return "mail";
   });
+  const setView = (next: "mail" | "calendar" | "tasks" | "accounts" | "docs") => {
+    if (next === "accounts") return void writeNavigation({ view: "accounts", kind: "accounts" });
+    if (next === "docs") return void writeNavigation({ view: "docs", kind: "docs" });
+    if (next === "calendar") return void writeNavigation({ view: "calendar", kind: "calendar" });
+    if (next === "mail") return void writeNavigation({ view: "mail", kind: "mail" });
+    setViewState(next);
+  };
   const [folder, setFolder] = useState<ViewKey>("inbox");
   const [messages, setMessages] = useState<Message[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
@@ -1244,6 +1265,7 @@ function MailboxApp({ session }: { session: Session }) {
       <PDocsApp
         userEmail={session.user.email}
         userName={displayName(session.user.email || "James")}
+        onOpenPdf={onOpenPdf}
         onBackToMail={() => {
           setView("mail");
           const url = new URL(window.location.href);
@@ -1316,7 +1338,7 @@ function MailboxApp({ session }: { session: Session }) {
                 setIsWaffleOpen(false);
               }}
               onSelectPillar={(pillar) => {
-                setSelectedPillar(pillar);
+                writeNavigation(navigationForPillar(pillar.id));
                 setIsWaffleOpen(false);
               }}
             />
@@ -3358,6 +3380,41 @@ function MailboxApp({ session }: { session: Session }) {
   );
 }
 
+function CalendarShell({ session: _session }: { session: Session }) {
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [error, setError] = useState("");
+  const loadEvents = useCallback(async () => {
+    try { setEvents(await apiFetch<CalendarEvent[]>("/api/calendar")); setError(""); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Calendar unavailable"); }
+  }, []);
+  useEffect(() => { void loadEvents(); }, [loadEvents]);
+  return <div className="pv-platform-shell"><SuiteNav current={{ view: "calendar", kind: "calendar" }} /><main className="pv-suite-content"><p className="pv-suite-heading"><strong>Private server-persisted calendar events; no provider sync.</strong></p>{error && <div className="inline-error" role="alert">{error}</div>}<Workspace mode="calendar" tasks={[]} events={events} workItems={[]} workSummary={{ reply_later: 0, waiting_on: 0, i_owe: 0, overdue: 0, total: 0 }} onOpenMessage={() => undefined} onRefresh={() => void loadEvents()} /></main></div>;
+}
+
+function AppShell({ session, initialRoute, pdfSnapshot, onOpenPdf }: { session: Session; initialRoute: NavigationTarget; pdfSnapshot?: import("./components/docs/types").UniversalDoc; onOpenPdf: (snapshot: import("./components/docs/types").UniversalDoc) => void }) {
+  const [route, setRoute] = useState<NavigationTarget>(() => normalizeNavigationTarget(initialRoute));
+  useEffect(() => subscribeToNavigation((next) => setRoute(normalizeNavigationTarget(next))), []);
+  const shellRoute = normalizeNavigationTarget(route);
+  if (shellRoute.view === "mail") return <MailboxApp session={session} onOpenPdf={onOpenPdf} />;
+  if (shellRoute.view === "calendar") return <CalendarShell session={session} />;
+  if (shellRoute.view === "docs") return <PDocsApp onOpenPdf={onOpenPdf} onBackToMail={() => writeNavigation({ view: "mail", kind: "mail" })} onSwitchToAccounts={() => writeNavigation({ view: "accounts", kind: "accounts" })} onSignOut={() => void requireSupabase().auth.signOut()} userEmail={session.user.email} userName={displayName(session.user.email || "Postveil")} />;
+  if (shellRoute.view === "accounts") return <AccountsHub currentUserEmail={session.user.email} currentUserName={displayName(session.user.email || "Postveil")} onBackToMail={() => writeNavigation({ view: "mail", kind: "mail" })} onSwitchToDocs={() => writeNavigation({ view: "docs", kind: "docs" })} onSignOut={() => void requireSupabase().auth.signOut()} />;
+  if (shellRoute.view === "suite") return <SuiteDashboard />;
+  if (shellRoute.view === "pillar") {
+    if (shellRoute.pillarId === "p-drive") return <PDriveApp session={session} />;
+    if (shellRoute.pillarId === "p-sheets") return <PSheetsApp />;
+    if (shellRoute.pillarId === "p-deck") return <PDeckApp />;
+    if (shellRoute.pillarId === "p-draw") return <PDrawApp />;
+    if (shellRoute.pillarId === "p-forms") return <PFormsApp />;
+    if (shellRoute.pillarId === "p-crm") return <PCRMApp session={session} />;
+    if (shellRoute.pillarId === "p-pdf") return <PPdfApp sourceDocument={pdfSnapshot} />;
+    if (shellRoute.pillarId === "p-voice") return <PVoiceApp session={session} />;
+    if (shellRoute.pillarId === "p-record") return <PRecordApp session={session} />;
+    return <PillarBoundary pillarId={shellRoute.pillarId} />;
+  }
+  return <PillarBoundary unknownId={shellRoute.unknownId} />;
+}
+
 function AppContent() {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
@@ -3370,6 +3427,7 @@ function AppContent() {
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const [mfaRequired, setMfaRequired] = useState(false);
   const [mfaSetupRequired, setMfaSetupRequired] = useState(false);
+  const [pdfSnapshot, setPdfSnapshot] = useState<import("./components/docs/types").UniversalDoc | undefined>();
   useEffect(() => {
     if (!supabase) {
       setReady(true);
@@ -3443,7 +3501,7 @@ function AppContent() {
     return () => { active = false; };
   }, [session, recovering]);
   useEffect(() => {
-    if (!session) {
+    if (!session || mfaRequired || mfaSetupRequired) {
       setOnboardingChecked(false);
       setOnboardingRequired(false);
       return;
@@ -3456,19 +3514,18 @@ function AppContent() {
     ]).then(([settings, mailboxes]) => {
       if (!active) return;
       const state = settings.onboarding_state && typeof settings.onboarding_state === "object" ? settings.onboarding_state as OnboardingState : null;
-      // A completed flag alone is not enough: an account without a mailbox
-      // must always return to the domain onboarding wizard. This also repairs
-      // sessions created before the first mailbox is provisioned.
-      setOnboardingRequired(state?.completed !== true || mailboxes.length === 0);
+      // Users with an existing mailbox or sovereign handle skip setup wizard entirely
+      const hasMailbox = Array.isArray(mailboxes) && mailboxes.length > 0;
+      const completed = state?.completed === true || hasMailbox;
+      setOnboardingRequired(!completed);
     }).catch(() => {
-      // Fail closed for a signed-in account: if readiness cannot be checked,
-      // keep the user in onboarding instead of exposing an unusable mailbox.
-      if (active) setOnboardingRequired(true);
+      // If error occurs, keep safe fallback
+      if (active) setOnboardingRequired(false);
     }).finally(() => {
       if (active) setOnboardingChecked(true);
     });
     return () => { active = false; };
-  }, [session]);
+  }, [session, mfaRequired, mfaSetupRequired]);
   if (!ready)
     return (
       <div className="loading-screen">
@@ -3507,7 +3564,7 @@ function AppContent() {
   if (mfaRequired) return <MfaChallengeScreen onVerified={() => setMfaRequired(false)} />;
   if (!onboardingChecked) return <div className="loading-screen"><BrandMark /><p>Preparing your private desk…</p></div>;
   if (onboardingRequired) return <OnboardingWizard session={session} onComplete={() => setOnboardingRequired(false)} />;
-  return <MailboxApp session={session} />;
+  return <AppShell session={session} initialRoute={readNavigationLocation(window.location)} pdfSnapshot={pdfSnapshot} onOpenPdf={(snapshot) => { setPdfSnapshot(structuredClone(snapshot)); writeNavigation({ view: "pillar", pillarId: "p-pdf" }); }} />;
 }
 
 export default function App() {

@@ -1,5 +1,4 @@
-import { type UniversalDoc, type ExportOptions } from "../types";
-import { type DocumentCodec } from "./UniversalFormatEngine";
+import { normalizeDocumentSignatures, type UniversalDoc, type ExportOptions, type DocumentCodec } from "../types.ts";
 
 export const nativePdocCodec: DocumentCodec = {
   id: "pdoc",
@@ -9,8 +8,8 @@ export const nativePdocCodec: DocumentCodec = {
     extension: ".pdoc",
     mimeType: "application/x-postveil-doc",
     category: "Sovereign Native",
-    giantCompetitor: "None (Zero-Knowledge Sovereign Standard)",
-    description: "Native cryptographic AST with Ed25519 author signing, Merkle DAG history, and zero-knowledge local-first OPFS storage.",
+    giantCompetitor: "None (local Postveil format)",
+    description: "Native Postveil document format with local metadata and SHA-256 hash previews.",
     isLossless: true,
     supportsMath: true,
     supportsTables: true,
@@ -24,7 +23,7 @@ export const nativePdocCodec: DocumentCodec = {
       throw new Error("Invalid Postveil Sovereign Document (.pdoc) schema");
     }
 
-    return parsed.document as UniversalDoc;
+    return normalizeDocumentSignatures(parsed.document as UniversalDoc);
   },
 
   async export(doc: UniversalDoc, options?: ExportOptions): Promise<{ data: string; filename: string }> {
@@ -34,8 +33,7 @@ export const nativePdocCodec: DocumentCodec = {
       generator: "Postveil P-Docs Sovereign Engine 1.0",
       cryptography: {
         hashAlgorithm: "SHA-256",
-        signatureStandard: "Ed25519",
-        authorKeyId: doc.metadata.authorKeyId || "sovereign_local_key",
+        signatureMetadata: doc.metadata.signatures || [],
       },
       document: doc,
     };

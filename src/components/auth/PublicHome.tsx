@@ -13,211 +13,17 @@ import {
   X,
 } from "lucide-react";
 import "./PublicHomeStyles.css";
+import { CAPABILITY_STATE_LABELS, PILLAR_REGISTRY } from "../../lib/pillars";
 
-interface PillarItem {
-  id: string;
-  name: string;
-  category: "comms" | "office" | "media" | "ops";
-  logo: string;
-  status: string;
-  isLive?: boolean;
-  summary: string;
-  replaces: string;
-  href?: string;
-}
-
-const ALL_20_PILLARS: PillarItem[] = [
-  {
-    id: "p-mail",
-    name: "P-Mail",
-    category: "comms",
-    logo: "/brand/pillars/p-mail.svg",
-    status: "Live",
-    isLive: true,
-    summary: "Custom-domain & subdomain sovereign email with cloaked aliases, DKIM/DMARC automation, and Trust Lens verification.",
-    replaces: "Google Workspace / Proton Mail",
-  },
-  {
-    id: "p-docs",
-    name: "P-Docs",
-    category: "office",
-    logo: "/brand/pillars/p-docs.svg",
-    status: "Live",
-    isLive: true,
-    summary: "Paginated word processor with 50+ live typefaces, KaTeX symbolic math, Ed25519 digital signatures, and 10 native binary exports.",
-    replaces: "Microsoft Word / Google Docs / Notion",
-    href: "https://docs.postveil.me/",
-  },
-  {
-    id: "p-calendar",
-    name: "P-Calendar",
-    category: "comms",
-    logo: "/brand/pillars/p-calendar.svg",
-    status: "Live",
-    isLive: true,
-    summary: "Zero-leak time-zone scheduling and instant public booking links hosted on your sovereign handle.",
-    replaces: "Calendly ($144/yr) / Google Calendar",
-  },
-  {
-    id: "p-pass",
-    name: "P-Pass",
-    category: "ops",
-    logo: "/brand/pillars/p-pass.svg",
-    status: "Live",
-    isLive: true,
-    summary: "FIDO2 hardware passkeys, Ed25519 cryptographic identity hub, and cloaked email alias generator.",
-    replaces: "1Password ($96/yr) / SimpleLogin",
-    href: "https://accounts.postveil.me/",
-  },
-  {
-    id: "p-sheets",
-    name: "P-Sheets",
-    category: "office",
-    logo: "/brand/pillars/p-sheets.svg",
-    status: "WASM Engine",
-    summary: "120 FPS local-first reactive spreadsheet and relational grid executing formulas directly on your device CPU.",
-    replaces: "Microsoft Excel / Airtable ($240/yr)",
-  },
-  {
-    id: "p-drive",
-    name: "P-Drive",
-    category: "office",
-    logo: "/brand/pillars/p-drive.svg",
-    status: "BYOS + R2",
-    summary: "Client-side encrypted vault supporting Local OPFS, Bring-Your-Own S3/Google Drive, or zero-egress R2 cloud storage.",
-    replaces: "Dropbox ($120/yr) / Google Drive",
-  },
-  {
-    id: "p-meet",
-    name: "P-Meet",
-    category: "comms",
-    logo: "/brand/pillars/p-meet.svg",
-    status: "Edge WebRTC",
-    summary: "Instant encrypted video rooms with zero time limits on 1-on-1 calls and no mandatory desktop bloatware.",
-    replaces: "Zoom ($190/yr) / Microsoft Teams",
-  },
-  {
-    id: "p-chat",
-    name: "P-Chat",
-    category: "comms",
-    logo: "/brand/pillars/p-chat.svg",
-    status: "Stateless Wire",
-    summary: "High-speed team channels and direct messaging with full history ownership and zero message-retention ransom.",
-    replaces: "Slack ($105/yr) / Discord Nitro",
-  },
-  {
-    id: "p-sign",
-    name: "P-Sign",
-    category: "ops",
-    logo: "/brand/pillars/p-sign.svg",
-    status: "Live in P-Docs",
-    isLive: true,
-    summary: "Tamper-evident Ed25519 + SHA-256 cryptographic contract and document signing with verifiable public key fingerprints.",
-    replaces: "DocuSign ($300/yr) / Adobe Sign",
-    href: "https://docs.postveil.me/",
-  },
-  {
-    id: "p-pdf",
-    name: "P-PDF",
-    category: "office",
-    logo: "/brand/pillars/p-pdf.svg",
-    status: "Native Codec",
-    isLive: true,
-    summary: "Client-side binary PDF 1.4 compiler, redaction engine, and layout inspector with zero server uploads.",
-    replaces: "Adobe Acrobat Pro ($240/yr)",
-    href: "https://docs.postveil.me/",
-  },
-  {
-    id: "p-deck",
-    name: "P-Deck",
-    category: "office",
-    logo: "/brand/pillars/p-deck.svg",
-    status: "Suite Pillar",
-    summary: "Markdown-native pitch deck and presentation studio with instant responsive slide layouts.",
-    replaces: "PowerPoint / Pitch / Keynote",
-  },
-  {
-    id: "p-draw",
-    name: "P-Draw",
-    category: "media",
-    logo: "/brand/pillars/p-draw.svg",
-    status: "Vector Canvas",
-    summary: "Infinite collaborative whiteboard, architecture diagramming, and SVG vector illustration canvas.",
-    replaces: "Miro ($120/yr) / FigJam / Illustrator",
-  },
-  {
-    id: "p-studio",
-    name: "P-Studio",
-    category: "media",
-    logo: "/brand/pillars/p-studio.svg",
-    status: "WebGPU",
-    summary: "Hardware-accelerated non-linear media, raster photo layers, and 3D/CAD creative workstation in the browser.",
-    replaces: "Adobe Creative Cloud ($720/yr)",
-  },
-  {
-    id: "p-record",
-    name: "P-Record",
-    category: "media",
-    logo: "/brand/pillars/p-record.svg",
-    status: "4K Local",
-    summary: "Async screen, camera, and system audio recorder saving straight to local OPFS or instant share links.",
-    replaces: "Loom ($150/yr) / Camtasia",
-  },
-  {
-    id: "p-voice",
-    name: "P-Voice",
-    category: "media",
-    logo: "/brand/pillars/p-voice.svg",
-    status: "Local Whisper",
-    summary: "Private audio notes, multi-track podcast capture, and on-device speech-to-text transcription.",
-    replaces: "Otter.ai / Descript ($180/yr)",
-  },
-  {
-    id: "p-forms",
-    name: "P-Forms",
-    category: "ops",
-    logo: "/brand/pillars/p-forms.svg",
-    status: "Zero-Track",
-    summary: "Encrypted lead capture, surveys, and conditional intake forms without paywalling response counts.",
-    replaces: "Typeform ($300/yr) / Tally",
-  },
-  {
-    id: "p-books",
-    name: "P-Books",
-    category: "ops",
-    logo: "/brand/pillars/p-books.svg",
-    status: "Zero-Fee",
-    summary: "Double-entry ledger, automated PDF invoicing, expense tracking, and tax-ready financial statements.",
-    replaces: "QuickBooks ($360/yr) / Xero / FreshBooks",
-  },
-  {
-    id: "p-crm",
-    name: "P-CRM",
-    category: "ops",
-    logo: "/brand/pillars/p-crm.svg",
-    status: "Inbox-Linked",
-    summary: "Lightweight deal pipelines and client relationship timelines automatically hydrated from P-Mail threads.",
-    replaces: "HubSpot / Pipedrive ($180/yr)",
-  },
-  {
-    id: "p-sites",
-    name: "P-Sites",
-    category: "ops",
-    logo: "/brand/pillars/p-sites.svg",
-    status: "Edge Static",
-    summary: "One-click personal portfolios, documentation hubs, and bio-links published to yourname.postveil.me or custom domain.",
-    replaces: "Carrd / Linktree / Webflow ($168/yr)",
-  },
-  {
-    id: "p-automate",
-    name: "P-Automate",
-    category: "ops",
-    logo: "/brand/pillars/p-automate.svg",
-    status: "Cron + MCP",
-    summary: "Deterministic workflow webhooks paired with optional local Model Context Protocol (MCP) AI agents.",
-    replaces: "Zapier ($240/yr) / Make / n8n Cloud",
-  },
-];
+const REGISTERED_PILLARS = PILLAR_REGISTRY.map((pillar) => ({
+  id: pillar.id,
+  name: pillar.name,
+  category: pillar.category,
+  logo: pillar.icon.path,
+  status: CAPABILITY_STATE_LABELS[pillar.state],
+  summary: pillar.summary,
+  replaces: pillar.dependencyNote || "No additional dependency is stated.",
+}));
 
 const SHOWCASE_MODES = [
   {
@@ -225,10 +31,10 @@ const SHOWCASE_MODES = [
     label: "P-Mail (Custom Domain Inbox)",
     logo: "/brand/pillars/p-mail.svg",
     url: "https://postveil.me/",
-    badge: "DKIM • SPF • DMARC Verified",
+    badge: "Mail authentication status is shown after verification",
     title: "Your Sovereign Inbox — On postveil.me or Your Own Domain",
     description:
-      "Start in 10 seconds with a free username.postveil.me identity and wildcard aliases, or connect any domain from Cloudflare, Spaceship, Porkbun, Namecheap, or GoDaddy.",
+      "Start with the current account flow and connect a domain through the configured onboarding path.",
     replaces: "Replaces Google Workspace ($86/yr) & Proton Unlimited ($120/yr)",
     navItems: ["Focused Inbox (4)", "Cloaked Aliases", "Custom Domains", "Trust Lens Inspector", "Scheduled Outbox"],
     cards: [
@@ -238,11 +44,11 @@ const SHOWCASE_MODES = [
       },
       {
         title: "1-Click & Guided DNS",
-        body: "Live pre-flight DNS verifier checks your MX, SPF, DKIM, and DMARC records in real time.",
+        body: "The mail setup can check configured authentication records; results depend on the connected domain.",
       },
       {
         title: "Trust Lens Security",
-        body: "Inspect sender authentication, block remote tracking pixels, and verify cryptographic signatures.",
+        body: "Inspect sender authentication and message safety indicators.",
       },
     ],
   },
@@ -251,50 +57,50 @@ const SHOWCASE_MODES = [
     label: "P-Docs (Sovereign Word Processor)",
     logo: "/brand/pillars/p-docs.svg",
     url: "https://docs.postveil.me/",
-    badge: "OPFS Local-First • 10 Native Codecs",
-    title: "Enterprise Word Processing That Runs 100% on Your Silicon",
+    badge: "OPFS local-first • open-format exports",
+    title: "Document editing that runs on your device",
     description:
       "True A4/Letter paginated canvas, interactive margin ruler, 50+ live typefaces, KaTeX symbolic equations, version history diffs, and genuine binary exports.",
     replaces: "Replaces Microsoft 365 Word ($99/yr), Google Docs & Notion ($120/yr)",
-    navItems: ["Print Layout & Flow Mode", "50+ Font Library", "KaTeX Math Engine", "Ed25519 Signing", "10 Binary Exports"],
+    navItems: ["Print Layout & Flow Mode", "50+ Font Library", "KaTeX Math Engine", "Document hash preview", "10 Binary Exports"],
     cards: [
       {
-        title: "10 Genuine Export Formats",
-        body: "Compile binary .docx, .pdf, .odt, .epub, .rtf, .tex, .md, .html, .txt, and .pdoc locally in milliseconds.",
+        title: "Document editing and export",
+        body: "P-Docs exports supported open formats locally; available formats depend on the current document path.",
       },
       {
         title: "LLM Chatbot Smart Paste",
         body: "Paste raw Markdown, tables, callouts, and LaTeX math from any AI assistant directly into rich formatted blocks.",
       },
       {
-        title: "Ed25519 Digital Signatures",
-        body: "Sign documents with your hardware-backed WebCrypto keypair and verify SHA-256 tamper-proof hashes.",
+        title: "Document hash preview",
+        body: "P-Docs can show document hashes and retain legacy signature metadata as unverified; signing is disabled until a verification service exists.",
       },
     ],
   },
   {
     id: "accounts",
-    label: "Sovereign Identity & BYOS",
+    label: "Sovereign Account Settings",
     logo: "/brand/pillars/p-pass.svg",
     url: "https://accounts.postveil.me/",
-    badge: "WebCrypto Ed25519 • FIDO2 Passkeys",
-    title: "Zero-Knowledge Identity & Bring-Your-Own-Storage (BYOS)",
+    badge: "MFA available • credential service setup-required",
+    title: "Account security and local storage settings",
     description:
-      "Authenticate with fingerprint/FaceID passkeys, generate cloaked aliases, and choose where your bytes live: Local OPFS, your own S3/Google Drive, or Postveil R2 Vault.",
+      "Email authentication and MFA are available today. Credential storage and passkey enrollment require separate setup.",
     replaces: "Replaces 1Password ($96/yr), Dropbox ($120/yr) & Auth0",
-    navItems: ["FIDO2 Passkey Vault", "3-Tier Storage Selector", "Cloaked Email Aliases", "Connected OAuth Apps", "Domain Health Hub"],
+    navItems: ["Account MFA", "Credential service setup-required", "Local browser storage", "Connected apps", "Domain health"],
     cards: [
       {
-        title: "Local OPFS ($0 Forever)",
-        body: "Documents and assets stay inside your browser's Origin Private File System—zero cloud exposure.",
+        title: "Local browser storage",
+        body: "Supported local-first document features keep their data in the browser when the selected medium is available.",
       },
       {
-        title: "Bring Your Own Storage",
-        body: "Plug in your own Cloudflare R2, AWS S3 bucket, or Google Drive with client-side encryption.",
+        title: "External storage setup",
+        body: "Cloud storage connectors are not configured in this deployment; local browser storage remains the available option.",
       },
       {
-        title: "Voluntary Local MCP AI",
-        body: "100% offline by default. Optionally connect local Ollama models or your own API key with explicit consent.",
+        title: "Optional local tooling",
+        body: "No hosted AI connection is required or enabled by this shell.",
       },
     ],
   },
@@ -317,8 +123,8 @@ export default function PublicHome({
 
   const filteredPillars =
     activeCategory === "all"
-      ? ALL_20_PILLARS
-      : ALL_20_PILLARS.filter((p) => p.category === activeCategory);
+      ? REGISTERED_PILLARS
+      : REGISTERED_PILLARS.filter((p) => p.category === activeCategory);
 
   function handleClaimSubmit(e: FormEvent) {
     e.preventDefault();
@@ -346,7 +152,7 @@ export default function PublicHome({
           </a>
 
           <nav className="pv-nav-links" aria-label="Primary navigation">
-            <a href="#live-suite">Live Workspace</a>
+            <a href="#live-suite">Available surfaces</a>
             <a href="#pillars">20 Pillars</a>
             <a href="#architecture">Sovereign Architecture</a>
             <a href="#pricing">Pricing</a>
@@ -374,9 +180,9 @@ export default function PublicHome({
 
         {/* Mobile Navigation Drawer */}
         <div className={`pv-mobile-drawer ${mobileMenuOpen ? "open" : ""}`}>
-          <a href="#live-suite" onClick={() => setMobileMenuOpen(false)}>Live Workspace</a>
+          <a href="#live-suite" onClick={() => setMobileMenuOpen(false)}>Available surfaces</a>
           <a href="#pillars" onClick={() => setMobileMenuOpen(false)}>All 20 Sovereign Pillars</a>
-          <a href="#architecture" onClick={() => setMobileMenuOpen(false)}>Zero-Knowledge Architecture</a>
+          <a href="#architecture" onClick={() => setMobileMenuOpen(false)}>Architecture and boundaries</a>
           <a href="#pricing" onClick={() => setMobileMenuOpen(false)}>Pricing & Welcome Gift</a>
           <a href="https://docs.postveil.me/">Open P-Docs Editor</a>
           <a href="https://accounts.postveil.me/">Open Accounts Hub</a>
@@ -431,7 +237,7 @@ export default function PublicHome({
           <div className="pv-claim-status-bar">
             <span className="pv-claim-available">
               <Check size={15} />
-              <strong>{cleanHandle}.postveil.me</strong> &amp; <strong>*@{cleanHandle}.postveil.me</strong> are available!
+              <strong>{cleanHandle}.postveil.me</strong> &amp; <strong>*@{cleanHandle}.postveil.me</strong> will be checked when you continue.
             </span>
             <button type="button" className="pv-claim-custom-domain-link" onClick={onSignUp}>
               Already own a custom domain (e.g. acme.com)? Connect it here →
@@ -444,18 +250,18 @@ export default function PublicHome({
             <Check size={15} /> No existing email required to sign up
           </span>
           <span>
-            <KeyRound size={15} /> FIDO2 Passkey &amp; Ed25519 Cryptography
+            <KeyRound size={15} /> Email sign-in and MFA are available; passkeys require setup
           </span>
           <span>
-            <HardDrive size={15} /> Local OPFS + Bring Your Own Storage (BYOS)
+            <HardDrive size={15} /> Local browser storage for supported features
           </span>
           <span>
-            <Globe2 size={15} /> 1-Click Cloudflare &amp; Registrar DNS
+            <Globe2 size={15} /> Domain connection guidance
           </span>
         </div>
       </section>
 
-      {/* 3. INTERACTIVE LIVE SUITE SWITCHER */}
+      {/* 3. INTERACTIVE SUITE SHOWCASE */}
       <section className="pv-showcase-section" id="live-suite" aria-label="Interactive Suite Preview">
         <div className="pv-showcase-tabs" role="tablist">
           {SHOWCASE_MODES.map((mode) => (
@@ -528,7 +334,7 @@ export default function PublicHome({
                       className="pv-btn-ghost"
                       style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}
                     >
-                      Try Live P-Docs Editor <ArrowRight size={14} />
+                      Open P-Docs Editor <ArrowRight size={14} />
                     </a>
                   )}
                   {currentShowcase.id === "accounts" && (
@@ -559,7 +365,7 @@ export default function PublicHome({
           </div>
           <h2 id="pillars-heading">Every tool your life and business run on. Unbundled from Big Tech.</h2>
           <p>
-            Instead of paying 15 separate monthly SaaS subscriptions that scrape your private documents, Postveil unifies 20 cryptographically sovereign pillars under one roof.
+            Instead of presenting every manifesto item as complete, Postveil lists 20 pillars with their current registry state and explicit boundaries.
           </p>
         </div>
 
@@ -590,7 +396,7 @@ export default function PublicHome({
                   <div className="pv-pillar-icon">
                     <img src={pillar.logo} alt={`${pillar.name} logo`} loading="lazy" />
                   </div>
-                  <span className={`pv-pillar-status ${pillar.isLive ? "live" : ""}`}>
+                  <span className={`pv-pillar-status ${pillar.status.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
                     {pillar.status}
                   </span>
                 </div>
@@ -600,7 +406,7 @@ export default function PublicHome({
                 </div>
               </div>
               <div className="pv-pillar-replaces">
-                Replaces: <strong>{pillar.replaces}</strong>
+                Scope: <strong>{pillar.replaces}</strong>
               </div>
             </article>
           ))}
@@ -613,11 +419,11 @@ export default function PublicHome({
           <div className="pv-arch-copy">
             <div className="pv-eyebrow-pill">
               <Cpu size={14} />
-              <span>LOCAL-FIRST • ZERO-KNOWLEDGE • IaaS EDGE</span>
+              <span>LOCAL-FIRST • BOUNDED CAPABILITIES • AUTHENTICATED ACCESS</span>
             </div>
-            <h2 id="arch-heading">Engineered so your files never become training fodder.</h2>
+            <h2 id="arch-heading">Local-first features with explicit capability boundaries.</h2>
             <p>
-              Traditional cloud suites hold your data hostage on multi-tenant servers and charge recurring rent. Postveil pushes computing to your local device silicon and gives you total ownership of your storage and keys.
+              Traditional suites combine many services behind broad promises. Postveil shows each pillar's current state and keeps supported local data in the browser where possible.
             </p>
 
             <div className="pv-arch-points">
@@ -626,10 +432,8 @@ export default function PublicHome({
                   <HardDrive size={18} />
                 </div>
                 <div>
-                  <h4>3-Way Sovereign Storage (OPFS, BYOS, or R2 Vault)</h4>
-                  <p>
-                    Store documents for $0 in your browser’s Origin Private File System (OPFS), connect your own AWS S3 / Cloudflare R2 / Google Drive, or use our encrypted zero-egress Vault.
-                  </p>
+                  <h4>Local browser storage</h4>
+                  <p>Supported local-first document features use browser storage when available. External storage connectors and managed vaults require setup.</p>
                 </div>
               </div>
 
@@ -638,10 +442,8 @@ export default function PublicHome({
                   <KeyRound size={18} />
                 </div>
                 <div>
-                  <h4>Asymmetric Ed25519 &amp; Hardware Passkeys</h4>
-                  <p>
-                    Every Postveil identity derives a deterministic WebCrypto keypair on your device. Sign contracts in P-Docs and authenticate across apps without passwords.
-                  </p>
+                  <h4>Authentication and account security</h4>
+                  <p>Email authentication and MFA are available. Passkey credentials and cryptographic signing require separate setup.</p>
                 </div>
               </div>
 
@@ -650,10 +452,8 @@ export default function PublicHome({
                   <ShieldCheck size={18} />
                 </div>
                 <div>
-                  <h4>100% Voluntary MCP AI (Zero Forced Cloud Scraping)</h4>
-                  <p>
-                    AI is disabled by default. Power users can voluntarily attach local offline models (via Ollama) or their own API keys via the Model Context Protocol (MCP) with biometric confirmation.
-                  </p>
+                  <h4>Optional integrations</h4>
+                  <p>Provider connections and hosted AI tools are not enabled by this shell; unsupported integrations remain setup-required.</p>
                 </div>
               </div>
             </div>
@@ -701,7 +501,7 @@ export default function PublicHome({
             <div className="pv-receipt-total-new">
               <div>
                 <strong>Postveil Sovereign Suite</strong>
-                <small>All 20 Pillars • Custom Domains • Zero Lock-in</small>
+                <small>Available surfaces follow the registry state</small>
               </div>
               <span className="pv-receipt-price">$48 / yr</span>
             </div>
@@ -733,10 +533,7 @@ export default function PublicHome({
                 <span>/ forever (Self-Hosted)</span>
               </div>
               <ul className="pv-price-features">
-                <li><Check size={16} /> Deploy on your own Cloudflare / Docker</li>
-                <li><Check size={16} /> Bring your own AWS SES &amp; R2/S3</li>
-                <li><Check size={16} /> Unlimited custom domains (own DNS)</li>
-                <li><Check size={16} /> Full local OPFS &amp; WebCrypto engine</li>
+                <li><Check size={16} /> Local browser storage where supported</li>
               </ul>
             </div>
             <button type="button" className="pv-btn-ghost pv-price-btn" onClick={onSignUp}>
@@ -756,8 +553,8 @@ export default function PublicHome({
               <ul className="pv-price-features">
                 <li><Check size={16} /> Free <strong>yourname.postveil.me</strong> identity</li>
                 <li><Check size={16} /> Connect 1 custom domain you own</li>
-                <li><Check size={16} /> Core pillars (P-Mail, P-Docs, P-Cal, P-Pass)</li>
-                <li><Check size={16} /> 2 GB Cloud Vault + Unlimited Local OPFS</li>
+                <li><Check size={16} /> P-Mail, P-Docs, and P-Calendar availability follows their registry states</li>
+                <li><Check size={16} /> Local storage where the browser medium is available</li>
               </ul>
             </div>
             <button type="button" className="pv-btn-ghost pv-price-btn" onClick={onSignUp}>
@@ -779,11 +576,9 @@ export default function PublicHome({
                 🎁 <strong>Includes 1 Welcome Gift:</strong> Choose a <strong>Free Custom Domain</strong> (1st yr), a <strong>Free Domain Transfer-In</strong> (+1 yr renewal), or <strong>+25 GB Bonus Vault</strong>!
               </div>
               <ul className="pv-price-features">
-                <li><Check size={16} /> <strong>All 20 Sovereign Pillars</strong> unlocked</li>
-                <li><Check size={16} /> <strong>Unlimited</strong> custom domains &amp; aliases</li>
-                <li><Check size={16} /> 50 GB Zero-Egress R2 Cloud Vault</li>
-                <li><Check size={16} /> 25,000 emails/mo + Remove viral badges</li>
-                <li><Check size={16} /> Unlimited Ed25519 P-Sign signatures</li>
+                <li><Check size={16} /> Registry access to available beta surfaces</li>
+                <li><Check size={16} /> Custom-domain and storage options remain subject to setup</li>
+                <li><Check size={16} /> Signature metadata preview; signing remains disabled</li>
               </ul>
             </div>
             <button type="button" className="pv-btn-primary pv-price-btn" onClick={onSignUp}>
@@ -801,11 +596,9 @@ export default function PublicHome({
                 <span>/ seat / mo ($60/yr)</span>
               </div>
               <ul className="pv-price-features">
-                <li><Check size={16} /> Everything in Pro for every team member</li>
-                <li><Check size={16} /> Shared team mailboxes &amp; split-domain routing</li>
-                <li><Check size={16} /> 250 GB pooled zero-knowledge Vault / seat</li>
-                <li><Check size={16} /> Role-based access control (RBAC) &amp; audit logs</li>
-                <li><Check size={16} /> Priority SLA &amp; dedicated sending pools</li>
+                <li><Check size={16} /> Available account and mail features depend on deployment configuration</li>
+                <li><Check size={16} /> Team sharing and hosted storage require separate setup</li>
+                <li><Check size={16} /> Local-first surfaces remain bounded to their registry state</li>
               </ul>
             </div>
             <button type="button" className="pv-btn-ghost pv-price-btn" onClick={onSignUp}>
@@ -827,7 +620,7 @@ export default function PublicHome({
               Claim {cleanHandle}.postveil.me <ArrowRight size={16} />
             </button>
             <a href="https://docs.postveil.me/" className="pv-btn-outline-light">
-              Test P-Docs Live Without Signing Up
+              Open P-Docs information
             </a>
           </div>
         </div>

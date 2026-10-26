@@ -1,0 +1,244 @@
+/* Postveil P-Deck Sovereign Theme Styles (Reveal.js & Slidev Inspired) */
+
+.pv-deck-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+/* 16:9 Stage Aspect Ratio Container */
+.pv-deck-stage {
+  position: relative;
+  width: 960px;
+  height: 540px;
+  max-width: 95vw;
+  max-height: 85vh;
+  aspect-ratio: 16 / 9;
+  background-color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* Fullscreen mode */
+.pv-deck-viewport:fullscreen .pv-deck-stage {
+  max-width: 100vw;
+  max-height: 100vh;
+  width: 100vw;
+  height: 56.25vw; /* 16:9 ratio in fullscreen */
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* Slide Content */
+.pv-deck-slide {
+  flex: 1;
+  padding: 48px 64px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  animation-duration: 0.4s;
+  animation-timing-function: cubic-bezier(0.26, 0.86, 0.44, 0.985);
+}
+
+/* Reveal.js Transition Animations */
+.pv-deck-transition-slide {
+  animation-name: pv-slide-in-right;
+}
+
+.pv-deck-transition-fade {
+  animation-name: pv-fade-in;
+}
+
+.pv-deck-transition-zoom {
+  animation-name: pv-zoom-in;
+}
+
+@keyframes pv-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pv-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pv-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Slide Themes */
+.pv-deck-theme-sovereign {
+  background: linear-gradient(135deg, #ffffff 0%, #f0f7f3 100%);
+  color: #0f172a;
+}
+.pv-deck-theme-sovereign h1,
+.pv-deck-theme-sovereign h2,
+.pv-deck-theme-sovereign h3 {
+  color: #0f5132;
+  font-family: "Schibsted Grotesk", sans-serif;
+  letter-spacing: -0.02em;
+}
+
+.pv-deck-theme-dark {
+  background-color: #090d16;
+  color: #f8fafc;
+}
+.pv-deck-theme-dark h1,
+.pv-deck-theme-dark h2,
+.pv-deck-theme-dark h3 {
+  color: #38bdf8;
+}
+
+.pv-deck-theme-cyber {
+  background: radial-gradient(circle at 50% 50%, #064e3b 0%, #022c22 100%);
+  color: #a7f3d0;
+}
+.pv-deck-theme-cyber h1,
+.pv-deck-theme-cyber h2 {
+  color: #34d399;
+}
+
+.pv-deck-theme-minimal {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
+.pv-deck-theme-academic {
+  background-color: #fafaf9;
+  color: #292524;
+  font-family: "Playfair Display", Georgia, serif;
+}
+
+/* Typography Inside Slides */
+.pv-deck-slide h1 {
+  font-size: 38px;
+  font-weight: 800;
+  margin: 0 0 16px 0;
+  line-height: 1.15;
+}
+
+.pv-deck-slide h2 {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0 0 16px 0;
+  line-height: 1.2;
+}
+
+.pv-deck-slide h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 16px 0;
+  opacity: 0.85;
+}
+
+.pv-deck-slide p,
+.pv-deck-slide li {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.pv-deck-slide blockquote {
+  border-left: 4px solid #0f5132;
+  margin: 16px 0;
+  padding: 8px 16px;
+  background-color: rgba(15, 81, 50, 0.05);
+  font-style: italic;
+}
+
+.pv-deck-slide ul,
+.pv-deck-slide ol {
+  padding-left: 24px;
+  margin: 12px 0;
+}
+
+/* HUD Presentation Controls (Bottom Right) */
+.pv-deck-controls {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(8px);
+  padding: 4px 8px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  z-index: 50;
+}
+
+.pv-deck-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pv-deck-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.2);
+  transform: scale(1.1);
+}
+
+.pv-deck-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pv-deck-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background-color: #0f5132;
+  transition: width 0.3s ease;
+  z-index: 60;
+}
+
+/* Presenter HUD Modal */
+.pv-deck-notes-panel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: rgba(15, 23, 42, 0.95);
+  color: #f8fafc;
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(12px);
+  z-index: 70;
+  max-height: 180px;
+  overflow-y: auto;
+}

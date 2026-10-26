@@ -1,0 +1,103 @@
+/* Postveil Platform Unified Ribbon Styles */
+:root {
+  --ribbon-bg: #ffffff;
+  --ribbon-border: #e2e8f0;
+  --ribbon-btn-hover: #f1f5f9;
+  --ribbon-btn-active: #e8f5e9;
+  --ribbon-btn-active-color: #0f5132;
+  --ribbon-text-primary: #0f172a;
+  --ribbon-text-muted: #64748b;
+}
+
+.pv-ribbon-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background-color: var(--ribbon-bg);
+  border-bottom: 1px solid var(--ribbon-border);
+  box-sizing: border-box;
+}
+
+.pv-ribbon-tabs {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background-color: #f8fafc;
+  border-bottom: 1px solid var(--ribbon-border);
+  gap: 2px;
+  height: 28px;
+  overflow-x: auto;
+}
+
+.pv-ribbon-tab {
+  height: 100%;
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ribbon-text-muted);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.pv-ribbon-tab:hover {
+  color: var(--ribbon-text-primary);
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.pv-ribbon-tab.active {
+  font-weight: 600;
+  color: var(--ribbon-text-primary);
+  background-color: #ffffff;
+  border-bottom: 2px solid #0f5132;
+}
+
+.pv-ribbon-bar {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 12px;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: visible;
+  position: relative;
+  z-index: 100;
+}
+
+.pv-ribbon-btn {
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: none;
+  background: none;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.pv-ribbon-btn:hover {
+  background-color: var(--ribbon-btn-hover);
+  color: var(--ribbon-text-primary);
+}
+
+.pv-ribbon-btn.active {
+  background-color: var(--ribbon-btn-active);
+  color: var(--ribbon-btn-active-color);
+  font-weight: 600;
+}
+
+.pv-ribbon-separator {
+  width: 1px;
+  height: 20px;
+  background-color: var(--ribbon-border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}

@@ -113,10 +113,66 @@ export interface DocumentMetadata {
   footnotes?: FootnoteItem[];
   comments?: DocComment[];
   suggestions?: DocSuggestion[];
-  signatures?: CryptographicSignature[];
+  signatures?: SignatureMetadata[];
 }
 
 export type ReviewMode = "editing" | "suggesting" | "viewing";
+
+export interface LegacySignatureFields {
+  id: string;
+  signerName: string;
+  signerEmail: string;
+  publicKey: string;
+  signatureBase64: string;
+  documentHashSha256: string;
+  timestamp: string;
+  algorithm: "Ed25519";
+}
+
+export interface VerifiedSignature extends LegacySignatureFields {
+  kind: "verified";
+  status: "verified";
+  verifiedAt: string;
+  verificationMethod: "approved-key-service";
+}
+
+export interface UnverifiedSignatureMetadata extends LegacySignatureFields {
+  kind: "unverified";
+  status: "unverified";
+  reason: "legacy-signature-metadata" | "verification-unavailable";
+}
+
+export type SignatureMetadata = VerifiedSignature | UnverifiedSignatureMetadata;
+
+const LEGACY_SIGNATURE_KEYS = ["id", "signerName", "signerEmail", "publicKey", "signatureBase64", "documentHashSha256", "timestamp", "algorithm"] as const;
+
+export function normalizeSignatureMetadata(value: unknown): SignatureMetadata | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  if (LEGACY_SIGNATURE_KEYS.some((key) => typeof candidate[key] !== "string") || candidate.algorithm !== "Ed25519") return null;
+  const legacy = Object.fromEntries(LEGACY_SIGNATURE_KEYS.map((key) => [key, candidate[key]])) as unknown as LegacySignatureFields;
+  if (candidate.kind === "verified" && candidate.status === "verified" && typeof candidate.verifiedAt === "string" && candidate.verificationMethod === "approved-key-service") {
+    return { ...legacy, kind: "verified", status: "verified", verifiedAt: candidate.verifiedAt, verificationMethod: "approved-key-service" };
+  }
+  return { ...legacy, kind: "unverified", status: "unverified", reason: candidate.kind === "unverified" && candidate.reason === "verification-unavailable" ? "verification-unavailable" : "legacy-signature-metadata" };
+}
+
+export function normalizeDocumentSignatures<T extends UniversalDoc>(doc: T): T {
+  const signatures = Array.isArray(doc.metadata.signatures)
+    ? doc.metadata.signatures.map(normalizeSignatureMetadata).filter((signature): signature is SignatureMetadata => Boolean(signature))
+    : undefined;
+  return { ...doc, metadata: { ...doc.metadata, ...(signatures ? { signatures } : {}) } };
+}
+
+export type AutosaveStatus = "unknown" | "saved" | "saving" | "unsaved" | "error";
+
+export type SaveResult =
+  | { status: "saved"; medium: "opfs" | "indexeddb" | "localStorage"; savedAt: string }
+  | { status: "failed"; reason: "unsupported" | "quota" | "io"; message: string };
+
+export function isVerifiedSignature(signature: SignatureMetadata): signature is VerifiedSignature {
+  return signature.kind === "verified" && signature.status === "verified";
+}
 
 export interface CommentReply {
   id: string;
@@ -150,17 +206,6 @@ export interface DocSuggestion {
   status: "pending" | "accepted" | "rejected";
 }
 
-export interface CryptographicSignature {
-  id: string;
-  signerName: string;
-  signerEmail: string;
-  publicKey: string;
-  signatureBase64: string;
-  documentHashSha256: string;
-  timestamp: string;
-  algorithm: "Ed25519";
-}
-
 export interface FootnoteItem {
   id: string;
   number: number;
@@ -176,8 +221,6 @@ export interface DocVersionSnapshot {
   wordCount: number;
   doc: UniversalDoc;
 }
-
-export type AutosaveStatus = "saved" | "saving" | "unsaved" | "error";
 
 export interface UniversalDoc {
   metadata: DocumentMetadata;
@@ -204,4 +247,11 @@ export interface ExportOptions {
   orientation?: Orientation;
   mathEngine?: "latex" | "mathml" | "unicode";
   styleTheme?: "modern" | "classic" | "academic" | "minimal";
+}
+
+export interface DocumentCodec {
+  id: SupportedFormat;
+  spec: FormatSpecification;
+  import(raw: string | ArrayBuffer): Promise<UniversalDoc>;
+  export(doc: UniversalDoc, options?: ExportOptions): Promise<{ data: string | Blob; filename: string }>;
 }

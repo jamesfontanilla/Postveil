@@ -128,7 +128,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
                 Version history
               </h2>
               <p style={{ fontSize: "12px", color: "#64748b", margin: "2px 0 0" }}>
-                {currentDoc.metadata.title} • Local Zero-Knowledge Snapshot Timeline
+                {currentDoc.metadata.title} • Local Snapshot Timeline
               </p>
             </div>
           </div>

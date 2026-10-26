@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import {
   Home,
   User,
-  Shield,
   Key,
   Globe,
   HardDrive,
@@ -14,24 +13,23 @@ import {
   X,
   ChevronRight,
   ShieldCheck,
-  Smartphone,
   Laptop,
-  Copy,
-  Check,
   ExternalLink,
   Trash2,
   Plus,
-  RefreshCw,
-  LogOut,
   Mail,
   EyeOff,
   Eye,
   Database,
   ArrowLeft,
+  Shield,
+  LogOut,
 } from "lucide-react";
 import "./AccountsStyles.css";
 import { WaffleLauncher } from "./WaffleLauncher";
-import { PillarPreviewModal, SOVEREIGN_PILLARS, type PillarDetails } from "./PillarPreviewModal";
+import { PillarPreviewModal, type PillarDetails } from "./PillarPreviewModal";
+import { getPillarDefinition } from "../../lib/pillars";
+import { navigationForPillar, writeNavigation } from "../../lib/navigation";
 import BrandMark from "../BrandMark";
 import { apiFetch } from "../../lib/api";
 
@@ -56,9 +54,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isWaffleOpen, setIsWaffleOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const [copiedKey, setCopiedKey] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(true);
   const [selectedPillar, setSelectedPillar] = useState<PillarDetails | null>(null);
 
   // Real data state
@@ -70,11 +66,9 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
     last_sign_in_at: null as string | null,
   });
 
-  const [storageTier, setStorageTier] = useState<"local" | "byos" | "managed">("local");
   const [storageStats, setStorageStats] = useState({ usedBytes: 0, quotaBytes: 0, usageFormatted: "0 KB" });
-  const [ed25519Key, setEd25519Key] = useState("ed25519_pk_loading...");
 
-  const [passkeys, setPasskeys] = useState<any[]>([]);
+  const [passkeys] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [aliases, setAliases] = useState<any[]>([]);
   const [domains, setDomains] = useState<any[]>([]);
@@ -82,8 +76,6 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
   // Fetch real data on load
   const loadRealData = async () => {
     try {
-      setLoading(true);
-
       // 1. Calculate Real Storage Usage via Browser Storage API
       if (navigator.storage && navigator.storage.estimate) {
         const estimate = await navigator.storage.estimate();
@@ -96,17 +88,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
         setStorageStats({ usedBytes: used, quotaBytes: quota, usageFormatted: formatted });
       }
 
-      // 2. Generate or derive a deterministic real WebCrypto key for the user
-      try {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(`postveil:ed25519:identity:${currentUserEmail}`);
-        const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-        setEd25519Key(`ed25519_pk_${hex}`);
-      } catch {
-        setEd25519Key(`ed25519_pk_${btoa(currentUserEmail).replace(/[^a-zA-Z0-9]/g, "").slice(0, 48)}`);
-      }
+      // Account overview remains the source of truth for account data; no local key is fabricated here.
 
       // 3. Fetch real accounts overview from backend
       const res = await apiFetch<any>("/api/accounts/overview").catch(() => null);
@@ -120,8 +102,6 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
             last_sign_in_at: res.data.user.last_sign_in_at,
           });
         }
-        if (res.data.storageTier) setStorageTier(res.data.storageTier);
-        if (res.data.passkeys) setPasskeys(res.data.passkeys);
         if (res.data.sessions) setSessions(res.data.sessions);
         if (res.data.domains) setDomains(res.data.domains);
 
@@ -139,9 +119,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
         }
       }
     } catch {
-      // Graceful fallback to default sovereign profile
-    } finally {
-      setLoading(false);
+      // Keep the session-provided account identity when the overview is unavailable.
     }
   };
 
@@ -149,85 +127,12 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
     void loadRealData();
   }, [currentUserEmail]);
 
-  const handleCopyKey = () => {
-    navigator.clipboard.writeText(ed25519Key);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
+  const handleAddPasskey = () => {
+    alert("Passkey enrollment is setup-required. Account MFA remains available; no credential was created.");
   };
 
-  // Real Add Passkey (Uses WebAuthn if available, or backend registration)
-  const handleAddPasskey = async () => {
-    const name = prompt("Enter a label for this hardware passkey (e.g. Touch ID, Windows Hello):", "Touch ID / Windows Hello");
-    if (!name) return;
-
-    let credentialId = `fido2_cred_${Date.now()}`;
-    if (window.PublicKeyCredential && navigator.credentials && navigator.credentials.create) {
-      try {
-        const challenge = new Uint8Array(32);
-        window.crypto.getRandomValues(challenge);
-        const cred = await navigator.credentials.create({
-          publicKey: {
-            challenge,
-            rp: { name: "Postveil Sovereign Accounts", id: window.location.hostname.replace(/^[^.]+\./, "") || window.location.hostname },
-            user: {
-              id: new TextEncoder().encode(userData.id || currentUserEmail),
-              name: currentUserEmail,
-              displayName: currentUserName,
-            },
-            pubKeyCredParams: [{ alg: -7, type: "public-key" }, { alg: -257, type: "public-key" }],
-            authenticatorSelection: { userVerification: "preferred" },
-            timeout: 60000,
-          },
-        }) as PublicKeyCredential | null;
-        if (cred && cred.id) {
-          credentialId = cred.id;
-        }
-      } catch (err) {
-        // User cancelled WebAuthn prompt or fallback to simulated credential
-      }
-    }
-
-    try {
-      const res = await apiFetch<any>("/api/accounts/passkeys", {
-        method: "POST",
-        body: JSON.stringify({ name, credentialId }),
-      });
-      if (res && res.data) {
-        setPasskeys((prev) => [res.data, ...prev]);
-      } else {
-        setPasskeys((prev) => [
-          { id: `pk_${Date.now()}`, name, created_at: new Date().toISOString(), lastUsed: "Just now" },
-          ...prev,
-        ]);
-      }
-    } catch {
-      setPasskeys((prev) => [
-        { id: `pk_${Date.now()}`, name, created_at: new Date().toISOString(), lastUsed: "Just now" },
-        ...prev,
-      ]);
-    }
-  };
-
-  const handleDeletePasskey = async (pkId: string) => {
-    if (!confirm("Are you sure you want to remove this passkey?")) return;
-    try {
-      await apiFetch(`/api/accounts/passkeys/${pkId}`, { method: "DELETE" });
-      setPasskeys((prev) => prev.filter((p) => p.id !== pkId));
-    } catch {
-      setPasskeys((prev) => prev.filter((p) => p.id !== pkId));
-    }
-  };
-
-  const handleUpdateStorageTier = async (tier: "local" | "byos" | "managed") => {
-    setStorageTier(tier);
-    try {
-      await apiFetch("/api/accounts/storage", {
-        method: "POST",
-        body: JSON.stringify({ tier }),
-      });
-    } catch {
-      // Local state is already set
-    }
+  const handleDeletePasskey = (_id?: string) => {
+    alert("Passkey service is setup-required; no credential was removed.");
   };
 
   const handleToggleMute = async (aliasId: string) => {
@@ -250,9 +155,9 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
   const navItems = [
     { key: "home" as TabKey, label: "Home", icon: Home },
     { key: "personal" as TabKey, label: "Personal info", icon: User },
-    { key: "security" as TabKey, label: "Security & Passkeys", icon: Shield },
+    { key: "security" as TabKey, label: "Security & MFA", icon: Shield },
     { key: "apps" as TabKey, label: "Apps & Cloaked Aliases", icon: Globe },
-    { key: "storage" as TabKey, label: "Storage & BYOS", icon: HardDrive },
+    { key: "storage" as TabKey, label: "Storage settings", icon: HardDrive },
     { key: "domains" as TabKey, label: "Subscriptions & Domains", icon: CreditCard },
   ];
 
@@ -299,7 +204,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
           <button
             className="pv-acc-icon-btn"
             title="Help & Sovereign Guides"
-            onClick={() => alert("Postveil Sovereign Accounts: End-to-end WebCrypto & FIDO2 Passkeys.")}
+            onClick={() => alert("Postveil Account: MFA is available. Passkeys and external storage require setup.")}
           >
             <HelpCircle size={22} />
           </button>
@@ -321,7 +226,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
               onClose={() => setIsWaffleOpen(false)}
               onSwitchToMail={onBackToMail}
               onSwitchToDocs={onSwitchToDocs}
-              onSelectPillar={setSelectedPillar}
+              onSelectPillar={(pillar) => writeNavigation(navigationForPillar(pillar.id))}
             />
           </div>
 
@@ -437,7 +342,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                   </div>
                   <h1 className="pv-acc-hero-title">Welcome, {currentUserName}</h1>
                   <p className="pv-acc-hero-subtitle">
-                    Manage your sovereign identity, cryptographic passkeys, cloaked aliases, and zero-knowledge storage vaults.
+                    Manage account authentication, aliases, and browser storage settings. TOTP MFA remains separate from P-Pass.
                   </p>
                 </div>
 
@@ -456,15 +361,11 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                       <ShieldCheck size={24} color="#0f5132" />
                     </div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">Account is Mathematically Protected</div>
-                      <div className="pv-acc-card-subtitle">
-                        {passkeys.length > 0
-                          ? `${passkeys.length} hardware passkey(s) enrolled.`
-                          : "Enroll a FIDO2 hardware passkey (Touch ID / Face ID) for zero-password login."}
-                      </div>
+                      <div className="pv-acc-card-title">Account security setup</div>
+                      <div className="pv-acc-card-subtitle">Account MFA is available; passkey enrollment requires a configured credential service.</div>
                     </div>
                     <div className="pv-acc-card-trailing">
-                      <span className="pv-acc-badge pv-acc-badge-success">Secured</span>
+                      <span className="pv-acc-badge pv-acc-badge-neutral">Setup required</span>
                       <ChevronRight size={18} />
                     </div>
                   </div>
@@ -504,21 +405,13 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                       <Database size={24} color="#157347" />
                     </div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">
-                        {storageTier === "local"
-                          ? "Local-First Storage (Origin Private File System)"
-                          : storageTier === "byos"
-                          ? "Bring Your Own Storage (Google Drive / Cloudflare R2)"
-                          : "Managed Cloud Vault (50 GB Encrypted)"}
-                      </div>
+                      <div className="pv-acc-card-title">Local browser storage</div>
                       <div className="pv-acc-card-subtitle">
-                        Real local device cache: {storageStats.usageFormatted}. Founder server liability: $0.00.
+                        Browser-wide usage estimate: {storageStats.usageFormatted}. This is not the P-Drive quota.
                       </div>
                     </div>
                     <div className="pv-acc-card-trailing">
-                      <span className="pv-acc-badge pv-acc-badge-neutral">
-                        {storageTier === "local" ? "Local Only ($0)" : storageTier.toUpperCase()}
-                      </span>
+                      <span className="pv-acc-badge pv-acc-badge-neutral">Local estimate</span>
                       <ChevronRight size={18} />
                     </div>
                   </div>
@@ -546,14 +439,14 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
 
                   <div
                     className="pv-acc-card-row pos-middle"
-                    onClick={() => setSelectedPillar(SOVEREIGN_PILLARS.cad)}
+                    onClick={() => setSelectedPillar(getPillarDefinition("p-pass") || null)}
                   >
                     <div className="pv-acc-card-leading">
                       <HardDrive size={22} color="#0d47a1" />
                     </div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">P-CAD</div>
-                      <div className="pv-acc-card-subtitle">Hardware OS, 2D constraints & 3D WebGPU B-Rep modeling</div>
+                      <div className="pv-acc-card-title">P-Pass</div>
+                      <div className="pv-acc-card-subtitle">Account MFA is available; the password vault and passkey service require setup.</div>
                     </div>
                     <div className="pv-acc-card-trailing">
                       <ExternalLink size={16} />
@@ -568,8 +461,8 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                       <CreditCard size={22} color="#f57f17" />
                     </div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">Custom Domains & Registrars</div>
-                      <div className="pv-acc-card-subtitle">Porkbun API wholesale domain automation ($9.73/yr)</div>
+                      <div className="pv-acc-card-title">Custom domain settings</div>
+                      <div className="pv-acc-card-subtitle">Registrar and automated DNS setup require separate deployment configuration.</div>
                     </div>
                     <div className="pv-acc-card-trailing">
                       <ChevronRight size={18} />
@@ -583,10 +476,10 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
             {activeTab === "personal" && (
               <>
                 <h1 className="pv-acc-hero-title" style={{ textAlign: "left", marginTop: 16 }}>
-                  Personal Info & Cryptographic Identity
+                  Personal Info
                 </h1>
                 <p className="pv-acc-hero-subtitle" style={{ textAlign: "left", marginBottom: 24 }}>
-                  Info about you and your sovereign public cryptographic key used across Postveil services.
+                  Account details and contact information.
                 </p>
 
                 <div className="pv-acc-card-group">
@@ -608,11 +501,11 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                       <Mail size={22} />
                     </div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">Primary Sovereign Email</div>
+                      <div className="pv-acc-card-title">Primary account email</div>
                       <div className="pv-acc-card-subtitle">{userData.email}</div>
                     </div>
                     <div className="pv-acc-card-trailing">
-                      <span className="pv-acc-badge pv-acc-badge-success">Verified</span>
+                      <span className="pv-acc-badge pv-acc-badge-neutral">Account email</span>
                     </div>
                   </div>
 
@@ -621,32 +514,11 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                       <Key size={22} color="#0f5132" />
                     </div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">Ed25519 WebCrypto Identity Key</div>
-                      <div
-                        className="pv-acc-card-subtitle"
-                        style={{ fontFamily: "monospace", fontSize: "12px" }}
-                      >
-                        {ed25519Key.slice(0, 36)}...
-                      </div>
+                      <div className="pv-acc-card-title">Account identifier</div>
+                      <div className="pv-acc-card-subtitle">No signing key or credential fingerprint is configured.</div>
                     </div>
                     <div className="pv-acc-card-trailing">
-                      <button
-                        onClick={handleCopyKey}
-                        style={{
-                          background: "none",
-                          border: "1px solid #747775",
-                          borderRadius: "16px",
-                          padding: "4px 12px",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          fontSize: "12px",
-                        }}
-                      >
-                        {copiedKey ? <Check size={14} color="#0f5132" /> : <Copy size={14} />}
-                        {copiedKey ? "Copied" : "Copy Key"}
-                      </button>
+                      <span className="pv-acc-badge pv-acc-badge-neutral">Setup required</span>
                     </div>
                   </div>
                 </div>
@@ -676,7 +548,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                     <div className="pv-acc-card-body">
                       <div className="pv-acc-card-title">Download Your Data (Postveil Takeout)</div>
                       <div className="pv-acc-card-subtitle">
-                        Zero hostage formats. Instant 1-click export of all account records, aliases, and public cryptographic tokens.
+                        Export the account data currently available in this session.
                       </div>
                     </div>
                     <div className="pv-acc-card-trailing">
@@ -692,7 +564,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, marginBottom: 8 }}>
                   <h1 className="pv-acc-hero-title" style={{ textAlign: "left", margin: 0 }}>
-                    Security & Hardware Passkeys
+                    Security & MFA
                   </h1>
                   <button
                     onClick={handleAddPasskey}
@@ -715,12 +587,12 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                   </button>
                 </div>
                 <p className="pv-acc-hero-subtitle" style={{ textAlign: "left", marginBottom: 24 }}>
-                  Postveil uses FIDO2 WebAuthn hardware passkeys. Your private key stays inside your device's Secure Enclave.
+                  Passkey credentials require setup; account MFA remains available.
                 </p>
 
                 <div className="pv-acc-section-title">
                   <Key size={22} color="var(--pv-acc-primary)" />
-                  <span>Enrolled FIDO2 Hardware Passkeys ({passkeys.length})</span>
+                  <span>Passkey service (setup required)</span>
                 </div>
 
                 <div className="pv-acc-card-group">
@@ -732,7 +604,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                       <div className="pv-acc-card-body">
                         <div className="pv-acc-card-title">No passkeys enrolled yet</div>
                         <div className="pv-acc-card-subtitle">
-                          Click here to enroll Touch ID, Face ID, or Windows Hello for instant biometric login.
+                          Passkey enrollment is disabled until a credential service is configured. Account MFA remains available.
                         </div>
                       </div>
                       <div className="pv-acc-card-trailing">
@@ -757,11 +629,11 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                           <div className="pv-acc-card-body">
                             <div className="pv-acc-card-title">{pk.name}</div>
                             <div className="pv-acc-card-subtitle">
-                              Created: {new Date(pk.created_at || Date.now()).toLocaleDateString()} • Last used: {pk.lastUsed || "Just now"}
+                              Created: {pk.created_at ? new Date(pk.created_at).toLocaleDateString() : "Not reported"} • Last used: {pk.lastUsed || "Not reported"}
                             </div>
                           </div>
                           <div className="pv-acc-card-trailing">
-                            <span className="pv-acc-badge pv-acc-badge-success">FIDO2 Active</span>
+                            <span className="pv-acc-badge pv-acc-badge-neutral">Setup required</span>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -825,7 +697,7 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                               <span className="pv-acc-badge pv-acc-badge-success">This device</span>
                             ) : (
                               <button
-                                onClick={() => alert("Session terminated.")}
+                                onClick={() => alert("Remote session management is not configured in this deployment.")}
                                 style={{
                                   background: "none",
                                   border: "1px solid #d32f2f",
@@ -913,84 +785,31 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
               </>
             )}
 
-            {/* TAB: STORAGE & BYOS */}
+            {/* TAB: STORAGE */}
             {activeTab === "storage" && (
               <>
                 <h1 className="pv-acc-hero-title" style={{ textAlign: "left", marginTop: 16 }}>
-                  Sovereign Storage Architecture
+                  Browser storage settings
                 </h1>
                 <p className="pv-acc-hero-subtitle" style={{ textAlign: "left", marginBottom: 24 }}>
-                  Postveil never holds your files hostage. Choose between local-first silicon storage, BYOS (Bring Your Own Storage), or a managed vault.
+                  Local browser storage is available where supported. The browser-wide estimate below is not the P-Drive quota.
                 </p>
-
                 <div className="pv-acc-card-group">
-                  <div
-                    className="pv-acc-card-row pos-first"
-                    onClick={() => void handleUpdateStorageTier("local")}
-                    style={{
-                      borderLeft: storageTier === "local" ? "4px solid var(--pv-acc-primary)" : "none",
-                    }}
-                  >
-                    <div className="pv-acc-card-leading">
-                      <Laptop size={24} color="#0f5132" />
-                    </div>
+                  <div className="pv-acc-card-row pos-single">
+                    <div className="pv-acc-card-leading"><Laptop size={24} color="#0f5132" /></div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">Option 1: Local-Only (OPFS) — $0.00 Forever</div>
-                      <div className="pv-acc-card-subtitle">
-                        Stored strictly in your browser Origin Private File System. Current local cache: {storageStats.usageFormatted}.
-                      </div>
+                      <div className="pv-acc-card-title">Local browser storage</div>
+                      <div className="pv-acc-card-subtitle">Current browser estimate: {storageStats.usageFormatted}. P-Drive owns its own bounded quota.</div>
                     </div>
-                    <div className="pv-acc-card-trailing">
-                      {storageTier === "local" && (
-                        <span className="pv-acc-badge pv-acc-badge-success">Active</span>
-                      )}
-                    </div>
+                    <div className="pv-acc-card-trailing"><span className="pv-acc-badge pv-acc-badge-neutral">Available where supported</span></div>
                   </div>
-
-                  <div
-                    className="pv-acc-card-row pos-middle"
-                    onClick={() => void handleUpdateStorageTier("byos")}
-                    style={{
-                      borderLeft: storageTier === "byos" ? "4px solid var(--pv-acc-primary)" : "none",
-                    }}
-                  >
-                    <div className="pv-acc-card-leading">
-                      <HardDrive size={24} color="#0d47a1" />
-                    </div>
+                  <div className="pv-acc-card-row pos-last">
+                    <div className="pv-acc-card-leading"><HardDrive size={24} color="#0d47a1" /></div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">Option 2: Bring Your Own Storage (BYOS) — $0.00</div>
-                      <div className="pv-acc-card-subtitle">
-                        Connect your personal Google Drive or Cloudflare R2 bucket. Zero platform storage fees.
-                      </div>
+                      <div className="pv-acc-card-title">External storage connectors</div>
+                      <div className="pv-acc-card-subtitle">External connectors and managed sync are not configured in this deployment.</div>
                     </div>
-                    <div className="pv-acc-card-trailing">
-                      {storageTier === "byos" && (
-                        <span className="pv-acc-badge pv-acc-badge-success">Active</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div
-                    className="pv-acc-card-row pos-last"
-                    onClick={() => void handleUpdateStorageTier("managed")}
-                    style={{
-                      borderLeft: storageTier === "managed" ? "4px solid var(--pv-acc-primary)" : "none",
-                    }}
-                  >
-                    <div className="pv-acc-card-leading">
-                      <Shield size={24} color="#f57f17" />
-                    </div>
-                    <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">Option 3: Postveil Managed Vault — $2.00 / month</div>
-                      <div className="pv-acc-card-subtitle">
-                        50 GB encrypted cloud sync across all your devices on Cloudflare R2 ($0 egress fees).
-                      </div>
-                    </div>
-                    <div className="pv-acc-card-trailing">
-                      {storageTier === "managed" && (
-                        <span className="pv-acc-badge pv-acc-badge-success">Active</span>
-                      )}
-                    </div>
+                    <div className="pv-acc-card-trailing"><span className="pv-acc-badge pv-acc-badge-neutral">Setup required</span></div>
                   </div>
                 </div>
               </>
@@ -1003,12 +822,12 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                   Subscriptions & Custom Domains
                 </h1>
                 <p className="pv-acc-hero-subtitle" style={{ textAlign: "left", marginBottom: 24 }}>
-                  Managed Porkbun registrar integration and Amazon SES deliverability subscriptions.
+                  Domain configuration status depends on the current deployment; registrar purchases are not initiated here.
                 </p>
 
                 <div className="pv-acc-section-title">
                   <Globe size={22} color="var(--pv-acc-primary)" />
-                  <span>Wholesale Domain Registrar (Porkbun API)</span>
+                  <span>Domain configuration</span>
                 </div>
 
                 <div className="pv-acc-card-group">
@@ -1018,28 +837,28 @@ export const AccountsHub: React.FC<AccountsHubProps> = ({
                     </div>
                     <div className="pv-acc-card-body">
                       <div className="pv-acc-card-title">
-                        {domains.length > 0 ? domains[0].domain || "jamesfontanilla.com" : "jamesfontanilla.com"}
+                        {domains.length > 0 ? domains[0].domain || "Configured domain" : "No domain record loaded"}
                       </div>
                       <div className="pv-acc-card-subtitle">
-                        Managed wholesale via Porkbun • Auto-renew active • MX & DKIM verified
+                        Domain status is shown only when returned by the account service; no registrar or delivery provider claim is made.
                       </div>
                     </div>
                     <div className="pv-acc-card-trailing">
-                      <span className="pv-acc-badge pv-acc-badge-success">Active ($9.73/yr)</span>
+                      <span className="pv-acc-badge pv-acc-badge-neutral">Setup required</span>
                     </div>
                   </div>
 
                   <div
                     className="pv-acc-card-row pos-last"
-                    onClick={() => alert("Search wholesale domains via Porkbun API v3...")}
+                    onClick={() => alert("Custom-domain purchase and registrar setup are not configured in this deployment.")}
                   >
                     <div className="pv-acc-card-leading">
                       <Plus size={24} color="#0f5132" />
                     </div>
                     <div className="pv-acc-card-body">
-                      <div className="pv-acc-card-title">Register a New Custom Domain</div>
+                      <div className="pv-acc-card-title">Configure a custom domain</div>
                       <div className="pv-acc-card-subtitle">
-                        Direct wholesale pricing ($9.73 for .com). Automated 1-click MX/DKIM injection.
+                        Registrar purchase and automated DNS setup require separate deployment configuration.
                       </div>
                     </div>
                     <div className="pv-acc-card-trailing">

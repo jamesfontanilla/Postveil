@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+import { validateDrawRecord, serializeDrawRecord } from "../src/components/draw/drawModel.ts";
+import { validateFormRecord, serializeFormRecord } from "../src/components/forms/formModel.ts";
+import { validateCrmRecord, serializeCrmRecord } from "../src/components/crm/crmTypes.ts";
+const fixture = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/pillar-records/${name}`, import.meta.url), "utf8"));
+test("valid pillar fixtures validate and serialize byte-stably", () => { for (const [name, validate, serialize] of [["p-draw.valid.json", validateDrawRecord, serializeDrawRecord], ["p-forms.valid.json", validateFormRecord, serializeFormRecord], ["p-crm.valid.json", validateCrmRecord, serializeCrmRecord]] as const) { const result = validate(fixture(name)); assert.equal(result.ok, true, name); if (result.ok) assert.equal(serialize(result.value as never), result.canonical, name); } });
+test("invalid imports reject unknown fields, invalid rules, and amounts", () => { const draw = validateDrawRecord(fixture("p-draw.invalid-unknown-field.json")); const form = validateFormRecord(fixture("p-forms.invalid-rule.json")); const crm = validateCrmRecord(fixture("p-crm.invalid-amount.json")); assert.equal(draw.ok, false); assert.equal(form.ok, false); assert.equal(crm.ok, false); if (!draw.ok) assert.equal(draw.error.issues[0].path, "unexpected"); if (!form.ok) assert.equal(form.error.issues[0].path, "fields[0].rules[0].when.fieldId"); if (!crm.ok) assert.equal(crm.error.issues[0].path, "amount"); });
+test("validators reject nested unknown fields deterministically", () => { const result = validateDrawRecord({ ...fixture("p-draw.valid.json"), viewport: { x: 0, y: 0, zoom: 1, extra: true } }); assert.equal(result.ok, false); if (!result.ok) assert.equal(result.error.issues[0].path, "viewport.extra"); });

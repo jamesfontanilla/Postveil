@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import BrandMark from "../../BrandMark";
 import { WaffleLauncher } from "../../accounts/WaffleLauncher";
-import { type UniversalDoc, type SupportedFormat, type BlockType, type AutosaveStatus } from "../types";
+import { type UniversalDoc, type SupportedFormat, type BlockType, type AutosaveStatus, type SaveResult } from "../types";
 
 interface DocsHeaderProps {
   doc: UniversalDoc;
@@ -63,6 +63,7 @@ interface DocsHeaderProps {
   userName?: string;
   autosaveStatus?: AutosaveStatus;
   lastSavedAt?: Date | null;
+  saveResult?: SaveResult | null;
   onManualSave?: () => void;
 }
 
@@ -95,13 +96,24 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
   onColumnsChange,
   userEmail = "user@postveil.app",
   userName = "Postveil Creator",
-  autosaveStatus = "saved",
+  autosaveStatus = "unknown",
   lastSavedAt,
+  saveResult,
   onManualSave,
 }) => {
   const [isWaffleOpen, setIsWaffleOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const saveMediumLabel = saveResult?.status === "saved"
+    ? saveResult.medium === "opfs" ? "local OPFS" : saveResult.medium === "indexeddb" ? "local IndexedDB" : "local browser storage"
+    : "local storage";
+  const saveTitle = autosaveStatus === "saving"
+    ? "Writing changes to local storage..."
+    : autosaveStatus === "unsaved" || autosaveStatus === "unknown"
+    ? "Changes are not confirmed as saved. Click to save now."
+    : autosaveStatus === "error"
+    ? `Not saved locally: ${saveResult?.status === "failed" ? saveResult.message : "the write was not confirmed"}. Click to retry or export.`
+    : `Saved to ${saveMediumLabel}${lastSavedAt ? ` at ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}. Click to force save.`;
 
   return (
     <header className="pdocs-header" role="banner">
@@ -229,7 +241,7 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
                       }}
                     >
                       <ShieldCheck size={15} style={{ marginRight: 8, color: "#059669" }} />
-                      Sovereign digital signature (Ed25519)...
+                      Document signing setup required...
                     </button>
                     <div style={{ height: "1px", backgroundColor: "#f1f5f9", margin: "4px 0" }} />
                     <button
@@ -733,41 +745,21 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
         </div>
       </div>
 
-      {/* Center: Live Real-Time Autosave Status */}
+      {/* Center: truthful local persistence status */}
       <div
         className={`pdocs-status-indicator status-${autosaveStatus}`}
         onClick={onManualSave}
-        title={
-          autosaveStatus === "saving"
-            ? "Writing changes to local OPFS & persistent storage..."
-            : autosaveStatus === "unsaved"
-            ? "Unsaved edits (saving shortly... click to save now)"
-            : autosaveStatus === "error"
-            ? "Error saving to storage. Click to retry."
-            : `All changes saved to local OPFS vault${lastSavedAt ? ` (${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })})` : ""}. Click to force save.`
-        }
+        title={saveTitle}
         style={{ cursor: "pointer", transition: "all 0.2s ease" }}
       >
         {autosaveStatus === "saving" ? (
-          <>
-            <RefreshCw size={13} className="pdocs-spin" style={{ color: "#2563eb" }} />
-            <span style={{ color: "#1d4ed8" }}>Saving changes...</span>
-          </>
-        ) : autosaveStatus === "unsaved" ? (
-          <>
-            <Cloud size={13} style={{ color: "#d97706" }} />
-            <span style={{ color: "#b45309" }}>Unsaved changes...</span>
-          </>
+          <><RefreshCw size={13} className="pdocs-spin" style={{ color: "#2563eb" }} /><span style={{ color: "#1d4ed8" }}>Saving changes...</span></>
         ) : autosaveStatus === "error" ? (
-          <>
-            <AlertCircle size={13} style={{ color: "#dc2626" }} />
-            <span style={{ color: "#b91c1c" }}>Save error (click to retry)</span>
-          </>
+          <><AlertCircle size={13} style={{ color: "#dc2626" }} /><span style={{ color: "#b91c1c" }}>Not saved locally (retry)</span></>
+        ) : autosaveStatus === "saved" && saveResult?.status === "saved" ? (
+          <><Check size={13} style={{ color: "#15803d" }} /><span>Saved to {saveMediumLabel}</span></>
         ) : (
-          <>
-            <Check size={13} style={{ color: "#15803d" }} />
-            <span>Saved to local OPFS</span>
-          </>
+          <><Cloud size={13} style={{ color: "#d97706" }} /><span>Not saved locally</span></>
         )}
       </div>
 

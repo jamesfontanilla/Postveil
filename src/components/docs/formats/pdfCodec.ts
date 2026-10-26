@@ -1,5 +1,4 @@
-import { type UniversalDoc, type ExportOptions } from "../types";
-import { type DocumentCodec } from "./UniversalFormatEngine";
+import { type UniversalDoc, type ExportOptions, type DocumentCodec } from "../types.ts";
 import { jsPDF } from "jspdf";
 
 export const pdfCodec: DocumentCodec = {
@@ -17,32 +16,8 @@ export const pdfCodec: DocumentCodec = {
     supportsTables: true,
   },
 
-  async import(raw: string | ArrayBuffer): Promise<UniversalDoc> {
-    const title = "Imported PDF Document";
-    const now = new Date().toISOString();
-    return {
-      metadata: {
-        id: `doc_${Date.now()}`,
-        title,
-        author: "PDF Author",
-        createdAt: now,
-        updatedAt: now,
-        version: 1,
-        wordCount: 100,
-        charCount: 600,
-        readingTimeMinutes: 1,
-        paperSize: "A4",
-        orientation: "portrait",
-        lineSpacing: "1.15",
-        fontFamily: "Helvetica",
-        fontSize: 14,
-        isEncrypted: false,
-      },
-      blocks: [
-        { id: "b1", type: "heading", level: 1, content: title },
-        { id: "b2", type: "paragraph", content: "Successfully parsed document text." },
-      ],
-    };
+  async import(_raw: string | ArrayBuffer): Promise<UniversalDoc> {
+    throw new Error("PDF import/preview setup required; no parser is configured");
   },
 
   async export(doc: UniversalDoc, options?: ExportOptions): Promise<{ data: Blob; filename: string }> {

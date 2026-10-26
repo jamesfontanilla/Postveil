@@ -1,4 +1,6 @@
-import { type UniversalDoc } from "../types";
+import { normalizeDocumentSignatures, type UniversalDoc, type SaveResult } from "../types.ts";
+
+export type { SaveResult } from "../types.ts";
 
 export interface DocStorageSummary {
   id: string;
@@ -28,40 +30,49 @@ export class OpfsDocStorage {
     localStorage.setItem(this.ACTIVE_KEY, id);
   }
 
-  public static async saveDocumentLocally(doc: UniversalDoc): Promise<boolean> {
-    try {
-      this.setActiveDocumentId(doc.metadata.id);
-
-      // Fast synchronous mirror to localStorage ensures zero data loss even on instant tab close
-      if (typeof localStorage !== "undefined") {
-        try {
-          localStorage.setItem(`pdocs_${doc.metadata.id}`, JSON.stringify(doc));
-        } catch {
-          // localStorage might exceed quota on very large docs; OPFS will handle it
-        }
+  public static async saveDocumentLocally(doc: UniversalDoc): Promise<SaveResult> {
+    let serialized: string;
+    try { serialized = JSON.stringify(doc, null, 2); } catch { return { status: "failed", reason: "io", message: "The document could not be serialized for local storage." }; }
+    let localStorageFailure: SaveResult | null = null;
+    if (typeof localStorage === "undefined") {
+      localStorageFailure = { status: "failed", reason: "unsupported", message: "Local browser storage is unavailable." };
+    } else {
+      try {
+        localStorage.setItem(`pdocs_${doc.metadata.id}`, serialized);
+      } catch (caught) {
+        const name = typeof DOMException !== "undefined" && caught instanceof DOMException ? caught.name : "";
+        localStorageFailure = { status: "failed", reason: name === "QuotaExceededError" ? "quota" : "io", message: "Local browser storage could not confirm this document write." };
       }
-
-      if (typeof window === "undefined" || !("storage" in navigator) || !navigator.storage.getDirectory) {
-        return true;
-      }
-
-      const root = await navigator.storage.getDirectory();
-      const dir = await root.getDirectoryHandle(this.DIRECTORY_NAME, { create: true });
-      const fileHandle = await dir.getFileHandle(`${doc.metadata.id}.json`, { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(JSON.stringify(doc, null, 2));
-      await writable.close();
-      return true;
-    } catch {
-      return true; // Still preserved in localStorage mirror
     }
+
+    if (typeof navigator !== "undefined" && "storage" in navigator && typeof navigator.storage.getDirectory === "function") {
+      try {
+        this.setActiveDocumentId(doc.metadata.id);
+        const root = await navigator.storage.getDirectory();
+        const dir = await root.getDirectoryHandle(this.DIRECTORY_NAME, { create: true });
+        const fileHandle = await dir.getFileHandle(`${doc.metadata.id}.json`, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(serialized);
+        await writable.close();
+        return { status: "saved", medium: "opfs", savedAt: new Date().toISOString() };
+      } catch (caught) {
+        const name = typeof DOMException !== "undefined" && caught instanceof DOMException ? caught.name : "";
+        if (!localStorageFailure) localStorageFailure = { status: "failed", reason: name === "QuotaExceededError" ? "quota" : "io", message: "The local document write could not be confirmed." };
+      }
+    }
+
+    if (!localStorageFailure && typeof localStorage !== "undefined") {
+      try { this.setActiveDocumentId(doc.metadata.id); } catch { /* The document payload was already confirmed. */ }
+      return { status: "saved", medium: "localStorage", savedAt: new Date().toISOString() };
+    }
+    return localStorageFailure || { status: "failed", reason: "unsupported", message: "No supported local document storage medium is available." };
   }
 
   public static async loadDocumentLocally(id: string): Promise<UniversalDoc | null> {
     try {
       if (typeof window === "undefined" || !("storage" in navigator)) {
-        const item = localStorage.getItem(`pdocs_${id}`);
-        return item ? JSON.parse(item) : null;
+        const item = typeof localStorage !== "undefined" ? localStorage.getItem(`pdocs_${id}`) : null;
+        return item ? normalizeDocumentSignatures(JSON.parse(item) as UniversalDoc) : null;
       }
 
       const root = await navigator.storage.getDirectory();
@@ -69,10 +80,10 @@ export class OpfsDocStorage {
       const fileHandle = await dir.getFileHandle(`${id}.json`);
       const file = await fileHandle.getFile();
       const text = await file.text();
-      return JSON.parse(text);
+      return normalizeDocumentSignatures(JSON.parse(text) as UniversalDoc);
     } catch {
-      const item = localStorage.getItem(`pdocs_${id}`);
-      return item ? JSON.parse(item) : null;
+      const item = typeof localStorage !== "undefined" ? localStorage.getItem(`pdocs_${id}`) : null;
+      return item ? normalizeDocumentSignatures(JSON.parse(item) as UniversalDoc) : null;
     }
   }
 
@@ -241,13 +252,13 @@ export class OpfsDocStorage {
           const fileHandle = await dir.getFileHandle(`${key}.json`);
           const file = await fileHandle.getFile();
           const text = await file.text();
-          return JSON.parse(text);
+          return (JSON.parse(text) as import("../types").DocVersionSnapshot[]).map((snapshot) => ({ ...snapshot, doc: normalizeDocumentSignatures(snapshot.doc) }));
         } catch {}
       }
 
       if (typeof localStorage !== "undefined") {
         const item = localStorage.getItem(key);
-        if (item) return JSON.parse(item);
+        if (item) return (JSON.parse(item) as import("../types").DocVersionSnapshot[]).map((snapshot) => ({ ...snapshot, doc: normalizeDocumentSignatures(snapshot.doc) }));
       }
     } catch {}
     return [];

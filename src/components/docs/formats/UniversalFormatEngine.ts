@@ -3,24 +3,33 @@ import {
   type SupportedFormat,
   type FormatSpecification,
   type ExportOptions,
+  type DocumentCodec,
   type DocBlock,
-} from "../types";
-import { markdownCodec } from "./markdownCodec";
-import { htmlCodec } from "./htmlCodec";
-import { plainTextCodec } from "./plainTextCodec";
-import { latexCodec } from "./latexCodec";
-import { docxCodec } from "./docxCodec";
-import { odtCodec } from "./odtCodec";
-import { nativePdocCodec } from "./nativePdocCodec";
-import { pdfCodec } from "./pdfCodec";
-import { rtfCodec } from "./rtfCodec";
-import { epubCodec } from "./epubCodec";
+  normalizeDocumentSignatures,
+} from "../types.ts";
 
-export interface DocumentCodec {
-  id: SupportedFormat;
-  spec: FormatSpecification;
-  import(raw: string | ArrayBuffer): Promise<UniversalDoc>;
-  export(doc: UniversalDoc, options?: ExportOptions): Promise<{ data: string | Blob; filename: string }>;
+export type { DocumentCodec };
+import { markdownCodec } from "./markdownCodec.ts";
+import { htmlCodec } from "./htmlCodec.ts";
+import { plainTextCodec } from "./plainTextCodec.ts";
+import { latexCodec } from "./latexCodec.ts";
+import { docxCodec } from "./docxCodec.ts";
+import { odtCodec } from "./odtCodec.ts";
+import { nativePdocCodec } from "./nativePdocCodec.ts";
+import { pdfCodec } from "./pdfCodec.ts";
+import { rtfCodec } from "./rtfCodec.ts";
+import { epubCodec } from "./epubCodec.ts";
+
+const SIGNATURE_MARKER = /<!-- postveil-signatures:([^>]+) -->/;
+
+function signaturesMarker(doc: UniversalDoc): string {
+  return doc.metadata.signatures?.length ? `\n<!-- postveil-signatures:${encodeURIComponent(JSON.stringify(doc.metadata.signatures))} -->` : "";
+}
+
+function signaturesFromContent(content: string): { content: string; signatures?: UniversalDoc["metadata"]["signatures"] } {
+  const match = content.match(SIGNATURE_MARKER);
+  if (!match) return { content };
+  try { return { content: content.replace(match[0], ""), signatures: JSON.parse(decodeURIComponent(match[1])) }; } catch { return { content: content.replace(match[0], "") }; }
 }
 
 export const FORMAT_REGISTRY: Record<SupportedFormat, FormatSpecification> = {
@@ -138,8 +147,8 @@ export const FORMAT_REGISTRY: Record<SupportedFormat, FormatSpecification> = {
     extension: ".pdoc",
     mimeType: "application/x-postveil-doc",
     category: "Sovereign Native",
-    giantCompetitor: "None (Zero-Knowledge Sovereign Standard)",
-    description: "Native cryptographic AST with Ed25519 author signing, Merkle DAG history, and zero-knowledge local-first OPFS storage.",
+    giantCompetitor: "None (local Postveil format)",
+    description: "Native Postveil document format with local metadata and SHA-256 hash previews.",
     isLossless: true,
     supportsMath: true,
     supportsTables: true,
@@ -173,7 +182,8 @@ export class UniversalFormatEngine {
     options: ExportOptions
   ): Promise<{ data: string | Blob; filename: string }> {
     const codec = this.codecs[options.format] || markdownCodec;
-    return await codec.export(doc, options);
+    const result = await codec.export(doc, options);
+    return typeof result.data === "string" && options.format !== "pdoc" ? { ...result, data: `${result.data}${signaturesMarker(doc)}` } : result;
   }
 
   public static async importDocument(
@@ -181,7 +191,9 @@ export class UniversalFormatEngine {
     formatGuess: SupportedFormat
   ): Promise<UniversalDoc> {
     const codec = this.codecs[formatGuess] || markdownCodec;
-    return await codec.import(content);
+    const extracted = typeof content === "string" ? signaturesFromContent(content) : { content };
+    const imported = await codec.import(extracted.content);
+    return normalizeDocumentSignatures({ ...imported, metadata: { ...imported.metadata, ...((extracted as { signatures?: UniversalDoc["metadata"]["signatures"] }).signatures ? { signatures: (extracted as { signatures: UniversalDoc["metadata"]["signatures"] }).signatures } : {}) } });
   }
 
   public static detectFormatFromFilename(filename: string): SupportedFormat {
@@ -401,13 +413,7 @@ export class UniversalFormatEngine {
         id: "b_demo_code",
         type: "codeBlock",
         language: "typescript",
-        content: `// Client-side Ed25519 Document Cryptographic Signing
-const docSignature = await window.crypto.subtle.sign(
-  "Ed25519",
-  privateKey,
-  new TextEncoder().encode(JSON.stringify(docAst))
-);
-console.log("Document mathematically verified:", docSignature);`,
+        content: `// Document hash preview (SHA-256)\nconst documentHashPreview = await window.crypto.subtle.digest(\n  "SHA-256",\n  new TextEncoder().encode(JSON.stringify(docAst))\n);\nconsole.log("Document hash preview:", documentHashPreview);`,
       },
     ];
 

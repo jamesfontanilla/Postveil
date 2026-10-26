@@ -218,6 +218,79 @@ const json = (data: unknown, status = 200) => new Response(JSON.stringify(data),
 });
 const error = (message: string, status = 400) => json({ error: message }, status);
 
+type CalendarWireEvent = {
+  id?: string;
+  title: string;
+  description?: string;
+  location?: string | null;
+  startsAt: string;
+  endsAt: string;
+  allDay?: boolean;
+  attendees?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+const CALENDAR_FIELDS = new Set(["id", "title", "description", "location", "startsAt", "endsAt", "allDay", "attendees", "createdAt", "updatedAt"]);
+const CALENDAR_MUTABLE_FIELDS = new Set(["title", "description", "location", "startsAt", "endsAt", "allDay", "attendees"]);
+const RFC3339_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function calendarStringLength(value: string): number { return Array.from(value).length; }
+export function calendarWire(row: JsonRecord): CalendarWireEvent {
+  const rawAttendees = Array.isArray(row.attendees) ? row.attendees : typeof row.attendees === "string" ? (() => { try { return JSON.parse(row.attendees as string); } catch { return []; } })() : [];
+  const attendees = Array.isArray(rawAttendees) ? rawAttendees.map((item) => String(item)) : [];
+  return {
+    id: String(row.id), title: String(row.title || ""), description: String(row.description || ""),
+    location: row.location == null ? null : String(row.location), startsAt: String(row.starts_at), endsAt: String(row.ends_at),
+    allDay: row.all_day === true || Number(row.all_day) === 1, attendees,
+    ...(row.created_at ? { createdAt: String(row.created_at) } : {}), ...(row.updated_at ? { updatedAt: String(row.updated_at) } : {}),
+  };
+}
+export function validateCalendarEvent(input: JsonRecord, partial = false): { value?: CalendarWireEvent; fields: Record<string, string> } {
+  const fields: Record<string, string> = {};
+  const unknown = Object.keys(input).filter((key) => !CALENDAR_FIELDS.has(key)).sort();
+  for (const key of unknown) fields[key] = "Unknown field";
+  if (!partial || "title" in input) {
+    if (typeof input.title !== "string" || !input.title.trim()) fields.title = "Title is required";
+    else if (calendarStringLength(input.title.trim()) > 200) fields.title = "Title must be 200 characters or fewer";
+  }
+  for (const key of ["description", "location"] as const) if (key in input && input[key] !== null && typeof input[key] !== "string") fields[key] = `${key} must be text`;
+  if (typeof input.description === "string" && calendarStringLength(input.description) > 10000) fields.description = "Description must be 10,000 characters or fewer";
+  if (typeof input.location === "string" && calendarStringLength(input.location) > 10000) fields.location = "Location must be 10,000 characters or fewer";
+  for (const key of ["startsAt", "endsAt"] as const) {
+    if (!partial || key in input) {
+      if (typeof input[key] !== "string" || !RFC3339_OFFSET.test(input[key]) || !Number.isFinite(Date.parse(input[key]))) fields[key] = "Must be an RFC3339 timestamp with Z or a numeric offset";
+    }
+  }
+  if (input.startsAt && input.endsAt && RFC3339_OFFSET.test(String(input.startsAt)) && RFC3339_OFFSET.test(String(input.endsAt))) {
+    const startsAt = Date.parse(String(input.startsAt)); const endsAt = Date.parse(String(input.endsAt));
+    if (Number.isFinite(startsAt) && Number.isFinite(endsAt) && endsAt <= startsAt) fields.endsAt = "Must be after startsAt";
+  }
+  if ("allDay" in input && typeof input.allDay !== "boolean") fields.allDay = "Must be a boolean";
+  if ("attendees" in input) {
+    if (!Array.isArray(input.attendees)) fields.attendees = "Must be an array of email addresses";
+    else if (input.attendees.length > 100) fields.attendees = "Must contain at most 100 addresses";
+    else {
+      const normalized: string[] = [];
+      input.attendees.forEach((item, index) => {
+        const address = cleanAddress(String(item));
+        if (typeof item !== "string" || address.length > 320 || !isValidEmailAddress(address)) fields[`attendees[${index}]`] = "Must be a valid email address";
+        else normalized.push(address);
+      });
+      if (!Object.keys(fields).some((key) => key.startsWith("attendees["))) input.attendees = [...new Set(normalized)];
+    }
+  }
+  if (Object.keys(fields).length) return { fields };
+  const value: CalendarWireEvent = {
+    title: String(input.title).trim(), description: input.description == null ? "" : String(input.description), location: input.location == null ? null : String(input.location),
+    startsAt: new Date(String(input.startsAt)).toISOString(), endsAt: new Date(String(input.endsAt)).toISOString(), allDay: input.allDay === true, attendees: Array.isArray(input.attendees) ? input.attendees as string[] : [],
+  };
+  return { value, fields };
+}
+function calendarInvalid(fields: Record<string, string>): Response { return json({ error: "Invalid calendar event", fields: Object.fromEntries(Object.entries(fields).sort(([left], [right]) => left.localeCompare(right))) }, 400); }
+function calendarNotFound(): Response { return json({ error: "Calendar event not found" }, 404); }
+function calendarUnavailable(requestId: string): Response { console.error(JSON.stringify({ event: "calendar_service_failure", requestId })); return json({ error: "Calendar service unavailable", code: "calendar_unavailable", requestId }, 503); }
+
 function requestClientKey(request: Request): string {
   const forwarded = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() || "unknown";
   return forwarded.slice(0, 96);
@@ -5500,10 +5573,60 @@ async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<R
   if (request.method === "POST" && url.pathname === "/api/signatures") { if (!mailbox) return error("Connect and verify a domain to create your first mailbox", 409); const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "signatures", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, mailbox_id: body.mailboxId || mailbox.id, name: String(body.name || "Default"), text_body: String(body.text || ""), html_body: typeof body.html === "string" ? body.html : null, is_default: body.isDefault === true }) }); return json(rows[0], 201); }
   if (request.method === "GET" && url.pathname === "/api/settings") { const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}&limit=1`); return json({ ...(rows[0] || { owner_id: user.id }), send_undo_seconds: normalizeUndoSeconds(objectValue(mailbox?.settings).send_undo_seconds, 0) }); }
   if (request.method === "PATCH" && url.pathname === "/api/settings") { const body = (await request.json()) as JsonRecord; const allowed = ["theme", "density", "reading_pane", "language", "timezone", "focused_inbox_enabled", "desktop_notifications", "push_subscription", "onboarding_state", "onboarding_completed_at"]; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of allowed) if (key in body) patch[key] = body[key]; let undoSeconds = normalizeUndoSeconds(objectValue(mailbox?.settings).send_undo_seconds, 0); if ("send_undo_seconds" in body && mailbox) { undoSeconds = normalizeUndoSeconds(body.send_undo_seconds, undoSeconds); const currentMailboxSettings = objectValue(mailbox.settings); await dbRequest(env, `mailboxes?id=eq.${encodeURIComponent(mailbox.id)}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", body: JSON.stringify({ settings: { ...currentMailboxSettings, send_undo_seconds: undoSeconds } }) }); } const rows = await dbRequest<JsonRecord[]>(env, `user_settings?owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json({ ...(rows[0] || patch), send_undo_seconds: undoSeconds }); }
-  if (request.method === "GET" && url.pathname === "/api/calendar") return json(await dbRequest(env, `calendar_events?owner_id=eq.${encodeURIComponent(user.id)}&order=starts_at.asc`));
-  if (request.method === "POST" && url.pathname === "/api/calendar") { const body = (await request.json()) as JsonRecord; const rows = await dbRequest<JsonRecord[]>(env, "calendar_events", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, title: String(body.title || "Untitled event"), description: String(body.description || ""), location: body.location || null, starts_at: body.startsAt, ends_at: body.endsAt, all_day: body.allDay === true, attendees: body.attendees || [] }) }); return json(rows[0], 201); }
+  if (request.method === "GET" && url.pathname === "/api/calendar") {
+    try {
+      const rows = await dbRequest<JsonRecord[]>(env, `calendar_events?owner_id=eq.${encodeURIComponent(user.id)}&order=starts_at.asc`);
+      return json(rows.map(calendarWire));
+    } catch {
+      return calendarUnavailable(crypto.randomUUID());
+    }
+  }
+  if (request.method === "POST" && url.pathname === "/api/calendar") {
+    let body: JsonRecord;
+    try { body = await request.json() as JsonRecord; } catch { return calendarInvalid({ body: "Request body must be valid JSON" }); }
+    const validation = validateCalendarEvent(body);
+    const immutableFields = Object.keys(body).filter((key) => !CALENDAR_MUTABLE_FIELDS.has(key));
+    for (const key of immutableFields) validation.fields[key] = "Unknown or immutable field";
+    if (!validation.value || Object.keys(validation.fields).length) return calendarInvalid(validation.fields);
+    try {
+      const value = validation.value;
+      const rows = await dbRequest<JsonRecord[]>(env, "calendar_events", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, title: value.title, description: value.description, location: value.location, starts_at: value.startsAt, ends_at: value.endsAt, all_day: value.allDay, attendees: value.attendees }) });
+      if (!rows[0]) return calendarUnavailable(crypto.randomUUID());
+      return json(calendarWire(rows[0]), 201);
+    } catch { return calendarUnavailable(crypto.randomUUID()); }
+  }
   const calendarMatch = url.pathname.match(/^\/api\/calendar\/([^/]+)$/);
-  if (request.method === "PATCH" && calendarMatch) { const body = (await request.json()) as JsonRecord; const patch: JsonRecord = { updated_at: new Date().toISOString() }; for (const key of ["title", "description", "location", "starts_at", "ends_at", "all_day", "attendees"]) if (key in body) patch[key] = body[key]; const rows = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(calendarMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(patch) }); return json(rows[0] || null); }
+  if (calendarMatch && request.method === "GET") {
+    try {
+      const rows = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(calendarMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+      return rows[0] ? json(calendarWire(rows[0])) : calendarNotFound();
+    } catch { return calendarUnavailable(crypto.randomUUID()); }
+  }
+  if (calendarMatch && request.method === "PATCH") {
+    let body: JsonRecord;
+    try { body = await request.json() as JsonRecord; } catch { return calendarInvalid({ body: "Request body must be valid JSON" }); }
+    const invalidPatchKeys = Object.keys(body).filter((key) => !CALENDAR_MUTABLE_FIELDS.has(key));
+    if (!Object.keys(body).length) return calendarInvalid({ body: "At least one editable field is required" });
+    if (invalidPatchKeys.length) return calendarInvalid(Object.fromEntries(invalidPatchKeys.sort().map((key) => [key, "Unknown or immutable field"])));
+    try {
+      const rows = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(calendarMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+      if (!rows[0]) return calendarNotFound();
+      const merged = { ...calendarWire(rows[0]), ...body } as unknown as JsonRecord;
+      const validation = validateCalendarEvent(merged);
+      if (!validation.value || Object.keys(validation.fields).length) return calendarInvalid(validation.fields);
+      const value = validation.value;
+      const updated = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(calendarMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify({ title: value.title, description: value.description, location: value.location, starts_at: value.startsAt, ends_at: value.endsAt, all_day: value.allDay, attendees: value.attendees, updated_at: new Date().toISOString() }) });
+      return updated[0] ? json(calendarWire(updated[0])) : calendarNotFound();
+    } catch { return calendarUnavailable(crypto.randomUUID()); }
+  }
+  if (calendarMatch && request.method === "DELETE") {
+    try {
+      const rows = await dbRequest<JsonRecord[]>(env, `calendar_events?id=eq.${encodeURIComponent(calendarMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}&limit=1`);
+      if (!rows[0]) return calendarNotFound();
+      await dbRequest(env, `calendar_events?id=eq.${encodeURIComponent(calendarMatch[1])}&owner_id=eq.${encodeURIComponent(user.id)}`, { method: "DELETE" });
+      return json({ ok: true });
+    } catch { return calendarUnavailable(crypto.randomUUID()); }
+  }
   if (request.method === "GET" && url.pathname === "/api/tasks") return json(await dbRequest(env, `tasks?owner_id=eq.${encodeURIComponent(user.id)}&order=completed.asc,due_at.asc,created_at.desc`));
   if (request.method === "POST" && url.pathname === "/api/tasks") { const body = (await request.json()) as JsonRecord; if (body.sourceMessageId !== undefined && body.sourceMessageId !== null && !(await hasOwnedRecord(env, "messages", user.id, body.sourceMessageId))) return error("Source message not found", 404); const rows = await dbRequest<JsonRecord[]>(env, "tasks", { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify({ owner_id: user.id, title: String(body.title || "Untitled task"), notes: String(body.notes || ""), due_at: body.dueAt || null, priority: Number(body.priority || 0), source_message_id: body.sourceMessageId || null }) }); return json(rows[0], 201); }
   const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);

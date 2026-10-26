@@ -12,3 +12,6 @@ dist
 .npmrc
 .DS_Store
 .lambda-build/
+.agents/
+.kiro/
+

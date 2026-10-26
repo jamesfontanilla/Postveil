@@ -1,0 +1,4 @@
+export const VOICE_MAX_MS = 30 * 60 * 1000; export const VOICE_MAX_BYTES = 250 * 1024 * 1024;
+export function chooseAudioMimeType(): string { if (typeof MediaRecorder === "undefined") return ""; return ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"].find((type) => MediaRecorder.isTypeSupported(type)) || ""; }
+export function stopTracks(stream: MediaStream | null | undefined): void { stream?.getTracks().forEach((track) => track.stop()); }
+export function createAudioRecorder(stream: MediaStream, onData: (blob: Blob) => void, onStop: () => void): MediaRecorder { const mimeType = chooseAudioMimeType(); const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined); recorder.ondataavailable = (event) => { if (event.data.size) onData(event.data); }; recorder.onstop = onStop; return recorder; }

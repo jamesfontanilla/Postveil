@@ -27,6 +27,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
     try {
       const format = UniversalFormatEngine.detectFormatFromFilename(file.name);
+      if (format === "pdf") {
+        throw new Error("PDF import/preview setup required; no parser is configured");
+      }
       const text = await file.text();
       const doc = await UniversalFormatEngine.importDocument(text, format);
       if (!doc.metadata.title || doc.metadata.title === "Untitled Document") {

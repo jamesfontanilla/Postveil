@@ -1,0 +1,1 @@
+.pv-draw-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}.pv-draw-toolbar button,.pv-draw-toolbar label{padding:8px 10px;border:1px solid #cbd9d2;border-radius:8px;background:#fff;font:inherit}.pv-draw-toolbar input{display:block}.pv-draw-canvas{width:100%;max-width:900px;min-height:360px;background:#fff;border:1px solid #cbd9d2;border-radius:12px}

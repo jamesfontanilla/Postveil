@@ -1,0 +1,9 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { evaluateFormula, evaluateCell } from "../src/components/sheets/formulaEngine.ts";
+import { importCsv, parsePsheet, serializePsheet } from "../src/components/sheets/sheetCodecs.ts";
+import { cellKey, type SheetModel } from "../src/components/sheets/sheetTypes.ts";
+const sheet = (cells: SheetModel["cells"]): SheetModel => ({ name: "Sheet1", cells });
+test("evaluates direct references, ranges, and aggregate functions", () => { const model = sheet({ A1: { value: 2 }, A2: { value: 4 }, A3: { value: null }, B1: { formula: "=SUM(A1:A3)" }, B2: { formula: "=AVERAGE(A1:A3)" }, B3: { formula: "=MIN(A1:A2)" }, B4: { formula: "=MAX(A1:A2)" } }); assert.equal(evaluateCell(model, "B1"), 6); assert.equal(evaluateCell(model, "B2"), 3); assert.equal(evaluateCell(model, "B3"), 2); assert.equal(evaluateCell(model, "B4"), 4); });
+test("returns finalized blank, error, and cycle semantics", () => { const model = sheet({ A1: { formula: "=A2" }, A2: { formula: "=A1" }, A3: { formula: "=AVERAGE(B1:B1)" }, A4: { formula: "=MIN(B1:B1)" }, A5: { formula: "=NOPE()" } }); assert.deepEqual(evaluateCell(model, "A1"), { error: "#CYCLE!" }); assert.deepEqual(evaluateCell(model, "A3"), { error: "#DIV/0!" }); assert.deepEqual(evaluateCell(model, "A4"), { error: "#VALUE!" }); assert.deepEqual(evaluateCell(model, "A5"), { error: "#NAME?" }); assert.equal(evaluateFormula("=B1", model), null); });
+test("keeps workbook codec bounded and CSV round trips", () => { const workbook = { schema: "postveil.psheet" as const, schemaVersion: 1 as const, activeSheet: "Sheet1", sheets: [sheet({ [cellKey(0, 0)]: { value: "hello" }, [cellKey(1, 0)]: { value: 2 } })] }; assert.deepEqual(parsePsheet(serializePsheet(workbook)), workbook); assert.equal(importCsv('hello,"two, words"').sheets[0].cells.B1.value, "two, words"); });

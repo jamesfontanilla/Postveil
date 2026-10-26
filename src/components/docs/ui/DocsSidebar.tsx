@@ -20,7 +20,7 @@ import {
   KeyRound,
   Lock,
 } from "lucide-react";
-import { type UniversalDoc, type DocComment, type DocSuggestion } from "../types";
+import { isVerifiedSignature, type UniversalDoc, type DocComment, type DocSuggestion } from "../types";
 import { type DocOutlineItem } from "../engine/DocumentEngine";
 import { FORMAT_REGISTRY } from "../formats/UniversalFormatEngine";
 
@@ -584,7 +584,7 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: "12px", fontWeight: 700, color: "#0f172a" }}>
-              Digital Signatures ({signatures.length})
+              Digital signature metadata ({signatures.length})
             </span>
             <button
               onClick={onOpenSignatureModal}
@@ -622,7 +622,7 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
                 Unsigned Document
               </div>
               <div style={{ fontSize: "10px", color: "#64748b", marginTop: 4 }}>
-                Sign with your sovereign Ed25519 identity to seal document against alteration.
+                Signing setup is required; existing entries are unverified metadata.
               </div>
             </div>
           ) : (
@@ -638,19 +638,19 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                  <ShieldCheck size={14} color="#16a34a" />
-                  <span style={{ fontWeight: 700, color: "#14532d" }}>{sig.signerName}</span>
+                  <ShieldCheck size={14} color="#b45309" />
+                  <span style={{ fontWeight: 700, color: "#92400e" }}>{sig.signerName}</span>
                   <span
                     style={{
                       fontSize: "9px",
                       fontWeight: 700,
-                      backgroundColor: "#dcfce7",
-                      color: "#166534",
+                      backgroundColor: "#fef3c7",
+                      color: "#92400e",
                       padding: "1px 5px",
                       borderRadius: "999px",
                     }}
                   >
-                    VALID
+                    {isVerifiedSignature(sig) ? "Verified via approved key service" : "Unverified metadata"}
                   </span>
                 </div>
                 <div style={{ color: "#15803d", marginBottom: 2 }}>{sig.timestamp}</div>

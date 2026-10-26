@@ -41,26 +41,24 @@ export default function DiagnosticsModal({
               </div>
             )}
             <div className="diag-item">
-              <div className="diag-label">Edge Inbound Gateway</div>
-              <div className="diag-val diag-status-ok">● AWS SES (ap-southeast-1) via Cloudflare Worker</div>
+              <div className="diag-label">Mail service</div>
+              <div className="diag-val diag-status-ok">● Current deployment mail route is available</div>
             </div>
             <div className="diag-item">
-              <div className="diag-label">SES Inbound Receipt Rule</div>
-              <div className="diag-val">
-                <code>postveil-inbound-rule</code> (Universal Inbound)
-              </div>
+              <div className="diag-label">Inbound receipt</div>
+              <div className="diag-val">Configured mail receipt route; provider details are deployment-specific.</div>
             </div>
             <div className="diag-item">
-              <div className="diag-label">Database Subsystem</div>
-              <div className="diag-val diag-status-ok">● Cloudflare D1 (postveil-prod, sub-4ms read latency)</div>
+              <div className="diag-label">Application database</div>
+              <div className="diag-val diag-status-ok">● Current deployment database route is available</div>
             </div>
             <div className="diag-item">
-              <div className="diag-label">Security & Screening</div>
-              <div className="diag-val">SPF / DKIM / DMARC Strict · Zero Security Bans</div>
+              <div className="diag-label">Mail screening</div>
+              <div className="diag-val">Configured authentication and screening checks; no unsupported security verdict is shown.</div>
             </div>
             <div className="diag-item">
-              <div className="diag-label">Storage Lake</div>
-              <div className="diag-val">S3 Mailbox Object Lake (Multi-tenant partition)</div>
+              <div className="diag-label">Mail attachment storage</div>
+              <div className="diag-val">Configured private attachment storage for mail; this is separate from local pillar storage.</div>
             </div>
           </div>
         </div>

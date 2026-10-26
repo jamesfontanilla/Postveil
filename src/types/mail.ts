@@ -369,10 +369,13 @@ export type CalendarEvent = {
   id: string;
   title: string;
   description: string;
-  starts_at: string;
-  ends_at: string;
+  startsAt: string;
+  endsAt: string;
   location?: string | null;
-  all_day: boolean;
+  allDay: boolean;
+  attendees: string[];
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ComposeSeed = {

@@ -1,0 +1,1 @@
+{"schema":"postveil.p-forms","schemaVersion":1,"type":"form","id":"form-1","title":"Contact","description":"Contact form","fields":[{"id":"email","kind":"email","label":"Email","description":"","required":true}],"createdAt":"2025-01-01T00:00:00.000Z","updatedAt":"2025-01-01T00:00:00.000Z"}
