@@ -617,10 +617,24 @@ function domainOf(address: string): string {
 }
 
 const RESERVED_SOVEREIGN_HANDLES = new Set([
-  "admin", "postmaster", "support", "noreply", "no-reply", "docs", "accounts",
-  "mail", "root", "system", "security", "abuse", "hostmaster", "webmaster",
+  // Core System & Mail Infrastructure
+  "admin", "postmaster", "support", "noreply", "no-reply", "accounts",
+  "root", "system", "security", "abuse", "hostmaster", "webmaster",
   "api", "www", "status", "billing", "help", "info", "contact", "legal",
   "privacy", "sales", "team", "official", "postveil", "dmarc", "bounce", "bounces",
+  "auth", "login", "signin", "signup", "register", "sso", "oauth", "webhook",
+  "assets", "cdn", "static", "ns1", "ns2", "smtp", "imap", "pop", "pop3", "mx", "relay",
+  
+  // All 20 Sovereign Pillars (Base Names)
+  "mail", "docs", "deck", "sheets", "drive", "meet", "calendar", "cal",
+  "sign", "cad", "crm", "draw", "notes", "vault", "link", "forms",
+  "tasks", "chat", "flow", "audit", "engine", "fabric", "cloud",
+  
+  // Official P-Prefixes
+  "p-mail", "p-docs", "p-deck", "p-sheets", "p-drive", "p-meet",
+  "p-calendar", "p-sign", "p-cad", "p-crm", "p-draw", "p-notes",
+  "p-vault", "p-link", "p-forms", "p-tasks", "p-chat", "p-flow",
+  "p-audit", "p-engine"
 ]);
 
 function normalizeSovereignHandle(raw: string): string {
