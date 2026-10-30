@@ -68,6 +68,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const [cfSessionId, setCfSessionId] = useState<string | null>(null);
   const [permissionState, setPermissionState] = useState<"prompt" | "requesting" | "granted" | "denied">("prompt");
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [avatarBypass, setAvatarBypass] = useState(false);
 
   // Real WebRTC Streams & Devices
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -115,31 +116,68 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         throw new Error("navigator.mediaDevices.getUserMedia is not supported on this browser.");
       }
 
+      let stream: MediaStream | null = null;
+      let hasVideo = false;
+      let hasAudio = false;
+
       // Proactively prompt user for both mic and camera permissions with high fidelity
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: "user",
-        },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: "user",
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        hasVideo = true;
+        hasAudio = true;
+      } catch (bothErr) {
+        // Fallback 1: Try audio only if video failed or is denied
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+          hasAudio = true;
+          hasVideo = false;
+        } catch {
+          // Fallback 2: Try video only if mic failed
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: "user",
+              },
+            });
+            hasVideo = true;
+            hasAudio = false;
+          } catch {
+            throw bothErr;
+          }
+        }
+      }
 
       localStreamRef.current = stream;
-      if (localVideoRef.current) {
+      if (localVideoRef.current && hasVideo) {
         localVideoRef.current.srcObject = stream;
       }
 
       setPermissionState("granted");
-      setIsVideoOff(false);
-      setIsMuted(false);
+      setAvatarBypass(true);
+      setIsVideoOff(!hasVideo);
+      setIsMuted(!hasAudio);
 
       setParticipants((prev) =>
-        prev.map((p) => (p.isSelf ? { ...p, stream, isVideoOff: false, isMuted: false } : p))
+        prev.map((p) => (p.isSelf ? { ...p, stream: stream || undefined, isVideoOff: !hasVideo, isMuted: !hasAudio } : p))
       );
     } catch (err: unknown) {
       console.warn("Camera/Microphone permission was denied or failed:", err);
@@ -191,24 +229,44 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   }, [requestMediaPermissions]);
 
   // 2. Hardware Mute Toggle (Audio track)
-  const toggleMute = () => {
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    if (localStreamRef.current) {
+  const toggleMute = async () => {
+    if (isMuted) {
+      if (!localStreamRef.current || localStreamRef.current.getAudioTracks().length === 0) {
+        await requestMediaPermissions();
+        return;
+      }
+      setIsMuted(false);
       localStreamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = !nextMuted;
+        track.enabled = true;
       });
+    } else {
+      setIsMuted(true);
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
     }
   };
 
   // 3. Hardware Video Toggle (Video track)
-  const toggleVideo = () => {
-    const nextVideoOff = !isVideoOff;
-    setIsVideoOff(nextVideoOff);
-    if (localStreamRef.current) {
+  const toggleVideo = async () => {
+    if (isVideoOff) {
+      if (!localStreamRef.current || localStreamRef.current.getVideoTracks().length === 0) {
+        await requestMediaPermissions();
+        return;
+      }
+      setIsVideoOff(false);
       localStreamRef.current.getVideoTracks().forEach((track) => {
-        track.enabled = !nextVideoOff;
+        track.enabled = true;
       });
+    } else {
+      setIsVideoOff(true);
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach((track) => {
+          track.enabled = false;
+        });
+      }
     }
   };
 
@@ -452,18 +510,31 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
                   {/* Avatar Placeholder or Permission Prompt when video is off */}
                   {p.isVideoOff && (
                     <div className="pv-meet-avatar-placeholder">
-                      {permissionState === "denied" && p.isSelf ? (
+                      {permissionState === "denied" && p.isSelf && !avatarBypass ? (
                         <div className="pv-meet-permission-banner" data-testid="permission-banner">
                           <Lock size={28} color="#f59e0b" />
-                          <h4>Camera & Mic Permission Required</h4>
-                          <p>{permissionError || "Your browser blocked media device access or requires permission."}</p>
-                          <button
-                            type="button"
-                            className="pv-meet-permission-retry-btn"
-                            onClick={() => void requestMediaPermissions()}
-                          >
-                            Allow Camera & Microphone
-                          </button>
+                          <h4>Camera & Mic Permission Blocked</h4>
+                          <p>{permissionError || "Your browser has blocked camera and microphone access for this origin."}</p>
+                          <div className="pv-meet-permission-hint">
+                            <span>💡 <strong>To allow in Chrome:</strong> Click the <strong>🎛️ icon</strong> in your browser address bar (left of meet.postveil.me) → toggle <strong>Camera & Microphone</strong> to <strong>Allow</strong>.</span>
+                          </div>
+                          <div className="pv-meet-permission-actions">
+                            <button
+                              type="button"
+                              className="pv-meet-permission-retry-btn"
+                              onClick={() => void requestMediaPermissions()}
+                            >
+                              Allow Camera & Microphone
+                            </button>
+                            <button
+                              type="button"
+                              className="pv-meet-permission-avatar-btn"
+                              onClick={() => setAvatarBypass(true)}
+                              data-testid="join-avatar-btn"
+                            >
+                              Join with Sovereign Avatar (Camera Off)
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <div className={`pv-meet-avatar-circle ${p.isSpeaking ? "speaking-wave" : ""}`}>
