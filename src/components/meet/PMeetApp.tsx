@@ -175,6 +175,12 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
       setIsVideoOff(!res.hasVideo);
       setIsMuted(!res.hasAudio);
 
+      // Immediately connect to video element if already rendered
+      if (localVideoRef.current && res.hasVideo) {
+        localVideoRef.current.srcObject = stream;
+        void localVideoRef.current.play().catch(() => {});
+      }
+
       setParticipants((prev) =>
         prev.map((p) => (p.isSelf ? { ...p, stream, isVideoOff: !res.hasVideo, isMuted: !res.hasAudio } : p))
       );
@@ -190,6 +196,15 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
       );
     }
   }, [selectedCamId, selectedMicId]);
+
+  // Video Ref Callback to guarantee stream attachment whenever the <video> element mounts
+  const handleVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    localVideoRef.current = node;
+    if (node && localStreamRef.current && localStreamRef.current.getVideoTracks().length > 0) {
+      node.srcObject = localStreamRef.current;
+      void node.play().catch(() => {});
+    }
+  }, []);
 
   // 1. Proactively check media permissions and establish SovereignMesh session
   useEffect(() => {
@@ -530,7 +545,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
                   {!p.isVideoOff ? (
                     p.isSelf ? (
                       <video
-                        ref={localVideoRef}
+                        ref={handleVideoRef}
                         autoPlay
                         playsInline
                         muted
