@@ -25,6 +25,7 @@ export function readNavigationLocation(location: NavigationLocation): Navigation
   if (hostname.startsWith("accounts.")) return target("accounts");
   if (hostname.startsWith("docs.")) return target("docs");
   if (hostname.startsWith("deck.")) return target("pillar", "p-deck");
+  if (hostname.startsWith("meet.")) return target("pillar", "p-meet");
 
   if (pathname === "/" || pathname === "") {
     const legacyView = params.get("view");
