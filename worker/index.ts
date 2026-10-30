@@ -4348,17 +4348,23 @@ async function handleMeetApi(request: Request, env: Env, url: URL): Promise<Resp
     });
   }
 
-  // LiveKit-Compatible GET /api/meet/connection-details
+  // SovereignMesh GET /api/meet/connection-details (Purely online, zero edge/browser cache)
   if (url.pathname === "/api/meet/connection-details" && request.method === "GET") {
     const roomName = url.searchParams.get("roomName") || "boardroom";
     const participantName = url.searchParams.get("participantName") || "Jaime Fontanilla";
-    return json({
+    return new Response(JSON.stringify({
       serverUrl: "wss://meet.postveil.me/rtc",
       roomName,
       participantName,
       participantToken: `pv-token-${crypto.randomUUID()}`,
       sessionId: `calls-${crypto.randomUUID()}`,
       e2eeKey: crypto.randomUUID(),
+    }), {
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+      },
     });
   }
 

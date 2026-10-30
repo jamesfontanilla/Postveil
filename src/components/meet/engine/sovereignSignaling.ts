@@ -1,6 +1,6 @@
 /**
- * LiveKit & Cloudflare Calls Hybrid Signaling Client for P-Meet
- * Coordinates room connections, WebRTC tokens, and session states.
+ * Sovereign Realtime Signaling Client for P-Meet
+ * Proprietary Postveil SovereignMesh WebRTC signaling and SFU coordination.
  */
 
 export interface ConnectionDetails {
@@ -12,7 +12,7 @@ export interface ConnectionDetails {
   e2eeKey?: string;
 }
 
-export class LiveKitSignalingClient {
+export class SovereignSignalingClient {
   public static async fetchConnectionDetails(
     roomName: string,
     participantName: string
@@ -22,12 +22,15 @@ export class LiveKitSignalingClient {
     url.searchParams.set("participantName", participantName);
 
     try {
-      const res = await fetch(url.toString());
+      const res = await fetch(url.toString(), {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
       if (res.ok) {
         return (await res.json()) as ConnectionDetails;
       }
     } catch (err) {
-      console.warn("[LiveKitSignaling] Failed to fetch connection details, fallback to local:", err);
+      console.warn("[SovereignSignaling] Fallback to direct mesh:", err);
     }
 
     return {
@@ -43,14 +46,17 @@ export class LiveKitSignalingClient {
     try {
       const res = await fetch("/api/meet/sessions/new", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-cache",
+        },
         body: JSON.stringify({}),
       });
       if (res.ok) {
         return (await res.json()) as { sessionId: string; mode: string };
       }
     } catch (err) {
-      console.warn("[LiveKitSignaling] Calls session creation notice:", err);
+      console.warn("[SovereignSignaling] Session creation notice:", err);
     }
 
     return {

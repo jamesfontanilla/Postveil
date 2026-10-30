@@ -1,6 +1,6 @@
 /**
- * LiveKit-Compatible Media Device Manager for P-Meet
- * Based on @livekit/components-core and livekit-client device architecture.
+ * Sovereign Media Device Manager for P-Meet
+ * Proprietary Postveil SovereignMesh hardware abstraction layer.
  * Provides resilient enumeration, progressive device fallback, and live hot-plugging.
  */
 
@@ -18,8 +18,8 @@ export interface AcquireStreamResult {
   error?: string;
 }
 
-export class LiveKitDeviceManager {
-  private static instance: LiveKitDeviceManager;
+export class SovereignDeviceManager {
+  private static instance: SovereignDeviceManager;
   private deviceListeners: Set<(devices: MediaDeviceInfo[]) => void> = new Set();
   private cachedDevices: MediaDeviceInfo[] = [];
 
@@ -30,11 +30,11 @@ export class LiveKitDeviceManager {
     }
   }
 
-  public static getInstance(): LiveKitDeviceManager {
-    if (!LiveKitDeviceManager.instance) {
-      LiveKitDeviceManager.instance = new LiveKitDeviceManager();
+  public static getInstance(): SovereignDeviceManager {
+    if (!SovereignDeviceManager.instance) {
+      SovereignDeviceManager.instance = new SovereignDeviceManager();
     }
-    return LiveKitDeviceManager.instance;
+    return SovereignDeviceManager.instance;
   }
 
   private handleDeviceChange = async () => {
@@ -54,7 +54,7 @@ export class LiveKitDeviceManager {
       }
       return devices;
     } catch (err) {
-      console.warn("[LiveKitDeviceManager] enumerateDevices notice:", err);
+      console.warn("[SovereignDeviceManager] enumerateDevices notice:", err);
       return this.cachedDevices;
     }
   }
@@ -113,7 +113,7 @@ export class LiveKitDeviceManager {
         hasAudio: stream.getAudioTracks().length > 0,
       };
     } catch (bothErr) {
-      console.warn("[LiveKitDeviceManager] Combined acquisition failed, falling back progressively:", bothErr);
+      console.warn("[SovereignDeviceManager] Combined acquisition notice, checking progressive fallback:", bothErr);
 
       // 2. Fallback to audio-only if video failed
       if (wantAudio) {
@@ -128,7 +128,7 @@ export class LiveKitDeviceManager {
             error: bothErr instanceof Error ? bothErr.message : "Video unavailable, using audio only",
           };
         } catch (audioErr) {
-          console.warn("[LiveKitDeviceManager] Audio fallback failed:", audioErr);
+          console.warn("[SovereignDeviceManager] Audio fallback notice:", audioErr);
         }
       }
 
@@ -145,7 +145,7 @@ export class LiveKitDeviceManager {
             error: bothErr instanceof Error ? bothErr.message : "Audio unavailable, using video only",
           };
         } catch (videoErr) {
-          console.warn("[LiveKitDeviceManager] Video fallback failed:", videoErr);
+          console.warn("[SovereignDeviceManager] Video fallback notice:", videoErr);
         }
       }
 

@@ -1,13 +1,13 @@
 /**
- * LiveKit-Compatible Real-Time Audio Meter & Active Speaker Detector
- * Based on @livekit/components-core createIsSpeakingObserver and AudioContext architecture.
+ * Sovereign Real-Time Audio Meter & Active Speaker Detector
+ * Proprietary Postveil SovereignMesh Web Audio frequency analyzer.
  */
 
 export interface AudioMeterSubscription {
   cleanup: () => void;
 }
 
-export function createLiveKitAudioMeter(
+export function createSovereignAudioMeter(
   stream: MediaStream,
   onUpdate: (volume: number, isSpeaking: boolean) => void,
   options: {
@@ -78,7 +78,7 @@ export function createLiveKitAudioMeter(
       }
     }, intervalMs);
   } catch (err) {
-    console.warn("[LiveKitAudioMeter] Initialization notice:", err);
+    console.warn("[SovereignAudioMeter] Initialization notice:", err);
   }
 
   return {

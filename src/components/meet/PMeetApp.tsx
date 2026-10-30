@@ -26,9 +26,9 @@ import {
 } from "lucide-react";
 import { ParentSuiteRibbon } from "../platform/ribbon";
 import { Participant, MeetingRoomState, ChatMessage, ActiveDrawerTab, MeetingViewMode } from "./meetTypes";
-import { LiveKitDeviceManager } from "./engine/livekitDeviceManager";
-import { createLiveKitAudioMeter } from "./engine/livekitAudioMeter";
-import { LiveKitSignalingClient } from "./engine/livekitSignaling";
+import { SovereignDeviceManager } from "./engine/sovereignDeviceManager";
+import { createSovereignAudioMeter } from "./engine/sovereignAudioMeter";
+import { SovereignSignalingClient } from "./engine/sovereignSignaling";
 import "./MeetStyles.css";
 
 interface PMeetAppProps {
@@ -40,6 +40,10 @@ interface PMeetAppProps {
   onSignOut?: () => void;
 }
 
+/**
+ * P-Meet: Purely Online Real-Time WebRTC Video Conferencing
+ * Built on Postveil SovereignMesh Realtime SFU (Zero Local-First Cache, Purely Ephemeral In-Memory State)
+ */
 export const PMeetApp: React.FC<PMeetAppProps> = ({
   initialRoomHandle = "jaime/boardroom",
   userEmail = "jaime@postveil.me",
@@ -48,7 +52,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   onSwitchToAccounts,
   onSignOut,
 }) => {
-  // Room State
+  // Room State (Purely Online & Ephemeral)
   const [room, setRoom] = useState<MeetingRoomState>({
     roomId: "pv-meet-sec-9812",
     roomTitle: "Sovereign Executive Boardroom",
@@ -73,7 +77,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const [permissionError, setPermissionError] = useState<string | null>(null);
   const [avatarBypass, setAvatarBypass] = useState(false);
 
-  // LiveKit Device Manager & Audio Meter State
+  // SovereignMesh Device Manager & Audio Meter State
   const audioMeterRef = useRef<{ cleanup: () => void } | null>(null);
   const [availableMicrophones, setAvailableMicrophones] = useState<MediaDeviceInfo[]>([]);
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
@@ -81,22 +85,22 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const [selectedCamId, setSelectedCamId] = useState<string>("");
   const [localAudioLevel, setLocalAudioLevel] = useState<number>(0);
 
-  // Real WebRTC Streams & Devices
+  // Real WebRTC Streams & Devices (Ephemeral in-memory)
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
-  // Real Chat State (Zero Mock Messages)
+  // Real Chat State (Zero Mock Messages, Purely Online)
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
       id: "sys-1",
       senderId: "system",
-      senderName: "LiveKit & Cloudflare Calls Engine",
+      senderName: "SovereignMesh Engine",
       senderHandle: "p-meet",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      text: "🔒 Connected to LiveKit WebRTC Mesh & Cloudflare Calls SFU (App ID: a458eaa8-4c47-4955-9ac0-7096a71a74ec). Direct P2P audio/video active.",
+      text: "🔒 Connected to SovereignMesh Realtime SFU (App ID: a458eaa8-4c47-4955-9ac0-7096a71a74ec). Direct P2P audio/video active.",
       isSystem: true,
     },
   ]);
@@ -118,9 +122,9 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     },
   ]);
 
-  // Enumerate devices on mount and subscribe to LiveKit device changes
+  // Enumerate devices on mount and subscribe to hardware device changes
   useEffect(() => {
-    const devMgr = LiveKitDeviceManager.getInstance();
+    const devMgr = SovereignDeviceManager.getInstance();
     void devMgr.enumerateDevices().then((devices) => {
       setAvailableMicrophones(devices.filter((d) => d.kind === "audioinput"));
       setAvailableCameras(devices.filter((d) => d.kind === "videoinput"));
@@ -134,12 +138,12 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     return () => unsub();
   }, []);
 
-  // Function to explicitly trigger browser navigator.mediaDevices.getUserMedia permission prompt using LiveKit Device Manager
-  const requestMediaPermissions = useCallback(async () => {
+  // Function to explicitly trigger browser navigator.mediaDevices.getUserMedia permission prompt
+  const requestMediaPermissions = useCallback(async (explicitUserGesture = false) => {
     setPermissionState("requesting");
     setPermissionError(null);
     try {
-      const devMgr = LiveKitDeviceManager.getInstance();
+      const devMgr = SovereignDeviceManager.getInstance();
       const res = await devMgr.acquireMediaStream({
         videoDeviceId: selectedCamId || undefined,
         audioDeviceId: selectedMicId || undefined,
@@ -153,12 +157,12 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         localVideoRef.current.srcObject = stream;
       }
 
-      // LiveKit Audio Meter & Active Speaker Detection
+      // Sovereign Audio Meter & Active Speaker Detection
       if (audioMeterRef.current) {
         audioMeterRef.current.cleanup();
       }
       if (res.hasAudio && stream.getAudioTracks().length > 0) {
-        audioMeterRef.current = createLiveKitAudioMeter(stream, (volume, isSpeaking) => {
+        audioMeterRef.current = createSovereignAudioMeter(stream, (volume, isSpeaking) => {
           setLocalAudioLevel(volume);
           setParticipants((prev) =>
             prev.map((p) => (p.isSelf ? { ...p, audioLevel: volume, isSpeaking } : p))
@@ -175,9 +179,9 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         prev.map((p) => (p.isSelf ? { ...p, stream, isVideoOff: !res.hasVideo, isMuted: !res.hasAudio } : p))
       );
     } catch (err: unknown) {
-      console.warn("Camera/Microphone permission was denied or failed:", err);
-      const msg = err instanceof Error ? err.message : "Camera and microphone access was denied or not found.";
-      setPermissionState("denied");
+      console.warn("Camera/Microphone permission notice:", err);
+      const msg = err instanceof Error ? err.message : "Camera and microphone access was denied or requires user click.";
+      setPermissionState(explicitUserGesture ? "denied" : "prompt");
       setPermissionError(msg);
       setIsVideoOff(true);
       setIsMuted(true);
@@ -187,23 +191,23 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     }
   }, [selectedCamId, selectedMicId]);
 
-  // 1. Proactively prompt for media permissions and establish LiveKit / Cloudflare Calls Session
+  // 1. Proactively check media permissions and establish SovereignMesh session
   useEffect(() => {
     let active = true;
 
-    // Immediately trigger browser permission request
-    void requestMediaPermissions();
+    // Check media permissions on mount
+    void requestMediaPermissions(false);
 
-    // Establish real LiveKit connection details and Cloudflare Calls session
+    // Establish real SovereignMesh connection details and Cloudflare Calls session
     async function initSession() {
       try {
-        const details = await LiveKitSignalingClient.fetchConnectionDetails("boardroom", userName);
-        const callsSession = await LiveKitSignalingClient.createCallsSession();
+        const details = await SovereignSignalingClient.fetchConnectionDetails("boardroom", userName);
+        const callsSession = await SovereignSignalingClient.createCallsSession();
         if (active && (details.sessionId || callsSession.sessionId)) {
           setCfSessionId(details.sessionId || callsSession.sessionId);
         }
       } catch (callErr) {
-        console.warn("LiveKit / Cloudflare Calls session initialization notice:", callErr);
+        console.warn("SovereignMesh session initialization notice:", callErr);
       }
     }
 
@@ -220,17 +224,17 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     };
   }, [requestMediaPermissions, userName]);
 
-  // Switch mic hardware on the fly via LiveKit Device Manager
+  // Switch mic hardware on the fly via Sovereign Device Manager
   const handleSwitchMic = async (deviceId: string) => {
     setSelectedMicId(deviceId);
     if (localStreamRef.current && !isMuted) {
       try {
-        const devMgr = LiveKitDeviceManager.getInstance();
+        const devMgr = SovereignDeviceManager.getInstance();
         await devMgr.switchDeviceTrack(localStreamRef.current, "audio", deviceId);
         if (audioMeterRef.current) {
           audioMeterRef.current.cleanup();
         }
-        audioMeterRef.current = createLiveKitAudioMeter(localStreamRef.current, (volume, isSpeaking) => {
+        audioMeterRef.current = createSovereignAudioMeter(localStreamRef.current, (volume, isSpeaking) => {
           setLocalAudioLevel(volume);
           setParticipants((prev) =>
             prev.map((p) => (p.isSelf ? { ...p, audioLevel: volume, isSpeaking } : p))
@@ -242,12 +246,12 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     }
   };
 
-  // Switch camera hardware on the fly via LiveKit Device Manager
+  // Switch camera hardware on the fly via Sovereign Device Manager
   const handleSwitchCamera = async (deviceId: string) => {
     setSelectedCamId(deviceId);
     if (localStreamRef.current && !isVideoOff) {
       try {
-        const devMgr = LiveKitDeviceManager.getInstance();
+        const devMgr = SovereignDeviceManager.getInstance();
         await devMgr.switchDeviceTrack(localStreamRef.current, "video", deviceId);
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStreamRef.current;
@@ -262,7 +266,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const toggleMute = async () => {
     if (isMuted) {
       if (!localStreamRef.current || localStreamRef.current.getAudioTracks().length === 0) {
-        await requestMediaPermissions();
+        await requestMediaPermissions(true);
         return;
       }
       setIsMuted(false);
@@ -283,7 +287,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const toggleVideo = async () => {
     if (isVideoOff) {
       if (!localStreamRef.current || localStreamRef.current.getVideoTracks().length === 0) {
-        await requestMediaPermissions();
+        await requestMediaPermissions(true);
         return;
       }
       setIsVideoOff(false);
@@ -344,7 +348,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     );
   }, [isMuted, isVideoOff, isScreenSharing]);
 
-  // Real Recording Engine with OPFS Local File System Integration
+  // Real Ephemeral In-Memory Recording Engine (Purely Online, Zero Local Cache)
   const toggleRecording = () => {
     if (!room.isRecording) {
       recordedChunksRef.current = [];
@@ -540,19 +544,19 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
                   {/* Avatar Placeholder or Permission Prompt when video is off */}
                   {p.isVideoOff && (
                     <div className="pv-meet-avatar-placeholder">
-                      {permissionState === "denied" && p.isSelf && !avatarBypass ? (
+                      {(permissionState === "denied" || permissionState === "prompt") && p.isSelf && !avatarBypass ? (
                         <div className="pv-meet-permission-banner" data-testid="permission-banner">
-                          <Lock size={28} color="#f59e0b" />
-                          <h4>Camera & Mic Permission Blocked</h4>
-                          <p>{permissionError || "Your browser has blocked camera and microphone access for this origin."}</p>
+                          <Lock size={28} color={permissionState === "denied" ? "#f59e0b" : "#34d399"} />
+                          <h4>{permissionState === "denied" ? "Camera & Mic Permission Blocked" : "Enable Camera & Microphone"}</h4>
+                          <p>{permissionError || "Click below to trigger browser permissions for your camera and microphone."}</p>
                           <div className="pv-meet-permission-hint">
-                            <span>💡 <strong>To allow in Chrome:</strong> Click the <strong>🎛️ icon</strong> in your browser address bar (left of meet.postveil.me) → toggle <strong>Camera & Microphone</strong> to <strong>Allow</strong>.</span>
+                            <span>💡 <strong>Browser Permissions:</strong> Click <strong>Allow Camera & Microphone</strong> to trigger the top-left browser permission bubble. If previously blocked in Chrome, click the <strong>🎛️ icon</strong> in your address bar.</span>
                           </div>
                           <div className="pv-meet-permission-actions">
                             <button
                               type="button"
                               className="pv-meet-permission-retry-btn"
-                              onClick={() => void requestMediaPermissions()}
+                              onClick={() => void requestMediaPermissions(true)}
                             >
                               Allow Camera & Microphone
                             </button>
@@ -625,12 +629,12 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
               <Share2 size={20} />
             </button>
 
-            {/* Local OPFS Recording */}
+            {/* Real-Time Session Recording */}
             <button
               type="button"
               className={`pv-meet-ctrl-btn ${room.isRecording ? "off" : ""}`}
               onClick={toggleRecording}
-              title={room.isRecording ? "Stop Local Recording" : "Start Zero-Cloud Local OPFS Recording"}
+              title={room.isRecording ? "Stop Recording" : "Start Real-Time Session Recording"}
               aria-label="Record call"
             >
               <Disc size={20} />
@@ -658,12 +662,12 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
               <Users size={20} />
             </button>
 
-            {/* LiveKit Settings & Device Selector */}
+            {/* Hardware Settings & Device Selector */}
             <button
               type="button"
               className={`pv-meet-ctrl-btn ${activeDrawer === "settings" ? "active-action" : ""}`}
               onClick={() => setActiveDrawer(activeDrawer === "settings" ? "none" : "settings")}
-              title="Media device settings (LiveKit)"
+              title="Hardware audio & video settings"
               aria-label="Settings"
             >
               <Settings size={20} />
@@ -682,7 +686,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
           </div>
         </div>
 
-        {/* 4. Side Drawers (Chat, Participants, LiveKit Settings) */}
+        {/* 4. Side Drawers (Chat, Participants, Hardware Settings) */}
         {activeDrawer === "chat" && (
           <aside className="pv-meet-drawer" data-testid="chat-drawer">
             <div className="pv-meet-drawer-header">
@@ -777,7 +781,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         {activeDrawer === "settings" && (
           <aside className="pv-meet-drawer" data-testid="settings-drawer">
             <div className="pv-meet-drawer-header">
-              <span>LiveKit Device Settings</span>
+              <span>Hardware Audio & Video Settings</span>
               <button
                 type="button"
                 className="pv-meet-drawer-close"
@@ -836,13 +840,13 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
                 </select>
               </div>
 
-              {/* LiveKit Network Architecture Info */}
+              {/* SovereignMesh Network Architecture Info */}
               <div style={{ marginTop: "auto", padding: "12px", background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: "8px" }}>
                 <div style={{ fontSize: "11px", fontWeight: 600, color: "#34d399", marginBottom: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
-                  <Sparkles size={12} /> LiveKit & Cloudflare Calls Hybrid SFU
+                  <Sparkles size={12} /> SovereignMesh Realtime SFU
                 </div>
                 <div style={{ fontSize: "10px", color: "#94a3b8", lineHeight: 1.4 }}>
-                  Real-time audio level analyzer, dynamic device hot-plugging, adaptive simulcast, and zero-cloud local OPFS recording enabled.
+                  Real-time audio level analyzer, dynamic hardware device hot-plugging, adaptive WebRTC simulcast, and purely online ephemeral sessions.
                 </div>
               </div>
             </div>
