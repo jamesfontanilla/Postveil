@@ -542,6 +542,21 @@
   gap: 12px;
 }
 
+.pv-meet-device-select {
+  background-color: var(--pv-meet-surface);
+  border: 1px solid var(--pv-meet-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+}
+
+.pv-meet-device-select:focus {
+  border-color: var(--pv-meet-emerald-light);
+}
+
 /* Chat Bubbles */
 .pv-meet-chat-msg {
   display: flex;

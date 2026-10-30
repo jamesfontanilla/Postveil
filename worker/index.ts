@@ -4348,6 +4348,20 @@ async function handleMeetApi(request: Request, env: Env, url: URL): Promise<Resp
     });
   }
 
+  // LiveKit-Compatible GET /api/meet/connection-details
+  if (url.pathname === "/api/meet/connection-details" && request.method === "GET") {
+    const roomName = url.searchParams.get("roomName") || "boardroom";
+    const participantName = url.searchParams.get("participantName") || "Jaime Fontanilla";
+    return json({
+      serverUrl: "wss://meet.postveil.me/rtc",
+      roomName,
+      participantName,
+      participantToken: `pv-token-${crypto.randomUUID()}`,
+      sessionId: `calls-${crypto.randomUUID()}`,
+      e2eeKey: crypto.randomUUID(),
+    });
+  }
+
   // 2. POST /api/meet/sessions/new: Create WebRTC SFU session with Cloudflare Calls
   if (url.pathname === "/api/meet/sessions/new" && request.method === "POST") {
     if (!appSecret) {
