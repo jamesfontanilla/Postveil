@@ -3545,6 +3545,36 @@ function AppContent() {
     setAuthMode("signin");
   }} />;
   if (!session) {
+    const navTarget = readNavigationLocation(window.location);
+    if (navTarget.view === "docs") {
+      return (
+        <PDocsApp
+          onOpenPdf={(snapshot) => { setPdfSnapshot(structuredClone(snapshot)); writeNavigation({ view: "pillar", pillarId: "p-pdf" }); }}
+          onBackToMail={() => { window.location.href = "https://postveil.me/"; }}
+          onSwitchToAccounts={() => { window.location.href = "https://accounts.postveil.me/"; }}
+          userEmail="guest@postveil.me"
+          userName="Sovereign Guest"
+        />
+      );
+    }
+    if (navTarget.view === "pillar") {
+      if (navTarget.pillarId === "p-meet") {
+        return (
+          <PMeetApp
+            userEmail="guest@postveil.me"
+            userName="Guest Attendee"
+            onBackToMail={() => { window.location.href = "https://postveil.me/"; }}
+            onSwitchToAccounts={() => { window.location.href = "https://accounts.postveil.me/"; }}
+          />
+        );
+      }
+      if (navTarget.pillarId === "p-deck") return <PDeckApp />;
+      if (navTarget.pillarId === "p-sheets") return <PSheetsApp />;
+      if (navTarget.pillarId === "p-draw") return <PDrawApp />;
+      if (navTarget.pillarId === "p-forms") return <PFormsApp />;
+      if (navTarget.pillarId === "p-pdf") return <PPdfApp sourceDocument={pdfSnapshot} />;
+    }
+
     if (window.location.search.includes("view=consent") || window.location.search.includes("oauth=test")) {
       return (
         <OAuthConsentCard
