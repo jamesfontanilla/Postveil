@@ -170,6 +170,10 @@ interface Env {
   TURNSTILE_SITE_KEY?: string;
   ATTACHMENTS_ENABLED?: string;
   MFA_ENCRYPTION_KEY?: string;
+  CLOUDFLARE_CALLS_APP_ID?: string;
+  CLOUDFLARE_CALLS_APP_SECRET?: string;
+  CLOUDFLARE_REALTIME_APP_ID?: string;
+  CLOUDFLARE_ACCOUNT_ID?: string;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -4326,7 +4330,115 @@ async function handleAccountsApi(request: Request, env: Env, url: URL): Promise<
   return error("Not found", 404);
 }
 
+async function handleMeetApi(request: Request, env: Env, url: URL): Promise<Response> {
+  const appId = env.CLOUDFLARE_CALLS_APP_ID || env.CLOUDFLARE_REALTIME_APP_ID || "a458eaa8-4c47-4955-9ac0-7096a71a74ec";
+  const accountId = env.CLOUDFLARE_ACCOUNT_ID || "cbb5610b165533d7582f429a45e53d35";
+  const appSecret = env.CLOUDFLARE_CALLS_APP_SECRET || "";
+
+  // 1. GET /api/meet/config: Return client configuration for WebRTC
+  if (url.pathname === "/api/meet/config" && request.method === "GET") {
+    return json({
+      appId,
+      accountId,
+      hasSecret: Boolean(appSecret),
+      iceServers: [
+        { urls: ["stun:stun.cloudflare.com:3478"] },
+        { urls: ["stun:stun.l.google.com:19302"] },
+      ],
+    });
+  }
+
+  // 2. POST /api/meet/sessions/new: Create WebRTC SFU session with Cloudflare Calls
+  if (url.pathname === "/api/meet/sessions/new" && request.method === "POST") {
+    if (!appSecret) {
+      // Return edge session ID if direct Cloudflare Calls secret is not yet set
+      const localSessionId = `cf-session-${crypto.randomUUID()}`;
+      return json({ sessionId: localSessionId, mode: "mesh" });
+    }
+    try {
+      const cfRes = await fetch(`https://rtc.live.cloudflare.com/v1/apps/${encodeURIComponent(appId)}/sessions/new`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${appSecret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+      const data = await cfRes.json() as JsonRecord;
+      if (!cfRes.ok) {
+        return json({ sessionId: `cf-session-${crypto.randomUUID()}`, mode: "mesh", cloudflareError: data }, 200);
+      }
+      return json(data, 201);
+    } catch (callError) {
+      return json({ sessionId: `cf-session-${crypto.randomUUID()}`, mode: "mesh" }, 200);
+    }
+  }
+
+  // 3. POST /api/meet/sessions/:sessionId/tracks/new: Exchange SDP and negotiate tracks
+  const trackMatch = url.pathname.match(/^\/api\/meet\/sessions\/([^/]+)\/tracks\/new$/);
+  if (trackMatch && request.method === "POST") {
+    const sessionId = trackMatch[1];
+    const body = await request.json().catch(() => ({})) as JsonRecord;
+    if (!appSecret) {
+      return json({ ok: true, sessionId, status: "p2p_mesh" });
+    }
+    try {
+      const cfRes = await fetch(`https://rtc.live.cloudflare.com/v1/apps/${encodeURIComponent(appId)}/sessions/${encodeURIComponent(sessionId)}/tracks/new`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${appSecret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await cfRes.json() as JsonRecord;
+      return json(data, cfRes.status);
+    } catch (trackErr) {
+      return error(trackErr instanceof Error ? trackErr.message : "Tracks negotiation failed", 500);
+    }
+  }
+
+  // 4. In-Meeting Ephemeral Room Signal / State (Participants & Messages)
+  const roomSignalMatch = url.pathname.match(/^\/api\/meet\/rooms\/([^/]+)\/signal$/);
+  if (roomSignalMatch) {
+    const roomKey = decodeURIComponent(roomSignalMatch[1]).slice(0, 128);
+    if (request.method === "GET") {
+      const rows = await env.DB.prepare(
+        "SELECT data FROM pv_records WHERE table_name = 'meet_room_signals' AND record_id LIKE ? ORDER BY created_at DESC LIMIT 50"
+      ).bind(`${roomKey}:%`).all().catch(() => ({ results: [] }));
+      const signals = (rows.results || []).map((r: any) => {
+        try { return JSON.parse(r.data); } catch { return null; }
+      }).filter(Boolean);
+      return json({ roomKey, signals });
+    }
+    if (request.method === "POST") {
+      const payload = await request.json().catch(() => ({})) as JsonRecord;
+      const signalId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const signalRecord = {
+        id: signalId,
+        roomKey,
+        senderId: String(payload.senderId || "anonymous"),
+        senderName: String(payload.senderName || "Guest"),
+        type: String(payload.type || "state"),
+        data: payload.data || {},
+        timestamp: now,
+      };
+      await env.DB.prepare(
+        "INSERT INTO pv_records (table_name, record_id, data, created_at, updated_at) VALUES ('meet_room_signals', ?, ?, ?, ?)"
+      ).bind(`${roomKey}:${signalId}`, JSON.stringify(signalRecord), now, now).run().catch(() => {});
+      return json({ ok: true, signalId });
+    }
+  }
+
+  return error("Meet endpoint not found", 404);
+}
+
 async function api(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const meetUrl = new URL(request.url);
+  if (meetUrl.pathname.startsWith("/api/meet/")) {
+    return handleMeetApi(request, env, meetUrl);
+  }
   const accountsUrl = new URL(request.url);
   if (accountsUrl.pathname.startsWith("/api/accounts/")) {
     return handleAccountsApi(request, env, accountsUrl);
