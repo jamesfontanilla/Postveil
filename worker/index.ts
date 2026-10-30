@@ -4183,7 +4183,7 @@ function protectedHeaders(response: Response, noStore = false): Response {
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  headers.set("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()");
   headers.set("Cross-Origin-Opener-Policy", "same-origin");
   headers.set("Cross-Origin-Resource-Policy", "same-origin");
   headers.set("Strict-Transport-Security", "max-age=31536000");
@@ -5784,6 +5784,16 @@ export default {
       const assetRequest = new Request(new URL("/index.html?view=docs", request.url), request);
       const docsAsset = await env.ASSETS.fetch(assetRequest);
       return protectedHeaders(docsAsset);
+    }
+    if (url.pathname === "/deck" || url.pathname === "/deck/" || url.hostname.startsWith("deck.")) {
+      const assetRequest = new Request(new URL("/suite/p-deck", request.url), request);
+      const deckAsset = await env.ASSETS.fetch(assetRequest);
+      return protectedHeaders(deckAsset);
+    }
+    if (url.pathname === "/meet" || url.pathname === "/meet/" || url.hostname.startsWith("meet.")) {
+      const assetRequest = new Request(new URL("/suite/p-meet", request.url), request);
+      const meetAsset = await env.ASSETS.fetch(assetRequest);
+      return protectedHeaders(meetAsset);
     }
     const assetResponse = await env.ASSETS.fetch(request);
     const noStoreAsset = url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest";
