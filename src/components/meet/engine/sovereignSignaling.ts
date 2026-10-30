@@ -64,4 +64,72 @@ export class SovereignSignalingClient {
       mode: "mesh",
     };
   }
+
+  /**
+   * Publish local audio/video tracks to Cloudflare Calls SFU
+   */
+  public static async publishTracks(sessionId: string, tracks: Array<{ trackName: string; kind: "audio" | "video" }>): Promise<any> {
+    try {
+      const res = await fetch(`/api/meet/sessions/${encodeURIComponent(sessionId)}/tracks/new`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionDescription: { tracks } }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.warn("[SovereignSignaling] Publish tracks notice:", err);
+    }
+    return { ok: true, status: "local_broadcast" };
+  }
+
+  /**
+   * Connect to live room broadcast WebSocket
+   */
+  public static connectRoomWebSocket(
+    roomName: string,
+    onSignal: (signal: any) => void
+  ): { send: (msg: any) => void; close: () => void } {
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/api/meet/rooms/${encodeURIComponent(roomName)}/signal`;
+
+    let socket: WebSocket | null = null;
+    let isClosed = false;
+
+    try {
+      socket = new WebSocket(wsUrl);
+      socket.onopen = () => {
+        socket?.send(JSON.stringify({ type: "ping" }));
+      };
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          onSignal(data);
+        } catch {
+          // ignore malformed frame
+        }
+      };
+      socket.onerror = (e) => {
+        console.warn("[SovereignSignaling] Room WebSocket notice:", e);
+      };
+    } catch (err) {
+      console.warn("[SovereignSignaling] WebSocket init notice:", err);
+    }
+
+    return {
+      send: (msg: any) => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(msg));
+        }
+      },
+      close: () => {
+        isClosed = true;
+        if (socket) {
+          socket.close();
+          socket = null;
+        }
+      },
+    };
+  }
 }

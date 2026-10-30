@@ -29,6 +29,7 @@ import { Participant, MeetingRoomState, ChatMessage, ActiveDrawerTab, MeetingVie
 import { SovereignDeviceManager } from "./engine/sovereignDeviceManager";
 import { createSovereignAudioMeter } from "./engine/sovereignAudioMeter";
 import { SovereignSignalingClient } from "./engine/sovereignSignaling";
+import { SovereignNoiseSuppressor } from "./engine/sovereignNoiseSuppressor";
 import "./MeetStyles.css";
 
 interface PMeetAppProps {
@@ -79,6 +80,9 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
 
   // SovereignMesh Device Manager & Audio Meter State
   const audioMeterRef = useRef<{ cleanup: () => void } | null>(null);
+  const noiseSuppressorRef = useRef<SovereignNoiseSuppressor | null>(null);
+  const roomWsRef = useRef<{ send: (msg: any) => void; close: () => void } | null>(null);
+  const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState<boolean>(true);
   const [availableMicrophones, setAvailableMicrophones] = useState<MediaDeviceInfo[]>([]);
   const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicId, setSelectedMicId] = useState<string>("");
@@ -151,10 +155,33 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         audioEnabled: true,
       });
 
-      const stream = res.stream;
+      let stream = res.stream;
+
+      // Apply Sovereign Client-Side Noise Suppression
+      if (res.hasAudio && noiseSuppressionEnabled) {
+        if (!noiseSuppressorRef.current) {
+          noiseSuppressorRef.current = new SovereignNoiseSuppressor();
+        }
+        try {
+          stream = await noiseSuppressorRef.current.apply(stream);
+        } catch (suppErr) {
+          console.warn("[SovereignNoiseSuppressor] Filter bypass notice:", suppErr);
+        }
+      }
+
       localStreamRef.current = stream;
       if (localVideoRef.current && res.hasVideo) {
         localVideoRef.current.srcObject = stream;
+      }
+
+      // Automatically publish tracks to Cloudflare Calls SFU session
+      if (cfSessionId) {
+        const pubTracks: Array<{ trackName: string; kind: "audio" | "video" }> = [];
+        if (res.hasAudio) pubTracks.push({ trackName: "audio-main", kind: "audio" });
+        if (res.hasVideo) pubTracks.push({ trackName: "video-main", kind: "video" });
+        if (pubTracks.length > 0) {
+          void SovereignSignalingClient.publishTracks(cfSessionId, pubTracks);
+        }
       }
 
       // Sovereign Audio Meter & Active Speaker Detection
@@ -213,14 +240,24 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     // Check media permissions on mount
     void requestMediaPermissions(false);
 
-    // Establish real SovereignMesh connection details and Cloudflare Calls session
+    // Establish real SovereignMesh connection details, Cloudflare Calls session, and WebSocket signal
     async function initSession() {
       try {
-        const details = await SovereignSignalingClient.fetchConnectionDetails("boardroom", userName);
+        const details = await SovereignSignalingClient.fetchConnectionDetails(initialRoomHandle || "boardroom", userName);
         const callsSession = await SovereignSignalingClient.createCallsSession();
         if (active && (details.sessionId || callsSession.sessionId)) {
           setCfSessionId(details.sessionId || callsSession.sessionId);
         }
+
+        // Connect live WebSocket broadcast channel for instant room updates
+        roomWsRef.current = SovereignSignalingClient.connectRoomWebSocket(
+          initialRoomHandle || "boardroom",
+          (signal) => {
+            if (signal.type === "connected") {
+              console.log("[SovereignMesh] Live Room Broadcast Connected:", signal.roomKey);
+            }
+          }
+        );
       } catch (callErr) {
         console.warn("SovereignMesh session initialization notice:", callErr);
       }
@@ -230,6 +267,14 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
 
     return () => {
       active = false;
+      if (roomWsRef.current) {
+        roomWsRef.current.close();
+        roomWsRef.current = null;
+      }
+      if (noiseSuppressorRef.current) {
+        noiseSuppressorRef.current.cleanup();
+        noiseSuppressorRef.current = null;
+      }
       if (audioMeterRef.current) {
         audioMeterRef.current.cleanup();
       }
@@ -237,7 +282,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         localStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [requestMediaPermissions, userName]);
+  }, [requestMediaPermissions, userName, initialRoomHandle]);
 
   // Switch mic hardware on the fly via Sovereign Device Manager
   const handleSwitchMic = async (deviceId: string) => {
@@ -853,6 +898,31 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
                     ))
                   )}
                 </select>
+              </div>
+
+              {/* Sovereign Client-Side Noise Suppression Toggle */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px", background: "rgba(255,255,255,0.03)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: 600, color: "#fff" }}>Acoustic Noise Silencer</span>
+                  <span style={{ fontSize: "10px", color: "#94a3b8" }}>Local neural noise filtering (fans, echo, typing)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNoiseSuppressionEnabled(!noiseSuppressionEnabled)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    border: "none",
+                    background: noiseSuppressionEnabled ? "#10b981" : "rgba(255,255,255,0.15)",
+                    color: noiseSuppressionEnabled ? "#042f2e" : "#cbd5e1",
+                    transition: "all 0.2s ease"
+                  }}
+                >
+                  {noiseSuppressionEnabled ? "ON" : "OFF"}
+                </button>
               </div>
 
               {/* SovereignMesh Network Architecture Info */}

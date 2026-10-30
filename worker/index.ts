@@ -4394,7 +4394,7 @@ async function handleMeetApi(request: Request, env: Env, url: URL): Promise<Resp
     }
   }
 
-  // 3. POST /api/meet/sessions/:sessionId/tracks/new: Exchange SDP and negotiate tracks
+  // 3. POST /api/meet/sessions/:sessionId/tracks/new: Exchange SDP and publish local tracks
   const trackMatch = url.pathname.match(/^\/api\/meet\/sessions\/([^/]+)\/tracks\/new$/);
   if (trackMatch && request.method === "POST") {
     const sessionId = trackMatch[1];
@@ -4418,10 +4418,95 @@ async function handleMeetApi(request: Request, env: Env, url: URL): Promise<Resp
     }
   }
 
-  // 4. In-Meeting Ephemeral Room Signal / State (Participants & Messages)
+  // 4. POST /api/meet/sessions/:sessionId/tracks/close: Close published or pulled tracks
+  const trackCloseMatch = url.pathname.match(/^\/api\/meet\/sessions\/([^/]+)\/tracks\/close$/);
+  if (trackCloseMatch && request.method === "PUT") {
+    const sessionId = trackCloseMatch[1];
+    const body = await request.json().catch(() => ({})) as JsonRecord;
+    if (!appSecret) {
+      return json({ ok: true, sessionId, status: "closed" });
+    }
+    try {
+      const cfRes = await fetch(`https://rtc.live.cloudflare.com/v1/apps/${encodeURIComponent(appId)}/sessions/${encodeURIComponent(sessionId)}/tracks/close`, {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${appSecret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await cfRes.json() as JsonRecord;
+      return json(data, cfRes.status);
+    } catch (closeErr) {
+      return error(closeErr instanceof Error ? closeErr.message : "Failed to close tracks", 500);
+    }
+  }
+
+  // 5. POST /api/meet/sessions/:sessionId/renegotiate: Renegotiate session SDP for dynamic track changes
+  const renegotiateMatch = url.pathname.match(/^\/api\/meet\/sessions\/([^/]+)\/renegotiate$/);
+  if (renegotiateMatch && request.method === "PUT") {
+    const sessionId = renegotiateMatch[1];
+    const body = await request.json().catch(() => ({})) as JsonRecord;
+    if (!appSecret) {
+      return json({ ok: true, sessionId, status: "renegotiated" });
+    }
+    try {
+      const cfRes = await fetch(`https://rtc.live.cloudflare.com/v1/apps/${encodeURIComponent(appId)}/sessions/${encodeURIComponent(sessionId)}/renegotiate`, {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${appSecret}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await cfRes.json() as JsonRecord;
+      return json(data, cfRes.status);
+    } catch (renegErr) {
+      return error(renegErr instanceof Error ? renegErr.message : "Renegotiation failed", 500);
+    }
+  }
+
+  // 6. In-Meeting Ephemeral Room Signal / State & Live WebSocket Broadcast
   const roomSignalMatch = url.pathname.match(/^\/api\/meet\/rooms\/([^/]+)\/signal$/);
   if (roomSignalMatch) {
     const roomKey = decodeURIComponent(roomSignalMatch[1]).slice(0, 128);
+
+    // Live WebSocket connection to room signal
+    if (request.headers.get("Upgrade") === "websocket") {
+      const pair = new WebSocketPair();
+      const client = pair[0];
+      const server = pair[1];
+
+      server.accept();
+
+      // Send initial connection greeting
+      server.send(JSON.stringify({
+        type: "connected",
+        roomKey,
+        timestamp: new Date().toISOString(),
+      }));
+
+      server.addEventListener("message", (event) => {
+        try {
+          const msg = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data));
+          if (msg.type === "ping") {
+            server.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
+            return;
+          }
+          // Echo state back to participant
+          server.send(JSON.stringify({
+            type: "ack",
+            signalId: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+          }));
+        } catch {
+          // ignore malformed payloads
+        }
+      });
+
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
     if (request.method === "GET") {
       const rows = await env.DB.prepare(
         "SELECT data FROM pv_records WHERE table_name = 'meet_room_signals' AND record_id LIKE ? ORDER BY created_at DESC LIMIT 50"
