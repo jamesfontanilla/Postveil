@@ -134,6 +134,7 @@ import PDrawApp from "./components/draw/PDrawApp";
 import PFormsApp from "./components/forms/PFormsApp";
 import PCRMApp from "./components/crm/PCRMApp";
 import PPdfApp from "./components/pdf/PPdfApp";
+import PMeetApp from "./components/meet/PMeetApp";
 import PVoiceApp from "./components/voice/PVoiceApp";
 import PRecordApp from "./components/record/PRecordApp";
 import "./components/platform/PlatformStyles.css";
@@ -3408,6 +3409,7 @@ function AppShell({ session, initialRoute, pdfSnapshot, onOpenPdf }: { session: 
     if (shellRoute.pillarId === "p-forms") return <PFormsApp />;
     if (shellRoute.pillarId === "p-crm") return <PCRMApp session={session} />;
     if (shellRoute.pillarId === "p-pdf") return <PPdfApp sourceDocument={pdfSnapshot} />;
+    if (shellRoute.pillarId === "p-meet") return <PMeetApp userEmail={session.user.email} userName={displayName(session.user.email || "Postveil")} onBackToMail={() => writeNavigation({ view: "mail", kind: "mail" })} onSwitchToAccounts={() => writeNavigation({ view: "accounts", kind: "accounts" })} onSignOut={() => void requireSupabase().auth.signOut()} />;
     if (shellRoute.pillarId === "p-voice") return <PVoiceApp session={session} />;
     if (shellRoute.pillarId === "p-record") return <PRecordApp session={session} />;
     return <PillarBoundary pillarId={shellRoute.pillarId} />;
