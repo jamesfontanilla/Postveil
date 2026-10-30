@@ -66,6 +66,8 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const [activeDrawer, setActiveDrawer] = useState<ActiveDrawerTab>("none");
   const [copiedLink, setCopiedLink] = useState(false);
   const [cfSessionId, setCfSessionId] = useState<string | null>(null);
+  const [permissionState, setPermissionState] = useState<"prompt" | "requesting" | "granted" | "denied">("prompt");
+  const [permissionError, setPermissionError] = useState<string | null>(null);
 
   // Real WebRTC Streams & Devices
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -104,32 +106,63 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     },
   ]);
 
-  // 1. Initialize Real WebRTC User Media & Cloudflare Calls Session
+  // Function to explicitly trigger browser navigator.mediaDevices.getUserMedia permission prompt
+  const requestMediaPermissions = useCallback(async () => {
+    setPermissionState("requesting");
+    setPermissionError(null);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("navigator.mediaDevices.getUserMedia is not supported on this browser.");
+      }
+
+      // Proactively prompt user for both mic and camera permissions with high fidelity
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: "user",
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+
+      setPermissionState("granted");
+      setIsVideoOff(false);
+      setIsMuted(false);
+
+      setParticipants((prev) =>
+        prev.map((p) => (p.isSelf ? { ...p, stream, isVideoOff: false, isMuted: false } : p))
+      );
+    } catch (err: unknown) {
+      console.warn("Camera/Microphone permission was denied or failed:", err);
+      const msg = err instanceof Error ? err.message : "Camera and microphone access was denied or not found.";
+      setPermissionState("denied");
+      setPermissionError(msg);
+      setIsVideoOff(true);
+      setIsMuted(true);
+      setParticipants((prev) =>
+        prev.map((p) => (p.isSelf ? { ...p, isVideoOff: true, isMuted: true } : p))
+      );
+    }
+  }, []);
+
+  // 1. Proactively prompt for media permissions and establish Cloudflare Calls Session
   useEffect(() => {
     let active = true;
 
-    async function initRealMedia() {
-      try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
-            audio: { echoCancellation: true, noiseSuppression: true },
-          });
-          if (!active) return;
-          localStreamRef.current = stream;
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = stream;
-          }
-          setParticipants((prev) =>
-            prev.map((p) => (p.isSelf ? { ...p, stream, isVideoOff: false, isMuted: false } : p))
-          );
-        }
-      } catch (mediaError) {
-        // Fallback gracefully if camera/mic blocked by user or environment
-        console.warn("Real media initialization fallback:", mediaError);
-      }
+    // Immediately trigger browser permission request
+    void requestMediaPermissions();
 
-      // Establish real Cloudflare Calls session via Worker signaling
+    // Establish real Cloudflare Calls session via Worker signaling
+    async function initCallsSession() {
       try {
         const res = await fetch("/api/meet/sessions/new", {
           method: "POST",
@@ -137,7 +170,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
           body: JSON.stringify({}),
         });
         if (res.ok) {
-          const sessionData = await res.json() as { sessionId?: string };
+          const sessionData = (await res.json()) as { sessionId?: string };
           if (active && sessionData.sessionId) {
             setCfSessionId(sessionData.sessionId);
           }
@@ -147,7 +180,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
       }
     }
 
-    void initRealMedia();
+    void initCallsSession();
 
     return () => {
       active = false;
@@ -155,7 +188,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         localStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, []);
+  }, [requestMediaPermissions]);
 
   // 2. Hardware Mute Toggle (Audio track)
   const toggleMute = () => {
@@ -416,12 +449,27 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
                     )
                   ) : null}
 
-                  {/* Avatar Placeholder when video is off */}
+                  {/* Avatar Placeholder or Permission Prompt when video is off */}
                   {p.isVideoOff && (
                     <div className="pv-meet-avatar-placeholder">
-                      <div className={`pv-meet-avatar-circle ${p.isSpeaking ? "speaking-wave" : ""}`}>
-                        {initials}
-                      </div>
+                      {permissionState === "denied" && p.isSelf ? (
+                        <div className="pv-meet-permission-banner" data-testid="permission-banner">
+                          <Lock size={28} color="#f59e0b" />
+                          <h4>Camera & Mic Permission Required</h4>
+                          <p>{permissionError || "Your browser blocked media device access or requires permission."}</p>
+                          <button
+                            type="button"
+                            className="pv-meet-permission-retry-btn"
+                            onClick={() => void requestMediaPermissions()}
+                          >
+                            Allow Camera & Microphone
+                          </button>
+                        </div>
+                      ) : (
+                        <div className={`pv-meet-avatar-circle ${p.isSpeaking ? "speaking-wave" : ""}`}>
+                          {initials}
+                        </div>
+                      )}
                     </div>
                   )}
 
