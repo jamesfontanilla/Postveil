@@ -24,7 +24,7 @@ import {
 import { ParentSuiteRibbon } from "../platform/ribbon";
 import { SovereignDeviceManager } from "./engine/sovereignDeviceManager";
 import { createSovereignAudioMeter } from "./engine/sovereignAudioMeter";
-import { generateMemorableMeetingSlug, generateSecureE2EERoom, parseMeetingInput } from "./engine/meetingIdGenerator";
+import { generate343MeetingSlug, generateSecureE2EERoom, parseMeetingInput } from "./engine/meetingIdGenerator";
 import "./MeetStyles.css";
 
 export interface PMeetHomeProps {
@@ -229,7 +229,7 @@ export const PMeetHome: React.FC<PMeetHomeProps> = ({
 
   // Handlers for starting/joining meetings
   const handleStartInstant = () => {
-    const slug = generateMemorableMeetingSlug();
+    const slug = generate343MeetingSlug();
     onJoinRoom(slug);
   };
 

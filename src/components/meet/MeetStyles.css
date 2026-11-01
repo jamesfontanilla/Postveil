@@ -1273,3 +1273,125 @@
   }
 }
 
+/* MS Teams Style Guest Attendee Prompt */
+.pv-meet-guest-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(circle at 50% 30%, rgba(16, 185, 129, 0.08) 0%, transparent 70%), var(--pv-meet-bg);
+}
+
+.pv-meet-guest-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--pv-meet-surface);
+  border: 1px solid var(--pv-meet-border);
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.pv-meet-guest-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.pv-meet-guest-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pv-meet-guest-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+}
+
+.pv-meet-guest-header p {
+  font-size: 13px;
+  color: var(--pv-meet-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.pv-meet-guest-header strong {
+  color: #e2e8f0;
+}
+
+.pv-meet-guest-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pv-meet-guest-form label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pv-meet-guest-form input {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--pv-meet-border);
+  background: var(--pv-meet-surface-2);
+  color: #fff;
+  font-size: 15px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.pv-meet-guest-form input:focus {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.pv-meet-guest-submit-btn {
+  width: 100%;
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+  transition: all 0.2s ease;
+}
+
+.pv-meet-guest-submit-btn:hover:not(:disabled) {
+  opacity: 0.95;
+  transform: translateY(-1px);
+}
+
+.pv-meet-guest-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pv-meet-guest-footer-note {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.4;
+}
+

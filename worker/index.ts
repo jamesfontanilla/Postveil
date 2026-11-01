@@ -6008,6 +6008,15 @@ export default {
       return protectedHeaders(deckAsset);
     }
     if (url.pathname === "/meet" || url.pathname === "/meet/" || url.hostname.startsWith("meet.")) {
+      // Check if direct static asset (e.g. .js, .css, .woff, .svg, .png)
+      if (url.pathname.match(/\.[a-zA-Z0-9]+$/)) {
+        const directAsset = await env.ASSETS.fetch(request);
+        if (directAsset.status < 400) {
+          const noStoreAsset = url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest";
+          return protectedHeaders(directAsset, noStoreAsset);
+        }
+      }
+      // SPA Fallback: Any room slug or path on meet.* serves the P-Meet index bundle
       const assetRequest = new Request(new URL("/suite/p-meet", request.url), request);
       const meetAsset = await env.ASSETS.fetch(assetRequest);
       return protectedHeaders(meetAsset);

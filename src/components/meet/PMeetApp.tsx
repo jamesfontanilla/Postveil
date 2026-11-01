@@ -67,8 +67,19 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const initialSlug = getInitialSlug();
   const [appMode, setAppMode] = useState<"home" | "inCall">(initialSlug ? "inCall" : "home");
 
+  // Detect if user is joining as an unauthenticated guest
+  const isGuestUser = !userEmail || userEmail === "guest@postveil.me";
+  const [guestName, setGuestName] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("postveil_guest_name") || "";
+    }
+    return "";
+  });
+  const [guestJoined, setGuestJoined] = useState(() => !isGuestUser || !!guestName);
+
   // Derive user's sovereign handle from email or fallback
-  const userHandle = userEmail ? userEmail.split("@")[0] : "jaime";
+  const userHandle = userEmail ? userEmail.split("@")[0] : "guest";
+  const activeDisplayName = isGuestUser ? (guestName || "Guest Attendee") : userName;
 
   // Room State (Purely Online & Ephemeral)
   const [room, setRoom] = useState<MeetingRoomState>({
@@ -126,13 +137,13 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     },
   ]);
 
-  // Real Participants (Initialized strictly with the authenticated local attendee - NO mock peers)
+  // Real Participants (Initialized strictly with the authenticated or guest local attendee)
   const [participants, setParticipants] = useState<Participant[]>([
     {
       id: "self",
-      name: userName,
-      handle: userEmail,
-      isHost: true,
+      name: activeDisplayName,
+      handle: isGuestUser ? "guest@postveil.me" : userEmail,
+      isHost: !isGuestUser,
       isSelf: true,
       isMuted: false,
       isVideoOff: false,
@@ -142,6 +153,13 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
       connectionQuality: "excellent",
     },
   ]);
+
+  // Sync display name updates into self participant
+  useEffect(() => {
+    setParticipants((prev) =>
+      prev.map((p) => (p.isSelf ? { ...p, name: activeDisplayName } : p))
+    );
+  }, [activeDisplayName]);
 
   // Enumerate devices on mount and subscribe to hardware device changes
   useEffect(() => {
@@ -575,6 +593,76 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         onSwitchToAccounts={onSwitchToAccounts}
         onSignOut={onSignOut}
       />
+    );
+  }
+
+  // MS Teams style Guest Name Prompt when unauthenticated attendee enters meeting link
+  if (isGuestUser && !guestJoined) {
+    return (
+      <div className="pv-meet-shell" data-testid="pmeet-guest-prompt">
+        <div className="pv-meet-ribbon-wrapper">
+          <ParentSuiteRibbon
+            currentPillarId="p-meet"
+            userEmail="guest@postveil.me"
+            userName={guestName || "Guest Attendee"}
+            onSwitchToMail={onBackToMail}
+            onSwitchToAccounts={onSwitchToAccounts}
+            onSignOut={onSignOut}
+          />
+        </div>
+        <div className="pv-meet-guest-stage">
+          <div className="pv-meet-guest-card">
+            <div className="pv-meet-guest-header">
+              <div className="pv-meet-guest-icon">
+                <Users size={28} />
+              </div>
+              <h2>Join Meeting as Guest</h2>
+              <p>
+                You are entering <strong>meet.postveil.me/{room.roomHandle}</strong>. Please enter your name to appear in the meeting roster.
+              </p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const trimmed = guestName.trim();
+                if (!trimmed) return;
+                try {
+                  localStorage.setItem("postveil_guest_name", trimmed);
+                } catch {}
+                setGuestJoined(true);
+              }}
+              className="pv-meet-guest-form"
+            >
+              <label htmlFor="pv-guest-name-input">Type your name (Required)</label>
+              <input
+                id="pv-guest-name-input"
+                type="text"
+                autoFocus
+                placeholder="e.g. Alex Morgan"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                maxLength={40}
+                required
+              />
+
+              <div className="pv-meet-guest-actions">
+                <button
+                  type="submit"
+                  className="pv-meet-guest-submit-btn"
+                  disabled={!guestName.trim()}
+                >
+                  Join Meeting Now
+                </button>
+              </div>
+
+              <div className="pv-meet-guest-footer-note">
+                🔒 End-to-end encrypted sovereign WebRTC mesh. No account or password required.
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
     );
   }
 

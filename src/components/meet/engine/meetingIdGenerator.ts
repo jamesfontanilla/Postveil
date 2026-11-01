@@ -22,19 +22,33 @@ const VERBS = [
 ];
 
 /**
- * Generates an intuitive, memorable 3-word slug (e.g. "swift-zen-orbit")
+ * Generates a clean 3-4-3 random character meeting slug (e.g. "x7k-m9pq-w2z")
+ * Uses cryptographically secure random bytes with an unambiguous lowercase alphanumeric alphabet.
  */
-export function generateMemorableMeetingSlug(): string {
-  const getRand = (arr: string[]) => {
-    const buf = new Uint32Array(1);
-    crypto.getRandomValues(buf);
-    return arr[buf[0] % arr.length];
+export function generate343MeetingSlug(): string {
+  // Unambiguous lowercase alphabet excluding confusing characters (0, o, 1, l, i)
+  const CHARS = "abcdefghjkmnpqrstuvwxyz23456789";
+  const getRandChars = (count: number): string => {
+    const bytes = new Uint8Array(count);
+    crypto.getRandomValues(bytes);
+    let result = "";
+    for (let i = 0; i < count; i++) {
+      result += CHARS[bytes[i] % CHARS.length];
+    }
+    return result;
   };
 
-  const adj = getRand(ADJECTIVES);
-  const noun = getRand(NOUNS);
-  const verb = getRand(VERBS);
-  return `${adj}-${noun}-${verb}`;
+  const part1 = getRandChars(3);
+  const part2 = getRandChars(4);
+  const part3 = getRandChars(3);
+  return `${part1}-${part2}-${part3}`;
+}
+
+/**
+ * Generates meeting slug (defaults to 3-4-3 random characters, e.g. "x7k-m9pq-w2z")
+ */
+export function generateMeetingSlug(): string {
+  return generate343MeetingSlug();
 }
 
 /**
@@ -42,7 +56,7 @@ export function generateMemorableMeetingSlug(): string {
  * The server only sees the roomSlug; the encryption key after '#' never leaves the browser.
  */
 export function generateSecureE2EERoom(): { roomSlug: string; encryptionKey: string; fullPath: string } {
-  const roomSlug = generateMemorableMeetingSlug();
+  const roomSlug = generate343MeetingSlug();
   const rawKey = new Uint8Array(32);
   crypto.getRandomValues(rawKey);
   const encryptionKey = Array.from(rawKey, (b) => b.toString(16).padStart(2, "0")).join("");
