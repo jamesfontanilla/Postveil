@@ -67,15 +67,10 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const initialSlug = getInitialSlug();
   const [appMode, setAppMode] = useState<"home" | "inCall">(initialSlug ? "inCall" : "home");
 
-  // Detect if user is joining as an unauthenticated guest
+  // Purely Online & Ephemeral In-Memory State: Never read or persist guest name to local storage
   const isGuestUser = !userEmail || userEmail === "guest@postveil.me";
-  const [guestName, setGuestName] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("postveil_guest_name") || "";
-    }
-    return "";
-  });
-  const [guestJoined, setGuestJoined] = useState(() => !isGuestUser || !!guestName);
+  const [guestName, setGuestName] = useState<string>("");
+  const [guestJoined, setGuestJoined] = useState<boolean>(!isGuestUser);
 
   // Derive user's sovereign handle from email or fallback
   const userHandle = userEmail ? userEmail.split("@")[0] : "guest";
@@ -381,145 +376,147 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
           async (signal) => {
             if (!active) return;
 
-            // Connected: announce our presence and query current room peers
-            if (signal.type === "connected") {
-              console.log("[SovereignMesh] Live Room Broadcast Connected:", signal.roomKey);
-              if (roomWsRef.current) {
-                roomWsRef.current.send({
-                  type: "join",
-                  peerId: myPeerId,
-                  peerName: activeDisplayName,
-                });
-              }
-
-              // If existing peers are in the room, add them to participants and initiate WebRTC offer
-              if (Array.isArray(signal.peers)) {
-                signal.peers.forEach((peer: { peerId: string; peerName: string }) => {
-                  if (peer.peerId !== myPeerId) {
-                    setParticipants((prev) => {
-                      if (prev.some((p) => p.id === peer.peerId)) return prev;
-                      return [
-                        ...prev,
-                        {
-                          id: peer.peerId,
-                          name: peer.peerName,
-                          handle: "guest@postveil.me",
-                          isHost: false,
-                          isSelf: false,
-                          isMuted: false,
-                          isVideoOff: false,
-                          isScreenSharing: false,
-                          isSpeaking: false,
-                          audioLevel: 0,
-                          connectionQuality: "excellent",
-                        },
-                      ];
-                    });
-                    // Initiate WebRTC connection
-                    createPeerConnection(peer.peerId, peer.peerName, true);
-                  }
-                });
-              }
-            }
-
-            // A new peer joined the room
-            if (signal.type === "peer_joined" && signal.peerId !== myPeerId) {
-              const remoteId = String(signal.peerId);
-              const remoteName = String(signal.peerName || "Attendee");
-              setParticipants((prev) => {
-                if (prev.some((p) => p.id === remoteId)) return prev;
-                return [
-                  ...prev,
-                  {
-                    id: remoteId,
-                    name: remoteName,
-                    handle: "guest@postveil.me",
-                    isHost: false,
-                    isSelf: false,
-                    isMuted: false,
-                    isVideoOff: false,
-                    isScreenSharing: false,
-                    isSpeaking: false,
-                    audioLevel: 0,
-                    connectionQuality: "excellent",
-                  },
-                ];
-              });
-              // Existing client initiates connection to the new peer
-              createPeerConnection(remoteId, remoteName, true);
-            }
-
-            // A peer left the room
-            if (signal.type === "peer_left") {
-              const remoteId = String(signal.peerId);
-              const pc = peerConnectionsRef.current.get(remoteId);
-              if (pc) {
-                pc.close();
-                peerConnectionsRef.current.delete(remoteId);
-              }
-              peerStreamsRef.current.delete(remoteId);
-              setParticipants((prev) => prev.filter((p) => p.id !== remoteId));
-            }
-
-            // Received WebRTC Offer
-            if (signal.type === "offer" && signal.toPeerId === myPeerId) {
-              const remoteId = String(signal.fromPeerId);
-              const pc = createPeerConnection(remoteId, "Attendee", false);
-              try {
-                await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                if (roomWsRef.current && pc.localDescription) {
-                  roomWsRef.current.send({
-                    type: "answer",
-                    fromPeerId: myPeerId,
-                    toPeerId: remoteId,
-                    sdp: pc.localDescription,
-                  });
-                }
-              } catch (offerErr) {
-                console.warn("[WebRTC] Handling offer error:", offerErr);
-              }
-            }
-
-            // Received WebRTC Answer
-            if (signal.type === "answer" && signal.toPeerId === myPeerId) {
-              const remoteId = String(signal.fromPeerId);
-              const pc = peerConnectionsRef.current.get(remoteId);
-              if (pc && pc.signalingState !== "closed") {
-                try {
-                  await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-                } catch (ansErr) {
-                  console.warn("[WebRTC] Setting answer error:", ansErr);
-                }
-              }
-            }
-
-            // Received ICE Candidate
-            if (signal.type === "candidate" && signal.toPeerId === myPeerId && signal.candidate) {
-              const remoteId = String(signal.fromPeerId);
-              const pc = peerConnectionsRef.current.get(remoteId);
-              if (pc && pc.remoteDescription) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-                } catch (iceErr) {
-                  console.warn("[WebRTC] Add ICE candidate error:", iceErr);
-                }
-              }
-            }
+            handleIncomingSignal(signal);
           }
         );
+
+        // Edge Resilient Cross-Isolate Polling Sync
+        // Guaranteed fallback if two devices land on different Cloudflare datacenters
+        const pollInterval = setInterval(async () => {
+          if (!active) return;
+          try {
+            const remoteSignals = await SovereignSignalingClient.fetchRoomSignals(roomHandle);
+            remoteSignals.forEach((sig: any) => {
+              if (sig && sig.timestamp && new Date(sig.timestamp).getTime() > joinTimestamp) {
+                handleIncomingSignal(sig);
+              }
+            });
+          } catch {}
+        }, 1500);
+
+        return () => {
+          clearInterval(pollInterval);
+        };
       } catch (callErr) {
         console.warn("SovereignMesh session initialization notice:", callErr);
       }
     }
 
+    const joinTimestamp = Date.now() - 5000;
+    const processedSignals = new Set<string>();
+
+    const handleIncomingSignal = async (signal: any) => {
+      if (!active || !signal) return;
+      if (signal.id && processedSignals.has(signal.id)) return;
+      if (signal.id) processedSignals.add(signal.id);
+
+      // Connected: announce presence
+      if (signal.type === "connected") {
+        if (roomWsRef.current) {
+          roomWsRef.current.send({
+            type: "join",
+            peerId: myPeerId,
+            peerName: activeDisplayName,
+          });
+        }
+      }
+
+      // A new peer joined the room
+      if (signal.type === "peer_joined" && signal.peerId !== myPeerId) {
+        const remoteId = String(signal.peerId);
+        const remoteName = String(signal.peerName || "Attendee");
+        setParticipants((prev) => {
+          if (prev.some((p) => p.id === remoteId)) return prev;
+          return [
+            ...prev,
+            {
+              id: remoteId,
+              name: remoteName,
+              handle: "guest@postveil.me",
+              isHost: false,
+              isSelf: false,
+              isMuted: false,
+              isVideoOff: false,
+              isScreenSharing: false,
+              isSpeaking: false,
+              audioLevel: 0,
+              connectionQuality: "excellent",
+            },
+          ];
+        });
+        createPeerConnection(remoteId, remoteName, true);
+      }
+
+      // A peer left the room
+      if (signal.type === "peer_left") {
+        const remoteId = String(signal.peerId);
+        const pc = peerConnectionsRef.current.get(remoteId);
+        if (pc) {
+          pc.close();
+          peerConnectionsRef.current.delete(remoteId);
+        }
+        peerStreamsRef.current.delete(remoteId);
+        setParticipants((prev) => prev.filter((p) => p.id !== remoteId));
+      }
+
+      // Received WebRTC Offer
+      if (signal.type === "offer" && signal.toPeerId === myPeerId) {
+        const remoteId = String(signal.fromPeerId);
+        const pc = createPeerConnection(remoteId, "Attendee", false);
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (roomWsRef.current && pc.localDescription) {
+            roomWsRef.current.send({
+              type: "answer",
+              fromPeerId: myPeerId,
+              toPeerId: remoteId,
+              sdp: pc.localDescription,
+            });
+          }
+        } catch (offerErr) {
+          console.warn("[WebRTC] Handling offer error:", offerErr);
+        }
+      }
+
+      // Received WebRTC Answer
+      if (signal.type === "answer" && signal.toPeerId === myPeerId) {
+        const remoteId = String(signal.fromPeerId);
+        const pc = peerConnectionsRef.current.get(remoteId);
+        if (pc && pc.signalingState !== "closed") {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          } catch (ansErr) {
+            console.warn("[WebRTC] Setting answer error:", ansErr);
+          }
+        }
+      }
+
+      // Received ICE Candidate
+      if (signal.type === "candidate" && signal.toPeerId === myPeerId && signal.candidate) {
+        const remoteId = String(signal.fromPeerId);
+        const pc = peerConnectionsRef.current.get(remoteId);
+        if (pc && pc.remoteDescription) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+          } catch (iceErr) {
+            console.warn("[WebRTC] Add ICE candidate error:", iceErr);
+          }
+        }
+      }
+    };
+
+    let cleanupPoll: (() => void) | undefined;
     if (appMode === "inCall" && (!isGuestUser || guestJoined)) {
-      void initSession();
+      void initSession().then((cleanup) => {
+        if (typeof cleanup === "function") cleanupPoll = cleanup;
+      });
     }
 
     return () => {
       active = false;
+      cleanupPoll?.();
       if (roomWsRef.current) {
         roomWsRef.current.close();
         roomWsRef.current = null;
@@ -848,9 +845,6 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
                 e.preventDefault();
                 const trimmed = guestName.trim();
                 if (!trimmed) return;
-                try {
-                  localStorage.setItem("postveil_guest_name", trimmed);
-                } catch {}
                 setGuestJoined(true);
               }}
               className="pv-meet-guest-form"

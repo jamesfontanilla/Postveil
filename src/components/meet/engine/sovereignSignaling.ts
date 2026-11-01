@@ -85,6 +85,38 @@ export class SovereignSignalingClient {
   }
 
   /**
+   * Send a signal payload via HTTP POST to guarantee cross-edge delivery across Cloudflare isolates
+   */
+  public static async sendSignal(roomName: string, payload: any): Promise<void> {
+    try {
+      await fetch(`/api/meet/rooms/${encodeURIComponent(roomName)}/signal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      console.warn("[SovereignSignaling] Send signal error:", err);
+    }
+  }
+
+  /**
+   * Fetch latest signals for room to sync presence and WebRTC negotiations across isolates
+   */
+  public static async fetchRoomSignals(roomName: string): Promise<any[]> {
+    try {
+      const res = await fetch(`/api/meet/rooms/${encodeURIComponent(roomName)}/signal`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      if (res.ok) {
+        const data = await res.json() as any;
+        return Array.isArray(data.signals) ? data.signals : [];
+      }
+    } catch {}
+    return [];
+  }
+
+  /**
    * Connect to live room broadcast WebSocket
    */
   public static connectRoomWebSocket(
@@ -122,6 +154,8 @@ export class SovereignSignalingClient {
         if (socket && socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify(msg));
         }
+        // Also fire HTTP broadcast to guarantee cross-colocation delivery
+        void SovereignSignalingClient.sendSignal(roomName, msg);
       },
       close: () => {
         isClosed = true;
