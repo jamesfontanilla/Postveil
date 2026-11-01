@@ -6003,7 +6003,13 @@ export default {
       return protectedHeaders(docsAsset);
     }
     if (url.pathname === "/deck" || url.pathname === "/deck/" || url.hostname.startsWith("deck.")) {
-      const assetRequest = new Request(new URL("/suite/p-deck", request.url), request);
+      if (url.pathname.match(/\.[a-zA-Z0-9]+$/)) {
+        const directAsset = await env.ASSETS.fetch(request);
+        if (directAsset.status < 400) {
+          return protectedHeaders(directAsset);
+        }
+      }
+      const assetRequest = new Request(new URL("/index.html", request.url), request);
       const deckAsset = await env.ASSETS.fetch(assetRequest);
       return protectedHeaders(deckAsset);
     }
@@ -6016,8 +6022,8 @@ export default {
           return protectedHeaders(directAsset, noStoreAsset);
         }
       }
-      // SPA Fallback: Any room slug or path on meet.* serves the P-Meet index bundle
-      const assetRequest = new Request(new URL("/suite/p-meet", request.url), request);
+      // SPA Fallback: Any room slug or path on meet.* serves the /index.html bundle
+      const assetRequest = new Request(new URL("/index.html", request.url), request);
       const meetAsset = await env.ASSETS.fetch(assetRequest);
       return protectedHeaders(meetAsset);
     }
