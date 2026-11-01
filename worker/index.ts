@@ -4479,12 +4479,50 @@ async function handleMeetApi(request: Request, env: Env, url: URL): Promise<Resp
 
       server.accept();
 
-      // Send initial connection greeting
+      const connectionId = crypto.randomUUID();
+      const now = new Date().toISOString();
+
+      // Register connection in active in-memory room pool
+      const g = globalThis as any;
+      if (!g._pvMeetRooms) g._pvMeetRooms = new Map<string, Map<string, { ws: WebSocket; peerId?: string; peerName?: string }>>();
+      let roomPool = g._pvMeetRooms.get(roomKey);
+      if (!roomPool) {
+        roomPool = new Map<string, { ws: WebSocket; peerId?: string; peerName?: string }>();
+        g._pvMeetRooms.set(roomKey, roomPool);
+      }
+      roomPool.set(connectionId, { ws: server });
+
+      // Send initial connection greeting with current active room peers list
+      const existingPeers: Array<{ peerId: string; peerName: string }> = [];
+      roomPool.forEach((entry: any, id: string) => {
+        if (id !== connectionId && entry.peerId) {
+          existingPeers.push({ peerId: entry.peerId, peerName: entry.peerName || "Attendee" });
+        }
+      });
+
       server.send(JSON.stringify({
         type: "connected",
+        connectionId,
         roomKey,
-        timestamp: new Date().toISOString(),
+        peers: existingPeers,
+        timestamp: now,
       }));
+
+      // Broadcast helper to all other clients in the same room
+      const broadcastToRoom = (message: any, excludeConnId?: string) => {
+        const currentPool = (globalThis as any)._pvMeetRooms?.get(roomKey);
+        if (!currentPool) return;
+        const msgStr = typeof message === "string" ? message : JSON.stringify(message);
+        currentPool.forEach((entry: any, id: string) => {
+          if (id !== excludeConnId) {
+            try {
+              if (entry.ws.readyState === WebSocket.OPEN) {
+                entry.ws.send(msgStr);
+              }
+            } catch {}
+          }
+        });
+      };
 
       server.addEventListener("message", (event) => {
         try {
@@ -4493,7 +4531,48 @@ async function handleMeetApi(request: Request, env: Env, url: URL): Promise<Resp
             server.send(JSON.stringify({ type: "pong", timestamp: Date.now() }));
             return;
           }
-          // Echo state back to participant
+
+          // Peer announces presence / joins room
+          if (msg.type === "join") {
+            const peerId = String(msg.peerId || connectionId);
+            const peerName = String(msg.peerName || "Guest Attendee");
+            const entry = roomPool.get(connectionId);
+            if (entry) {
+              entry.peerId = peerId;
+              entry.peerName = peerName;
+            }
+
+            // Broadcast peer_joined to all other attendees in this room
+            broadcastToRoom({
+              type: "peer_joined",
+              peerId,
+              peerName,
+              timestamp: new Date().toISOString(),
+            }, connectionId);
+            return;
+          }
+
+          // WebRTC Signaling: Offer, Answer, ICE Candidate relay
+          if (msg.type === "signal" || msg.type === "offer" || msg.type === "answer" || msg.type === "candidate") {
+            broadcastToRoom({
+              type: msg.type,
+              fromPeerId: msg.fromPeerId || connectionId,
+              toPeerId: msg.toPeerId,
+              data: msg.data || msg.candidate || msg.sdp,
+              sdp: msg.sdp,
+              candidate: msg.candidate,
+              timestamp: new Date().toISOString(),
+            }, connectionId);
+            return;
+          }
+
+          // Ephemeral chat or status broadcast
+          if (msg.type === "chat" || msg.type === "state_change") {
+            broadcastToRoom(msg, connectionId);
+            return;
+          }
+
+          // Default acknowledgment
           server.send(JSON.stringify({
             type: "ack",
             signalId: crypto.randomUUID(),
@@ -4504,17 +4583,51 @@ async function handleMeetApi(request: Request, env: Env, url: URL): Promise<Resp
         }
       });
 
+      const handleClose = () => {
+        const currentPool = (globalThis as any)._pvMeetRooms?.get(roomKey);
+        if (currentPool) {
+          const entry = currentPool.get(connectionId);
+          const leavingPeerId = entry?.peerId || connectionId;
+          const leavingPeerName = entry?.peerName || "Attendee";
+          currentPool.delete(connectionId);
+          if (currentPool.size === 0) {
+            (globalThis as any)._pvMeetRooms.delete(roomKey);
+          } else {
+            broadcastToRoom({
+              type: "peer_left",
+              peerId: leavingPeerId,
+              peerName: leavingPeerName,
+              timestamp: new Date().toISOString(),
+            }, connectionId);
+          }
+        }
+      };
+
+      server.addEventListener("close", handleClose);
+      server.addEventListener("error", handleClose);
+
       return new Response(null, { status: 101, webSocket: client });
     }
 
     if (request.method === "GET") {
+      const g = globalThis as any;
+      const roomPool = g._pvMeetRooms?.get(roomKey);
+      const activePeers: Array<{ peerId: string; peerName: string }> = [];
+      if (roomPool) {
+        roomPool.forEach((entry: any) => {
+          if (entry.peerId) {
+            activePeers.push({ peerId: entry.peerId, peerName: entry.peerName || "Attendee" });
+          }
+        });
+      }
+
       const rows = await env.DB.prepare(
         "SELECT data FROM pv_records WHERE table_name = 'meet_room_signals' AND record_id LIKE ? ORDER BY created_at DESC LIMIT 50"
       ).bind(`${roomKey}:%`).all().catch(() => ({ results: [] }));
       const signals = (rows.results || []).map((r: any) => {
         try { return JSON.parse(r.data); } catch { return null; }
       }).filter(Boolean);
-      return json({ roomKey, signals });
+      return json({ roomKey, activePeers, signals });
     }
     if (request.method === "POST") {
       const payload = await request.json().catch(() => ({})) as JsonRecord;

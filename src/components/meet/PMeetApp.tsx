@@ -123,6 +123,11 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
+  // Ephemeral Peer-to-Peer WebRTC Mesh connections & remote video streams
+  const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
+  const [myPeerId] = useState<string>(() => `peer-${Math.random().toString(36).substring(2, 9)}`);
+
   // Real Chat State (Zero Mock Messages, Purely Online)
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -268,6 +273,90 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     }
   }, []);
 
+  // Helper to create and configure an RTCPeerConnection for a remote peer
+  const createPeerConnection = useCallback((remotePeerId: string, remotePeerName: string, isInitiator: boolean) => {
+    if (peerConnectionsRef.current.has(remotePeerId)) {
+      return peerConnectionsRef.current.get(remotePeerId)!;
+    }
+
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] },
+      ],
+    });
+
+    peerConnectionsRef.current.set(remotePeerId, pc);
+
+    // Attach local media stream tracks so the peer can receive our camera/mic
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current!);
+      });
+    }
+
+    // Send local ICE candidates to the remote peer via room WebSocket
+    pc.onicecandidate = (event) => {
+      if (event.candidate && roomWsRef.current) {
+        roomWsRef.current.send({
+          type: "candidate",
+          fromPeerId: myPeerId,
+          toPeerId: remotePeerId,
+          candidate: event.candidate,
+        });
+      }
+    };
+
+    // Receive incoming audio/video tracks from the peer
+    pc.ontrack = (event) => {
+      const remoteStream = event.streams[0] || new MediaStream([event.track]);
+      peerStreamsRef.current.set(remotePeerId, remoteStream);
+
+      // Update participant with live incoming stream
+      setParticipants((prev) => {
+        const existing = prev.find((p) => p.id === remotePeerId);
+        if (existing) {
+          return prev.map((p) => (p.id === remotePeerId ? { ...p, stream: remoteStream, isVideoOff: false } : p));
+        }
+        return [
+          ...prev,
+          {
+            id: remotePeerId,
+            name: remotePeerName || "Attendee",
+            handle: "guest@postveil.me",
+            isHost: false,
+            isSelf: false,
+            isMuted: false,
+            isVideoOff: false,
+            isScreenSharing: false,
+            isSpeaking: false,
+            audioLevel: 0,
+            connectionQuality: "excellent",
+            stream: remoteStream,
+          },
+        ];
+      });
+    };
+
+    // If we are the initiator (e.g. peer joined after us), create and send an SDP offer
+    if (isInitiator) {
+      pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+        .then((offer) => pc.setLocalDescription(offer))
+        .then(() => {
+          if (roomWsRef.current && pc.localDescription) {
+            roomWsRef.current.send({
+              type: "offer",
+              fromPeerId: myPeerId,
+              toPeerId: remotePeerId,
+              sdp: pc.localDescription,
+            });
+          }
+        })
+        .catch((err) => console.warn("[WebRTC] Create offer error:", err));
+    }
+
+    return pc;
+  }, [myPeerId]);
+
   // 1. Proactively check media permissions and establish SovereignMesh session
   useEffect(() => {
     let active = true;
@@ -275,10 +364,12 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     // Check media permissions on mount
     void requestMediaPermissions(false);
 
+    const roomHandle = room.roomHandle || initialRoomHandle || "boardroom";
+
     // Establish real SovereignMesh connection details, Cloudflare Calls session, and WebSocket signal
     async function initSession() {
       try {
-        const details = await SovereignSignalingClient.fetchConnectionDetails(initialRoomHandle || "boardroom", userName);
+        const details = await SovereignSignalingClient.fetchConnectionDetails(roomHandle, activeDisplayName);
         const callsSession = await SovereignSignalingClient.createCallsSession();
         if (active && (details.sessionId || callsSession.sessionId)) {
           setCfSessionId(details.sessionId || callsSession.sessionId);
@@ -286,10 +377,135 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
 
         // Connect live WebSocket broadcast channel for instant room updates
         roomWsRef.current = SovereignSignalingClient.connectRoomWebSocket(
-          initialRoomHandle || "boardroom",
-          (signal) => {
+          roomHandle,
+          async (signal) => {
+            if (!active) return;
+
+            // Connected: announce our presence and query current room peers
             if (signal.type === "connected") {
               console.log("[SovereignMesh] Live Room Broadcast Connected:", signal.roomKey);
+              if (roomWsRef.current) {
+                roomWsRef.current.send({
+                  type: "join",
+                  peerId: myPeerId,
+                  peerName: activeDisplayName,
+                });
+              }
+
+              // If existing peers are in the room, add them to participants and initiate WebRTC offer
+              if (Array.isArray(signal.peers)) {
+                signal.peers.forEach((peer: { peerId: string; peerName: string }) => {
+                  if (peer.peerId !== myPeerId) {
+                    setParticipants((prev) => {
+                      if (prev.some((p) => p.id === peer.peerId)) return prev;
+                      return [
+                        ...prev,
+                        {
+                          id: peer.peerId,
+                          name: peer.peerName,
+                          handle: "guest@postveil.me",
+                          isHost: false,
+                          isSelf: false,
+                          isMuted: false,
+                          isVideoOff: false,
+                          isScreenSharing: false,
+                          isSpeaking: false,
+                          audioLevel: 0,
+                          connectionQuality: "excellent",
+                        },
+                      ];
+                    });
+                    // Initiate WebRTC connection
+                    createPeerConnection(peer.peerId, peer.peerName, true);
+                  }
+                });
+              }
+            }
+
+            // A new peer joined the room
+            if (signal.type === "peer_joined" && signal.peerId !== myPeerId) {
+              const remoteId = String(signal.peerId);
+              const remoteName = String(signal.peerName || "Attendee");
+              setParticipants((prev) => {
+                if (prev.some((p) => p.id === remoteId)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: remoteId,
+                    name: remoteName,
+                    handle: "guest@postveil.me",
+                    isHost: false,
+                    isSelf: false,
+                    isMuted: false,
+                    isVideoOff: false,
+                    isScreenSharing: false,
+                    isSpeaking: false,
+                    audioLevel: 0,
+                    connectionQuality: "excellent",
+                  },
+                ];
+              });
+              // Existing client initiates connection to the new peer
+              createPeerConnection(remoteId, remoteName, true);
+            }
+
+            // A peer left the room
+            if (signal.type === "peer_left") {
+              const remoteId = String(signal.peerId);
+              const pc = peerConnectionsRef.current.get(remoteId);
+              if (pc) {
+                pc.close();
+                peerConnectionsRef.current.delete(remoteId);
+              }
+              peerStreamsRef.current.delete(remoteId);
+              setParticipants((prev) => prev.filter((p) => p.id !== remoteId));
+            }
+
+            // Received WebRTC Offer
+            if (signal.type === "offer" && signal.toPeerId === myPeerId) {
+              const remoteId = String(signal.fromPeerId);
+              const pc = createPeerConnection(remoteId, "Attendee", false);
+              try {
+                await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                if (roomWsRef.current && pc.localDescription) {
+                  roomWsRef.current.send({
+                    type: "answer",
+                    fromPeerId: myPeerId,
+                    toPeerId: remoteId,
+                    sdp: pc.localDescription,
+                  });
+                }
+              } catch (offerErr) {
+                console.warn("[WebRTC] Handling offer error:", offerErr);
+              }
+            }
+
+            // Received WebRTC Answer
+            if (signal.type === "answer" && signal.toPeerId === myPeerId) {
+              const remoteId = String(signal.fromPeerId);
+              const pc = peerConnectionsRef.current.get(remoteId);
+              if (pc && pc.signalingState !== "closed") {
+                try {
+                  await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+                } catch (ansErr) {
+                  console.warn("[WebRTC] Setting answer error:", ansErr);
+                }
+              }
+            }
+
+            // Received ICE Candidate
+            if (signal.type === "candidate" && signal.toPeerId === myPeerId && signal.candidate) {
+              const remoteId = String(signal.fromPeerId);
+              const pc = peerConnectionsRef.current.get(remoteId);
+              if (pc && pc.remoteDescription) {
+                try {
+                  await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                } catch (iceErr) {
+                  console.warn("[WebRTC] Add ICE candidate error:", iceErr);
+                }
+              }
             }
           }
         );
@@ -298,7 +514,9 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
       }
     }
 
-    void initSession();
+    if (appMode === "inCall" && (!isGuestUser || guestJoined)) {
+      void initSession();
+    }
 
     return () => {
       active = false;
@@ -306,6 +524,9 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         roomWsRef.current.close();
         roomWsRef.current = null;
       }
+      peerConnectionsRef.current.forEach((pc) => pc.close());
+      peerConnectionsRef.current.clear();
+      peerStreamsRef.current.clear();
       if (noiseSuppressorRef.current) {
         noiseSuppressorRef.current.cleanup();
         noiseSuppressorRef.current = null;
@@ -317,7 +538,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
         localStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [requestMediaPermissions, userName, initialRoomHandle]);
+  }, [requestMediaPermissions, activeDisplayName, room.roomHandle, appMode, isGuestUser, guestJoined, myPeerId, createPeerConnection]);
 
   // Switch mic hardware on the fly via Sovereign Device Manager
   const handleSwitchMic = async (deviceId: string) => {
@@ -768,7 +989,19 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
                         className="pv-meet-video-element mirror"
                       />
                     ) : (
-                      <div className="pv-meet-video-canvas" />
+                      <video
+                        ref={(node) => {
+                          if (node && p.stream) {
+                            if (node.srcObject !== p.stream) {
+                              node.srcObject = p.stream;
+                              void node.play().catch(() => {});
+                            }
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        className="pv-meet-video-element"
+                      />
                     )
                   ) : null}
 
