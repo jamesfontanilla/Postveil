@@ -6022,8 +6022,8 @@ export default {
           return protectedHeaders(directAsset, noStoreAsset);
         }
       }
-      // SPA Fallback: Any room slug or path on meet.* serves the /index.html bundle
-      const assetRequest = new Request(new URL("/index.html", request.url), request);
+      // SPA Fallback: Any room slug or path on meet.* serves the HTML bundle directly from root (200 OK, zero redirect)
+      const assetRequest = new Request(new URL("/", request.url), request);
       const meetAsset = await env.ASSETS.fetch(assetRequest);
       return protectedHeaders(meetAsset);
     }
