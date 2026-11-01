@@ -177,18 +177,42 @@ export const PMeetHome: React.FC<PMeetHomeProps> = ({
     };
   }, [selectedMicId, selectedCamId]);
 
-  // Toggle Pre-flight Camera
-  const toggleGreenroomVideo = useCallback(() => {
-    if (previewStreamRef.current) {
-      const vTrack = previewStreamRef.current.getVideoTracks()[0];
-      if (vTrack) {
-        vTrack.enabled = !vTrack.enabled;
-        setGreenroomVideoOff(!vTrack.enabled);
+  // Toggle Pre-flight Camera (Fully stops hardware track so laptop LED physically turns off)
+  const toggleGreenroomVideo = useCallback(async () => {
+    if (greenroomVideoOff) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: selectedCamId ? { deviceId: { exact: selectedCamId } } : { width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+        const newTrack = stream.getVideoTracks()[0];
+        if (newTrack) {
+          if (previewStreamRef.current) {
+            previewStreamRef.current.addTrack(newTrack);
+          } else {
+            previewStreamRef.current = stream;
+          }
+          if (previewVideoRef.current) {
+            previewVideoRef.current.srcObject = previewStreamRef.current;
+            void previewVideoRef.current.play().catch(() => {});
+          }
+        }
+        setGreenroomVideoOff(false);
+      } catch (err) {
+        console.warn("[P-Meet Greenroom] Failed to re-open camera:", err);
       }
     } else {
-      setGreenroomVideoOff((prev) => !prev);
+      setGreenroomVideoOff(true);
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getVideoTracks().forEach((track) => {
+          track.stop();
+          previewStreamRef.current?.removeTrack(track);
+        });
+      }
+      if (previewVideoRef.current) {
+        previewVideoRef.current.srcObject = null;
+      }
     }
-  }, []);
+  }, [greenroomVideoOff, selectedCamId]);
 
   // Toggle Pre-flight Microphone
   const toggleGreenroomMic = useCallback(() => {

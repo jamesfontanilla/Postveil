@@ -360,23 +360,42 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     }
   };
 
-  // 3. Hardware Video Toggle (Video track)
+  // 3. Hardware Video Toggle (Fully stops hardware track so laptop LED physically turns off)
   const toggleVideo = async () => {
     if (isVideoOff) {
-      if (!localStreamRef.current || localStreamRef.current.getVideoTracks().length === 0) {
-        await requestMediaPermissions(true);
-        return;
+      try {
+        const devMgr = SovereignDeviceManager.getInstance();
+        const res = await devMgr.acquireMediaStream({
+          videoDeviceId: selectedCamId || undefined,
+          videoEnabled: true,
+          audioEnabled: false,
+        });
+        const newVideoTrack = res.stream.getVideoTracks()[0];
+        if (newVideoTrack) {
+          if (localStreamRef.current) {
+            localStreamRef.current.addTrack(newVideoTrack);
+          } else {
+            localStreamRef.current = res.stream;
+          }
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = localStreamRef.current;
+            void localVideoRef.current.play().catch(() => {});
+          }
+        }
+        setIsVideoOff(false);
+      } catch (err) {
+        console.warn("[P-Meet] Failed to re-acquire camera hardware:", err);
       }
-      setIsVideoOff(false);
-      localStreamRef.current.getVideoTracks().forEach((track) => {
-        track.enabled = true;
-      });
     } else {
       setIsVideoOff(true);
       if (localStreamRef.current) {
         localStreamRef.current.getVideoTracks().forEach((track) => {
-          track.enabled = false;
+          track.stop();
+          localStreamRef.current?.removeTrack(track);
         });
+      }
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = null;
       }
     }
   };
