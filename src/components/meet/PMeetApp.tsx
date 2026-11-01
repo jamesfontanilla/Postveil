@@ -30,6 +30,7 @@ import { SovereignDeviceManager } from "./engine/sovereignDeviceManager";
 import { createSovereignAudioMeter } from "./engine/sovereignAudioMeter";
 import { SovereignSignalingClient } from "./engine/sovereignSignaling";
 import { SovereignNoiseSuppressor } from "./engine/sovereignNoiseSuppressor";
+import { PMeetHome } from "./PMeetHome";
 import "./MeetStyles.css";
 
 interface PMeetAppProps {
@@ -46,18 +47,34 @@ interface PMeetAppProps {
  * Built on Postveil SovereignMesh Realtime SFU (Zero Local-First Cache, Purely Ephemeral In-Memory State)
  */
 export const PMeetApp: React.FC<PMeetAppProps> = ({
-  initialRoomHandle = "jaime/boardroom",
+  initialRoomHandle,
   userEmail = "jaime@postveil.me",
   userName = "Jaime",
   onBackToMail,
   onSwitchToAccounts,
   onSignOut,
 }) => {
+  // Determine if URL or prop specified a specific room, or if user is on the lobby / homepage
+  const getInitialSlug = (): string => {
+    if (initialRoomHandle && initialRoomHandle !== "/") return initialRoomHandle;
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname.replace(/^\/+/, "").trim();
+      if (path && path.length > 0) return path;
+    }
+    return "";
+  };
+
+  const initialSlug = getInitialSlug();
+  const [appMode, setAppMode] = useState<"home" | "inCall">(initialSlug ? "inCall" : "home");
+
+  // Derive user's sovereign handle from email or fallback
+  const userHandle = userEmail ? userEmail.split("@")[0] : "jaime";
+
   // Room State (Purely Online & Ephemeral)
   const [room, setRoom] = useState<MeetingRoomState>({
     roomId: "pv-meet-sec-9812",
     roomTitle: "Sovereign Executive Boardroom",
-    roomHandle: initialRoomHandle,
+    roomHandle: initialSlug || `${userHandle}/boardroom`,
     isLocked: true,
     isRecording: false,
     recordingDurationSeconds: 0,
@@ -495,6 +512,53 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
     setChatInput("");
   };
 
+  const handleJoinRoom = useCallback((slug: string) => {
+    setRoom((prev) => ({
+      ...prev,
+      roomHandle: slug,
+      roomTitle: slug.includes("boardroom") ? "Sovereign Executive Boardroom" : `Sovereign Call (${slug})`,
+    }));
+    setAppMode("inCall");
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", `/${slug}`);
+    }
+  }, []);
+
+  const handleLeaveCall = useCallback(() => {
+    // Teardown active call tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+    }
+    if (audioMeterRef.current) {
+      audioMeterRef.current.cleanup();
+      audioMeterRef.current = null;
+    }
+    if (roomWsRef.current) {
+      roomWsRef.current.close();
+      roomWsRef.current = null;
+    }
+
+    setAppMode("home");
+    if (typeof window !== "undefined") {
+      window.history.pushState(null, "", "/");
+    }
+  }, []);
+
+  if (appMode === "home") {
+    return (
+      <PMeetHome
+        userEmail={userEmail}
+        userName={userName}
+        userHandle={userHandle}
+        onJoinRoom={handleJoinRoom}
+        onBackToMail={onBackToMail}
+        onSwitchToAccounts={onSwitchToAccounts}
+        onSignOut={onSignOut}
+      />
+    );
+  }
+
   return (
     <div className="pv-meet-shell" data-testid="pmeet-app">
       {/* 1. Universal Parent Suite Ribbon */}
@@ -737,7 +801,7 @@ export const PMeetApp: React.FC<PMeetAppProps> = ({
             <button
               type="button"
               className="pv-meet-ctrl-btn leave-btn"
-              onClick={() => onBackToMail?.()}
+              onClick={handleLeaveCall}
               title="Leave sovereign call"
               aria-label="Leave call"
             >
