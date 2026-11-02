@@ -1,4 +1,5 @@
 @import url("https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400..600&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import url("/fonts/kerneon/kerneon-type.css");
 
 /* Subtle Outlook custom scrollbar */
 ::-webkit-scrollbar {
@@ -17,10 +18,11 @@
 }
 
 :root {
-  --font-ui: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-display: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --font-ui: "Kerneon Grotesk", "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-display: "Kerneon Grotesk", "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "Kerneon Mono", "IBM Plex Mono", "SF Mono", Menlo, Monaco, Consolas, monospace;
   font-family: var(--font-ui);
+  font-feature-settings: "cv05" 1, "cv08" 1, "ss01" 1, "zero" 1;
   color: #242424;
   background: #f0f2f5;
   font-synthesis: none;

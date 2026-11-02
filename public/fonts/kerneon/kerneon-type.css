@@ -1,0 +1,38 @@
+/* ==========================================================================
+   KERNEON PROPRIETARY TYPE SYSTEM
+   Copyright (c) 2026 Kerneon Systems. All rights reserved.
+   ========================================================================== */
+
+@font-face {
+  font-family: 'Kerneon Grotesk';
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/kerneon/KerneonGrotesk-Variable.woff2') format('woff2-variations'),
+       url('/fonts/kerneon/KerneonGrotesk-Variable.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Kerneon Mono';
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/kerneon/KerneonMono-Variable.woff2') format('woff2-variations'),
+       url('/fonts/kerneon/KerneonMono-Variable.ttf') format('truetype');
+}
+
+:root {
+  --font-kerneon-sans: 'Kerneon Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-kerneon-mono: 'Kerneon Mono', 'SF Mono', 'Cascadia Code', Consolas, monospace;
+}
+
+/* Kerneon Utilities */
+.font-kerneon-sans {
+  font-family: var(--font-kerneon-sans);
+  font-feature-settings: "cv05" 1, "cv08" 1, "ss01" 1, "zero" 1;
+}
+
+.font-kerneon-mono {
+  font-family: var(--font-kerneon-mono);
+  font-feature-settings: "zero" 1, "calt" 1;
+}

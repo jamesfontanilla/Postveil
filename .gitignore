@@ -14,4 +14,7 @@ dist
 .lambda-build/
 .agents/
 .kiro/
+public/fonts/kerneon/*.ttf
+public/fonts/kerneon/*.woff2
+scripts/generate_kerneon_*.py
 
