@@ -134,6 +134,27 @@ export class UpdateSpansStep extends SovereignStep {
 }
 
 /**
+ * Update Document Metadata Step (title, margins, paper size, columns, etc.)
+ */
+export class UpdateDocMetadataStep extends SovereignStep {
+  constructor(public readonly patch: Partial<import("../types").DocumentMetadata>) {
+    super();
+  }
+
+  apply(doc: SovereignDocTree): StepResult {
+    return { doc: doc.withMetadata(this.patch) };
+  }
+
+  invert(prevDoc: SovereignDocTree): SovereignStep {
+    const inversePatch: Partial<import("../types").DocumentMetadata> = {};
+    for (const key of Object.keys(this.patch) as Array<keyof import("../types").DocumentMetadata>) {
+      (inversePatch as any)[key] = (prevDoc.metadata as any)[key];
+    }
+    return new UpdateDocMetadataStep(inversePatch);
+  }
+}
+
+/**
  * Sovereign Transaction: Groups steps into an atomic document transition
  */
 export class SovereignTransaction {
@@ -189,6 +210,13 @@ export class SovereignTransaction {
    */
   public deleteNode(nodeId: string): this {
     return this.step(new DeleteNodeStep(nodeId));
+  }
+
+  /**
+   * Updates document metadata in an invertible step
+   */
+  public updateDocMetadata(patch: Partial<import("../types").DocumentMetadata>): this {
+    return this.step(new UpdateDocMetadataStep(patch));
   }
 
   /**

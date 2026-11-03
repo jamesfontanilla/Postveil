@@ -24,21 +24,17 @@ export interface DocOutlineItem {
 export class DocumentEngine {
   private doc: UniversalDoc;
   private state: SovereignEditorState;
-  private history: UniversalDoc[] = [];
-  private historyIndex = -1;
-  private maxHistory = 50;
 
   constructor(initialDoc: UniversalDoc) {
     this.doc = JSON.parse(JSON.stringify(initialDoc));
     this.state = SovereignEditorState.fromUniversalDoc(this.doc);
     this.recalculateStats();
-    this.pushHistory();
   }
 
   public getDocument(): UniversalDoc {
     return {
       ...this.doc,
-      metadata: { ...this.doc.metadata },
+      metadata: { ...this.doc.metadata, ...this.state.doc.metadata },
       blocks: [...this.doc.blocks],
     };
   }
@@ -50,21 +46,23 @@ export class DocumentEngine {
   public dispatch(tr: SovereignTransaction) {
     this.state = this.state.apply(tr);
     this.doc.blocks = this.state.toDocBlocks();
+    this.doc.metadata = {
+      ...this.doc.metadata,
+      ...this.state.doc.metadata,
+    };
     this.recalculateStats();
     this.doc.metadata.updatedAt = new Date().toISOString();
-    this.pushHistory();
   }
 
   public setDocument(newDoc: UniversalDoc) {
     this.doc = JSON.parse(JSON.stringify(newDoc));
     this.state = SovereignEditorState.fromUniversalDoc(this.doc);
     this.recalculateStats();
-    this.pushHistory();
   }
 
   public updateTitle(title: string) {
-    this.doc.metadata.title = title;
-    this.doc.metadata.updatedAt = new Date().toISOString();
+    const tr = this.state.tr().updateDocMetadata({ title });
+    this.dispatch(tr);
   }
 
   public updateBlockContent(id: string, content: string, html?: string) {
@@ -150,11 +148,12 @@ export class DocumentEngine {
   }
 
   public updateColumns(columns: 1 | 2 | 3, spacing = 0.5, divider = false) {
-    this.doc.metadata.columns = columns;
-    this.doc.metadata.columnSpacing = spacing;
-    this.doc.metadata.columnDivider = divider;
-    this.doc.metadata.updatedAt = new Date().toISOString();
-    this.pushHistory();
+    const tr = this.state.tr().updateDocMetadata({
+      columns,
+      columnSpacing: spacing,
+      columnDivider: divider,
+    });
+    this.dispatch(tr);
   }
 
   public updateImage(
@@ -183,18 +182,19 @@ export class DocumentEngine {
     margins?: import("../types").DocMargins,
     pageColor?: string
   ) {
-    this.doc.metadata.paperSize = paperSize;
-    this.doc.metadata.orientation = orientation;
-    if (margins) this.doc.metadata.margins = margins;
-    if (pageColor) this.doc.metadata.pageColor = pageColor;
-    this.doc.metadata.updatedAt = new Date().toISOString();
-    this.pushHistory();
+    const patch: Partial<import("../types").DocumentMetadata> = {
+      paperSize,
+      orientation,
+    };
+    if (margins) patch.margins = margins;
+    if (pageColor) patch.pageColor = pageColor;
+    const tr = this.state.tr().updateDocMetadata(patch);
+    this.dispatch(tr);
   }
 
   public updateFontFamily(fontFamily: string) {
-    this.doc.metadata.fontFamily = fontFamily;
-    this.doc.metadata.updatedAt = new Date().toISOString();
-    this.pushHistory();
+    const tr = this.state.tr().updateDocMetadata({ fontFamily });
+    this.dispatch(tr);
   }
 
   public changeBlockType(id: string, newType: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) {
@@ -228,11 +228,11 @@ export class DocumentEngine {
   }
 
   public canUndo(): boolean {
-    return this.state.canUndo() || this.historyIndex > 0;
+    return this.state.canUndo();
   }
 
   public canRedo(): boolean {
-    return this.state.canRedo() || this.historyIndex < this.history.length - 1;
+    return this.state.canRedo();
   }
 
   public undo(): UniversalDoc | null {
@@ -240,13 +240,11 @@ export class DocumentEngine {
     if (undoneState) {
       this.state = undoneState;
       this.doc.blocks = this.state.toDocBlocks();
+      this.doc.metadata = {
+        ...this.doc.metadata,
+        ...this.state.doc.metadata,
+      };
       this.recalculateStats();
-      return this.doc;
-    }
-    if (this.historyIndex > 0) {
-      this.historyIndex--;
-      this.doc = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
-      this.state = SovereignEditorState.fromUniversalDoc(this.doc);
       return this.doc;
     }
     return null;
@@ -257,28 +255,14 @@ export class DocumentEngine {
     if (redoneState) {
       this.state = redoneState;
       this.doc.blocks = this.state.toDocBlocks();
+      this.doc.metadata = {
+        ...this.doc.metadata,
+        ...this.state.doc.metadata,
+      };
       this.recalculateStats();
       return this.doc;
     }
-    if (this.historyIndex < this.history.length - 1) {
-      this.historyIndex++;
-      this.doc = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
-      this.state = SovereignEditorState.fromUniversalDoc(this.doc);
-      return this.doc;
-    }
     return null;
-  }
-
-  private pushHistory() {
-    if (this.historyIndex < this.history.length - 1) {
-      this.history = this.history.slice(0, this.historyIndex + 1);
-    }
-    this.history.push(JSON.parse(JSON.stringify(this.doc)));
-    if (this.history.length > this.maxHistory) {
-      this.history.shift();
-    } else {
-      this.historyIndex++;
-    }
   }
 
   private recalculateStats() {
@@ -305,38 +289,36 @@ export class DocumentEngine {
   }
 
   public addFootnote(blockId: string, text: string = "Footnote citation or reference text"): import("../types").FootnoteItem {
-    if (!this.doc.metadata.footnotes) {
-      this.doc.metadata.footnotes = [];
-    }
-    const nextNumber = this.doc.metadata.footnotes.length + 1;
+    const footnotes = [...(this.doc.metadata.footnotes || [])];
+    const nextNumber = footnotes.length + 1;
     const footnote: import("../types").FootnoteItem = {
       id: `fn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       number: nextNumber,
       text,
       blockId,
     };
-    this.doc.metadata.footnotes.push(footnote);
-    this.pushHistory();
+    footnotes.push(footnote);
+    const tr = this.state.tr().updateDocMetadata({ footnotes });
+    this.dispatch(tr);
     return footnote;
   }
 
   public updateFootnote(id: string, text: string) {
     if (!this.doc.metadata.footnotes) return;
-    const fn = this.doc.metadata.footnotes.find((f) => f.id === id);
-    if (fn) {
-      fn.text = text;
-      this.pushHistory();
-    }
+    const footnotes = this.doc.metadata.footnotes.map((f) =>
+      f.id === id ? { ...f, text } : f
+    );
+    const tr = this.state.tr().updateDocMetadata({ footnotes });
+    this.dispatch(tr);
   }
 
   public deleteFootnote(id: string) {
     if (!this.doc.metadata.footnotes) return;
-    this.doc.metadata.footnotes = this.doc.metadata.footnotes.filter((f) => f.id !== id);
-    // Renumber remaining footnotes
-    this.doc.metadata.footnotes.forEach((f, idx) => {
-      f.number = idx + 1;
-    });
-    this.pushHistory();
+    const footnotes = this.doc.metadata.footnotes
+      .filter((f) => f.id !== id)
+      .map((f, idx) => ({ ...f, number: idx + 1 }));
+    const tr = this.state.tr().updateDocMetadata({ footnotes });
+    this.dispatch(tr);
   }
 
   public updateHeaderFooter(
@@ -345,11 +327,13 @@ export class DocumentEngine {
     differentFirstPage?: boolean,
     pageNumberStyle?: "standard" | "pageOfTotal" | "none"
   ) {
-    if (headerText !== undefined) this.doc.metadata.headerText = headerText;
-    if (footerText !== undefined) this.doc.metadata.footerText = footerText;
-    if (differentFirstPage !== undefined) this.doc.metadata.differentFirstPage = differentFirstPage;
-    if (pageNumberStyle !== undefined) this.doc.metadata.pageNumberStyle = pageNumberStyle;
-    this.pushHistory();
+    const patch: Partial<import("../types").DocumentMetadata> = {};
+    if (headerText !== undefined) patch.headerText = headerText;
+    if (footerText !== undefined) patch.footerText = footerText;
+    if (differentFirstPage !== undefined) patch.differentFirstPage = differentFirstPage;
+    if (pageNumberStyle !== undefined) patch.pageNumberStyle = pageNumberStyle;
+    const tr = this.state.tr().updateDocMetadata(patch);
+    this.dispatch(tr);
   }
 
   public addComment(
@@ -359,7 +343,7 @@ export class DocumentEngine {
     authorEmail?: string,
     quotedText?: string
   ): DocComment {
-    if (!this.doc.metadata.comments) this.doc.metadata.comments = [];
+    const comments = [...(this.doc.metadata.comments || [])];
     const comment: DocComment = {
       id: `c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       blockId,
@@ -371,39 +355,46 @@ export class DocumentEngine {
       resolved: false,
       replies: [],
     };
-    this.doc.metadata.comments.push(comment);
-    this.pushHistory();
+    comments.push(comment);
+    const tr = this.state.tr().updateDocMetadata({ comments });
+    this.dispatch(tr);
     return comment;
   }
 
   public addCommentReply(commentId: string, text: string, author: string, authorEmail?: string) {
     if (!this.doc.metadata.comments) return;
-    const c = this.doc.metadata.comments.find((item) => item.id === commentId);
-    if (c) {
-      c.replies.push({
-        id: `r_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        author,
-        authorEmail,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" }),
-        text,
-      });
-      this.pushHistory();
-    }
+    const comments = this.doc.metadata.comments.map((c) => {
+      if (c.id !== commentId) return c;
+      const replies = [
+        ...(c.replies || []),
+        {
+          id: `r_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          author,
+          authorEmail,
+          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" }),
+          text,
+        },
+      ];
+      return { ...c, replies };
+    });
+    const tr = this.state.tr().updateDocMetadata({ comments });
+    this.dispatch(tr);
   }
 
   public resolveComment(commentId: string) {
     if (!this.doc.metadata.comments) return;
-    const c = this.doc.metadata.comments.find((item) => item.id === commentId);
-    if (c) {
-      c.resolved = !c.resolved;
-      this.pushHistory();
-    }
+    const comments = this.doc.metadata.comments.map((c) =>
+      c.id === commentId ? { ...c, resolved: !c.resolved } : c
+    );
+    const tr = this.state.tr().updateDocMetadata({ comments });
+    this.dispatch(tr);
   }
 
   public deleteComment(commentId: string) {
     if (!this.doc.metadata.comments) return;
-    this.doc.metadata.comments = this.doc.metadata.comments.filter((item) => item.id !== commentId);
-    this.pushHistory();
+    const comments = this.doc.metadata.comments.filter((item) => item.id !== commentId);
+    const tr = this.state.tr().updateDocMetadata({ comments });
+    this.dispatch(tr);
   }
 
   public addSuggestion(
@@ -414,7 +405,7 @@ export class DocumentEngine {
     author: string = "Reviewer",
     authorEmail?: string
   ): DocSuggestion {
-    if (!this.doc.metadata.suggestions) this.doc.metadata.suggestions = [];
+    const suggestions = [...(this.doc.metadata.suggestions || [])];
     const suggestion: DocSuggestion = {
       id: `s_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       blockId,
@@ -426,8 +417,9 @@ export class DocumentEngine {
       suggestedText,
       status: "pending",
     };
-    this.doc.metadata.suggestions.push(suggestion);
-    this.pushHistory();
+    suggestions.push(suggestion);
+    const tr = this.state.tr().updateDocMetadata({ suggestions });
+    this.dispatch(tr);
     return suggestion;
   }
 
@@ -436,36 +428,43 @@ export class DocumentEngine {
     const s = this.doc.metadata.suggestions.find((item) => item.id === suggestionId);
     if (!s) return;
 
+    const tr = this.state.tr();
     const block = this.doc.blocks.find((b) => b.id === s.blockId);
     if (block) {
+      let nextContent = block.content || "";
       if (s.type === "insert") {
-        block.content = block.content ? `${block.content} ${s.suggestedText}` : s.suggestedText;
+        nextContent = nextContent ? `${nextContent} ${s.suggestedText}` : s.suggestedText;
       } else if (s.type === "delete" && s.originalText) {
-        block.content = (block.content || "").replace(s.originalText, "");
+        nextContent = nextContent.replace(s.originalText, "");
       } else if (s.type === "replace") {
-        if (s.originalText && (block.content || "").includes(s.originalText)) {
-          block.content = (block.content || "").replace(s.originalText, s.suggestedText);
+        if (s.originalText && nextContent.includes(s.originalText)) {
+          nextContent = nextContent.replace(s.originalText, s.suggestedText);
         } else {
-          block.content = s.suggestedText;
+          nextContent = s.suggestedText;
         }
       }
+      tr.updateContent(block.id, nextContent);
     }
-    s.status = "accepted";
-    this.pushHistory();
+
+    const suggestions = this.doc.metadata.suggestions.map((item) =>
+      item.id === suggestionId ? { ...item, status: "accepted" as const } : item
+    );
+    tr.updateDocMetadata({ suggestions });
+    this.dispatch(tr);
   }
 
   public rejectSuggestion(suggestionId: string) {
     if (!this.doc.metadata.suggestions) return;
-    const s = this.doc.metadata.suggestions.find((item) => item.id === suggestionId);
-    if (s) {
-      s.status = "rejected";
-      this.pushHistory();
-    }
+    const suggestions = this.doc.metadata.suggestions.map((item) =>
+      item.id === suggestionId ? { ...item, status: "rejected" as const } : item
+    );
+    const tr = this.state.tr().updateDocMetadata({ suggestions });
+    this.dispatch(tr);
   }
 
   public addSignature(sig: SignatureMetadata) {
-    if (!this.doc.metadata.signatures) this.doc.metadata.signatures = [];
-    this.doc.metadata.signatures.push(sig);
-    this.pushHistory();
+    const signatures = [...(this.doc.metadata.signatures || []), sig];
+    const tr = this.state.tr().updateDocMetadata({ signatures });
+    this.dispatch(tr);
   }
 }

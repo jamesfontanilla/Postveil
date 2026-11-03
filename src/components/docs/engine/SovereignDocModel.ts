@@ -218,19 +218,32 @@ export class SovereignNode {
 export class SovereignDocTree {
   readonly nodes: readonly SovereignNode[];
   readonly schema: SovereignSchema;
+  readonly metadata: Partial<UniversalDoc["metadata"]>;
 
-  constructor(nodes: SovereignNode[], schema = new SovereignSchema()) {
+  constructor(
+    nodes: SovereignNode[],
+    schema = new SovereignSchema(),
+    metadata: Partial<UniversalDoc["metadata"]> = {}
+  ) {
     this.nodes = Object.freeze([...nodes]);
     this.schema = schema;
+    this.metadata = Object.freeze({ ...metadata });
   }
 
   public static fromUniversalDoc(doc: UniversalDoc, schema = new SovereignSchema()): SovereignDocTree {
     const nodes = (doc.blocks || []).map((b) => new SovereignNode(b));
-    return new SovereignDocTree(nodes, schema);
+    return new SovereignDocTree(nodes, schema, doc.metadata);
   }
 
   public toDocBlocks(): DocBlock[] {
     return this.nodes.map((n) => n.toDocBlock());
+  }
+
+  public withMetadata(patch: Partial<UniversalDoc["metadata"]>): SovereignDocTree {
+    return new SovereignDocTree([...this.nodes], this.schema, {
+      ...this.metadata,
+      ...patch,
+    });
   }
 
   public findNode(id: string): SovereignNode | undefined {
@@ -254,7 +267,7 @@ export class SovereignDocTree {
     if (idx === -1) return this;
     const nextNodes = [...this.nodes];
     nextNodes[idx] = updated;
-    return new SovereignDocTree(nextNodes, this.schema);
+    return new SovereignDocTree(nextNodes, this.schema, this.metadata);
   }
 
   public insertAfter(afterId: string, node: SovereignNode): SovereignDocTree {
@@ -265,12 +278,12 @@ export class SovereignDocTree {
     } else {
       nextNodes.push(node);
     }
-    return new SovereignDocTree(nextNodes, this.schema);
+    return new SovereignDocTree(nextNodes, this.schema, this.metadata);
   }
 
   public deleteNode(id: string): SovereignDocTree {
     if (this.nodes.length <= 1) return this; // Preserve at least one node
     const nextNodes = this.nodes.filter((n) => n.id !== id);
-    return new SovereignDocTree(nextNodes, this.schema);
+    return new SovereignDocTree(nextNodes, this.schema, this.metadata);
   }
 }
