@@ -26,16 +26,18 @@ export class DocumentEngine {
   private state: SovereignEditorState;
 
   constructor(initialDoc: UniversalDoc) {
-    this.doc = JSON.parse(JSON.stringify(initialDoc));
+    this.doc = {
+      metadata: { ...initialDoc.metadata },
+      blocks: [...initialDoc.blocks],
+    };
     this.state = SovereignEditorState.fromUniversalDoc(this.doc);
     this.recalculateStats();
   }
 
   public getDocument(): UniversalDoc {
     return {
-      ...this.doc,
       metadata: { ...this.doc.metadata, ...this.state.doc.metadata },
-      blocks: [...this.doc.blocks],
+      blocks: this.state.toDocBlocks(),
     };
   }
 
@@ -55,7 +57,10 @@ export class DocumentEngine {
   }
 
   public setDocument(newDoc: UniversalDoc) {
-    this.doc = JSON.parse(JSON.stringify(newDoc));
+    this.doc = {
+      metadata: { ...newDoc.metadata },
+      blocks: [...newDoc.blocks],
+    };
     this.state = SovereignEditorState.fromUniversalDoc(this.doc);
     this.recalculateStats();
   }

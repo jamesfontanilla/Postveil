@@ -143,13 +143,13 @@ export class SovereignNode {
   readonly calloutVariant?: CalloutVariant;
   readonly calloutTitle?: string;
   readonly latex?: string;
-  readonly rows?: TableRow[];
+  readonly rows?: readonly TableRow[];
   readonly imageUrl?: string;
   readonly imageAlt?: string;
   readonly imageWidth?: string;
   readonly imageAlign?: "left" | "center" | "right";
   readonly tocStyle?: "dotted" | "links";
-  readonly spans: InlineSpan[];
+  readonly spans: readonly InlineSpan[];
   readonly html?: string;
 
   constructor(block: DocBlock) {
@@ -163,13 +163,15 @@ export class SovereignNode {
     this.calloutVariant = block.calloutVariant;
     this.calloutTitle = block.calloutTitle;
     this.latex = block.latex;
-    this.rows = block.rows ? JSON.parse(JSON.stringify(block.rows)) : undefined;
+    this.rows = block.rows ? Object.freeze([...block.rows]) : undefined;
     this.imageUrl = block.imageUrl;
     this.imageAlt = block.imageAlt;
     this.imageWidth = block.imageWidth;
     this.imageAlign = block.imageAlign;
     this.tocStyle = block.tocStyle;
-    this.spans = block.spans ? JSON.parse(JSON.stringify(block.spans)) : [{ text: this.content }];
+    this.spans = block.spans
+      ? Object.freeze([...block.spans])
+      : Object.freeze([{ text: this.content }]);
   }
 
   public toDocBlock(): DocBlock {
@@ -184,29 +186,56 @@ export class SovereignNode {
       calloutVariant: this.calloutVariant,
       calloutTitle: this.calloutTitle,
       latex: this.latex,
-      rows: this.rows ? JSON.parse(JSON.stringify(this.rows)) : undefined,
+      rows: this.rows ? [...this.rows] : undefined,
       imageUrl: this.imageUrl,
       imageAlt: this.imageAlt,
       imageWidth: this.imageWidth,
       imageAlign: this.imageAlign,
       tocStyle: this.tocStyle,
-      spans: this.spans ? JSON.parse(JSON.stringify(this.spans)) : undefined,
+      spans: this.spans ? [...this.spans] : undefined,
     };
   }
 
   public withAttrs(attrs: Partial<DocBlock>): SovereignNode {
     return new SovereignNode({
-      ...this.toDocBlock(),
-      ...attrs,
+      id: this.id,
+      type: attrs.type ?? this.type,
+      content: attrs.content ?? this.content,
+      html: attrs.html !== undefined ? attrs.html : this.html,
+      level: attrs.level !== undefined ? attrs.level : this.level,
+      checked: attrs.checked !== undefined ? attrs.checked : this.checked,
+      language: attrs.language !== undefined ? attrs.language : this.language,
+      calloutVariant: attrs.calloutVariant !== undefined ? attrs.calloutVariant : this.calloutVariant,
+      calloutTitle: attrs.calloutTitle !== undefined ? attrs.calloutTitle : this.calloutTitle,
+      latex: attrs.latex !== undefined ? attrs.latex : this.latex,
+      rows: attrs.rows !== undefined ? attrs.rows : (this.rows as TableRow[] | undefined),
+      imageUrl: attrs.imageUrl !== undefined ? attrs.imageUrl : this.imageUrl,
+      imageAlt: attrs.imageAlt !== undefined ? attrs.imageAlt : this.imageAlt,
+      imageWidth: attrs.imageWidth !== undefined ? attrs.imageWidth : this.imageWidth,
+      imageAlign: attrs.imageAlign !== undefined ? attrs.imageAlign : this.imageAlign,
+      tocStyle: attrs.tocStyle !== undefined ? attrs.tocStyle : this.tocStyle,
+      spans: attrs.spans !== undefined ? attrs.spans : (this.spans as InlineSpan[] | undefined),
     });
   }
 
   public withContent(newContent: string, newHtml?: string): SovereignNode {
     return new SovereignNode({
-      ...this.toDocBlock(),
+      id: this.id,
+      type: this.type,
       content: newContent,
       html: newHtml !== undefined ? newHtml : this.html,
+      level: this.level,
+      checked: this.checked,
+      language: this.language,
+      calloutVariant: this.calloutVariant,
+      calloutTitle: this.calloutTitle,
       latex: this.type === "mathBlock" ? newContent : this.latex,
+      rows: this.rows as TableRow[] | undefined,
+      imageUrl: this.imageUrl,
+      imageAlt: this.imageAlt,
+      imageWidth: this.imageWidth,
+      imageAlign: this.imageAlign,
+      tocStyle: this.tocStyle,
       spans: [{ text: newContent }],
     });
   }

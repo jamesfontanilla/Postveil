@@ -116,14 +116,14 @@ export class DeleteNodeStep extends SovereignStep {
  * Update Spans/Marks Step
  */
 export class UpdateSpansStep extends SovereignStep {
-  constructor(public readonly nodeId: string, public readonly newSpans: InlineSpan[]) {
+  constructor(public readonly nodeId: string, public readonly newSpans: readonly InlineSpan[]) {
     super();
   }
 
   apply(doc: SovereignDocTree): StepResult {
     const node = doc.findNode(this.nodeId);
     if (!node) return { doc, failed: `Node ${this.nodeId} not found` };
-    const updated = node.withAttrs({ spans: this.newSpans });
+    const updated = node.withAttrs({ spans: [...this.newSpans] });
     return { doc: doc.replaceNode(this.nodeId, updated) };
   }
 
