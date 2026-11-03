@@ -8,7 +8,11 @@ import {
   type SignatureMetadata,
 } from "../types";
 import { SovereignEditorState } from "./SovereignEditorState";
-import { SovereignTransaction } from "./SovereignDocTransform";
+import {
+  SovereignTransaction,
+  UpdateContentStep,
+  InsertNodeStep,
+} from "./SovereignDocTransform";
 import { SovereignNode } from "./SovereignDocModel";
 
 export interface DocOutlineItem {
@@ -115,11 +119,18 @@ export class DocumentEngine {
     };
 
     const node = new SovereignNode(newBlock);
-    const tr = this.state.tr()
-      .updateContent(currentId, currentContent, currentHtml)
-      .insertNode(currentId, node);
+    const tr = this.state.tr();
+    tr.setMeta("splitOrigin", currentId);
+    tr.setMeta("splitTarget", newBlock.id);
 
-    this.dispatch(tr);
+    const ok = tr.stepAtomic([
+      new UpdateContentStep(currentId, currentContent, currentHtml),
+      new InsertNodeStep(currentId, node),
+    ]);
+
+    if (ok) {
+      this.dispatch(tr);
+    }
     return newBlock;
   }
 

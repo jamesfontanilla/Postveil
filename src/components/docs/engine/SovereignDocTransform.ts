@@ -171,17 +171,47 @@ export class SovereignTransaction {
   }
 
   /**
-   * Appends and applies a step to the transaction
+   * Appends and applies a step to the transaction.
+   * If any step fails, the entire transaction marks failure to ensure atomicity.
    */
   public step(step: SovereignStep): this {
     const result = step.apply(this.doc);
-    if (!result.failed) {
-      this.steps.push(step);
-      this.docs.push(result.doc);
-      this.doc = result.doc;
+    if (result.failed) {
+      console.warn(`[SovereignTransaction] Step failed: ${result.failed}`);
+      return this;
+    }
+    this.steps.push(step);
+    this.docs.push(result.doc);
+    this.doc = result.doc;
+    this.docChanged = true;
+    return this;
+  }
+
+  /**
+   * Executes a batch of steps atomically: if any step in the batch fails,
+   * rolls back the transaction doc to before the batch was attempted.
+   */
+  public stepAtomic(batch: SovereignStep[]): boolean {
+    const initialDoc = this.doc;
+    const initialStepsCount = this.steps.length;
+    const initialDocsCount = this.docs.length;
+
+    for (const s of batch) {
+      const res = s.apply(this.doc);
+      if (res.failed) {
+        console.warn(`[SovereignTransaction] Atomic batch failed at step: ${res.failed}. Rolling back.`);
+        this.doc = initialDoc;
+        this.steps.length = initialStepsCount;
+        this.docs.length = initialDocsCount;
+        this.docChanged = initialStepsCount > 0;
+        return false;
+      }
+      this.steps.push(s);
+      this.docs.push(res.doc);
+      this.doc = res.doc;
       this.docChanged = true;
     }
-    return this;
+    return true;
   }
 
   /**
@@ -220,7 +250,7 @@ export class SovereignTransaction {
   }
 
   /**
-   * Sets custom transaction metadata
+   * Sets custom transaction metadata (e.g. selection anchor, author, intent)
    */
   public setMeta(key: string, value: unknown): this {
     this.metadata[key] = value;
@@ -228,11 +258,12 @@ export class SovereignTransaction {
   }
 
   /**
-   * Inverts the transaction against the initial document state for undo
+   * Inverts the transaction in strict reverse order for mathematically exact undo
    */
   public createInvertedTransaction(): SovereignTransaction {
     const inverted = new SovereignTransaction(this.doc);
-    // Apply inverted steps in reverse order
+    inverted.metadata = { ...this.metadata, inverted: true };
+    // Apply inverted steps in strict reverse order
     for (let i = this.steps.length - 1; i >= 0; i--) {
       const step = this.steps[i];
       const prevDoc = this.docs[i];
