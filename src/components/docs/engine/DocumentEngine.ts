@@ -12,6 +12,7 @@ import {
   SovereignTransaction,
   UpdateContentStep,
   InsertNodeStep,
+  DeleteNodeStep,
 } from "./SovereignDocTransform";
 import { SovereignNode } from "./SovereignDocModel";
 
@@ -109,6 +110,50 @@ export class DocumentEngine {
     if (this.doc.blocks.length <= 1) return; // Keep at least one block
     const tr = this.state.tr().deleteNode(id);
     this.dispatch(tr);
+  }
+
+  /**
+   * Merges a block into the preceding block (invoked on Backspace at caret offset 0)
+   * Returns the ID of the target merged block and the join offset where caret should rest.
+   */
+  public mergeWithPreviousBlock(currentId: string): { targetBlockId: string; joinOffset: number } | null {
+    const idx = this.doc.blocks.findIndex((b) => b.id === currentId);
+    if (idx <= 0) return null;
+
+    const prevBlock = this.doc.blocks[idx - 1];
+    const currentBlock = this.doc.blocks[idx];
+
+    // Only merge text-based blocks (paragraphs, headings, lists, blockquotes)
+    const textTypes: BlockType[] = ["paragraph", "heading", "bulletList", "orderedList", "taskList", "blockquote"];
+    if (!textTypes.includes(prevBlock.type) || !textTypes.includes(currentBlock.type)) {
+      // If either block is a non-text block (table, divider, etc.), just delete the current block if empty
+      if (!currentBlock.content || currentBlock.content.trim() === "") {
+        this.deleteBlock(currentId);
+        return { targetBlockId: prevBlock.id, joinOffset: (prevBlock.content || "").length };
+      }
+      return null;
+    }
+
+    const prevText = prevBlock.content || "";
+    const currentText = currentBlock.content || "";
+    const joinOffset = prevText.length;
+    const joinedText = prevText + currentText;
+
+    const tr = this.state.tr();
+    tr.setMeta("mergeOrigin", currentId);
+    tr.setMeta("mergeTarget", prevBlock.id);
+    tr.setMeta("joinOffset", joinOffset);
+
+    const ok = tr.stepAtomic([
+      new UpdateContentStep(prevBlock.id, joinedText),
+      new DeleteNodeStep(currentId),
+    ]);
+
+    if (ok) {
+      this.dispatch(tr);
+      return { targetBlockId: prevBlock.id, joinOffset };
+    }
+    return null;
   }
 
   public splitBlock(currentId: string, currentContent: string, newContent: string, newType: BlockType = "paragraph", currentHtml?: string): DocBlock {

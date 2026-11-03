@@ -68,6 +68,7 @@ interface DocsCanvasProps {
   reviewMode?: ReviewMode;
   onOpenNewCommentModal?: (blockId: string, quotedText?: string) => void;
   onChangeBlockType?: (blockId: string, type: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) => void;
+  onMergeWithPreviousBlock?: (blockId: string) => void;
 }
 
 // Paper dimensions in pixels at 96 DPI
@@ -208,6 +209,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   reviewMode = "editing",
   onOpenNewCommentModal,
   onChangeBlockType,
+  onMergeWithPreviousBlock,
 }) => {
   // Equation Editor state
   const [editingMathBlockId, setEditingMathBlockId] = useState<string | null>(null);
@@ -438,9 +440,20 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       }
     } else if (e.key === "Backspace") {
       const text = e.currentTarget.innerText || "";
+      const offset = getCaretCharacterOffsetWithin(e.currentTarget);
+      const sel = window.getSelection();
+      const isCollapsed = !sel || sel.isCollapsed;
+
       if (text.trim() === "" && doc.blocks.length > 1) {
         e.preventDefault();
         onDeleteBlock(block.id);
+      } else if (offset === 0 && isCollapsed && onMergeWithPreviousBlock) {
+        // Backspace at the beginning of a paragraph joins it into the preceding paragraph
+        const blockIdx = doc.blocks.findIndex((b) => b.id === block.id);
+        if (blockIdx > 0) {
+          e.preventDefault();
+          onMergeWithPreviousBlock(block.id);
+        }
       }
     }
   };

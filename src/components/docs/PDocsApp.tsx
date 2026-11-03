@@ -264,6 +264,57 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     setDoc({ ...engineRef.current.getDocument() });
   };
 
+  const handleMergeWithPreviousBlock = (id: string) => {
+    const res = engineRef.current.mergeWithPreviousBlock(id);
+    if (res) {
+      setDoc({ ...engineRef.current.getDocument() });
+      setActiveBlockId(res.targetBlockId);
+      setTimeout(() => {
+        const el = document.getElementById(res.targetBlockId);
+        if (el) {
+          el.focus();
+          // Restore caret at the exact join boundary
+          const sel = window.getSelection();
+          if (sel) {
+            try {
+              const range = document.createRange();
+              let charCount = 0;
+              let found = false;
+
+              const walk = (node: Node) => {
+                if (found) return;
+                if (node.nodeType === Node.TEXT_NODE) {
+                  const len = node.nodeValue?.length || 0;
+                  if (charCount + len >= res.joinOffset) {
+                    range.setStart(node, Math.min(len, res.joinOffset - charCount));
+                    range.collapse(true);
+                    found = true;
+                    return;
+                  }
+                  charCount += len;
+                } else {
+                  for (let i = 0; i < node.childNodes.length; i++) {
+                    walk(node.childNodes[i]);
+                  }
+                }
+              };
+
+              walk(el);
+              if (!found) {
+                range.selectNodeContents(el);
+                range.collapse(false);
+              }
+              sel.removeAllRanges();
+              sel.addRange(range);
+            } catch (err) {
+              console.warn("Could not set caret at join boundary:", err);
+            }
+          }
+        }
+      }, 30);
+    }
+  };
+
   const handleUndo = () => {
     const prev = engineRef.current.undo();
     if (prev) setDoc({ ...prev });
@@ -725,6 +776,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 reviewMode={reviewMode}
                 onOpenNewCommentModal={handleOpenNewCommentModal}
                 onChangeBlockType={handleChangeBlockType}
+                onMergeWithPreviousBlock={handleMergeWithPreviousBlock}
               />
             </div>
           </div>
@@ -753,6 +805,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             reviewMode={reviewMode}
             onOpenNewCommentModal={handleOpenNewCommentModal}
             onChangeBlockType={handleChangeBlockType}
+            onMergeWithPreviousBlock={handleMergeWithPreviousBlock}
           />
         )}
       </div>
