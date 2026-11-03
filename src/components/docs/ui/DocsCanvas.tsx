@@ -80,29 +80,70 @@ const PAPER_DIMENSIONS: Record<PaperSize, { portrait: { width: number; height: n
   Tabloid: { portrait: { width: 1056, height: 1632 }, landscape: { width: 1632, height: 1056 } },
 };
 
-function estimateBlockHeight(block: DocBlock): number {
+export interface HeightEstimateContext {
+  usableWidthPx?: number;
+  fontSizePt?: number;
+  lineSpacing?: "1.0" | "1.15" | "1.5" | "2.0";
+}
+
+function estimateBlockHeight(block: DocBlock, ctx?: HeightEstimateContext): number {
+  const lineSpacingMult =
+    ctx?.lineSpacing === "2.0"
+      ? 2.0
+      : ctx?.lineSpacing === "1.5"
+      ? 1.5
+      : ctx?.lineSpacing === "1.15"
+      ? 1.15
+      : 1.25;
+
+  const fontBasePx = ctx?.fontSizePt ? (ctx.fontSizePt * 96) / 72 : 15;
+  const linePx = Math.round(fontBasePx * lineSpacingMult);
+  const usableW = ctx?.usableWidthPx && ctx.usableWidthPx > 100 ? ctx.usableWidthPx : 600;
+  // Average proportional glyph width is roughly 0.52 * font size for standard sans/serif
+  const avgGlyphWidth = Math.max(7, fontBasePx * 0.52);
+  const charsPerLine = Math.max(25, Math.floor(usableW / avgGlyphWidth));
+
   switch (block.type) {
     case "heading": {
       const lvl = block.level || 1;
-      return lvl === 1 ? 105 : lvl === 2 ? 54 : 46;
+      const headingFontPx = lvl === 1 ? 30 : lvl === 2 ? 22 : 18;
+      const headingLinePx = Math.round(headingFontPx * 1.3);
+      const headingCharsPerLine = Math.max(18, Math.floor(usableW / (headingFontPx * 0.55)));
+      const textLen = (block.content || "").length;
+      const numLines = Math.max(1, Math.ceil(textLen / headingCharsPerLine));
+      const marginBonus = lvl === 1 ? 40 : lvl === 2 ? 24 : 16;
+      return marginBonus + numLines * headingLinePx;
     }
     case "paragraph": {
       const textLen = (block.content || "").length;
-      return Math.max(38, 20 + Math.ceil(textLen / 65) * 24);
+      if (textLen === 0) return Math.max(28, linePx + 8);
+      const numLines = Math.max(1, Math.ceil(textLen / charsPerLine));
+      return 12 + numLines * linePx;
     }
     case "taskList":
     case "bulletList":
-    case "orderedList":
-      return 36;
-    case "blockquote":
-      return 80;
-    case "callout":
-      return 125;
+    case "orderedList": {
+      const textLen = (block.content || "").length;
+      const listCharsPerLine = Math.max(20, charsPerLine - 6);
+      const numLines = Math.max(1, Math.ceil(textLen / listCharsPerLine));
+      return 8 + numLines * linePx;
+    }
+    case "blockquote": {
+      const textLen = (block.content || "").length;
+      const bqCharsPerLine = Math.max(20, charsPerLine - 8);
+      const numLines = Math.max(1, Math.ceil(textLen / bqCharsPerLine));
+      return 24 + numLines * linePx;
+    }
+    case "callout": {
+      const textLen = (block.content || "").length;
+      const numLines = Math.max(1, Math.ceil(textLen / (charsPerLine - 10)));
+      return 56 + numLines * linePx;
+    }
     case "mathBlock":
       return 145;
     case "codeBlock": {
       const lines = (block.content || "").split("\n").length;
-      return 66 + lines * 20;
+      return 48 + lines * 22;
     }
     case "table": {
       const rowCount = block.rows?.length || 2;
@@ -204,12 +245,19 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
     }
 
     const colCount = doc.metadata.columns || 1;
+    const usableWidthPx = dim.width - leftMarginPx - rightMarginPx;
     // Height budget: distance between top margin and bottom margin, with 16px safety buffer
     // Multiplied by column count for multi-column documents so columns flow naturally
     const usableHeight = (dim.height - topMarginPx - bottomMarginPx - 16) * colCount;
     const result: DocBlock[][] = [];
     let currentPage: DocBlock[] = [];
     let currentHeight = 0;
+
+    const estimateCtx: HeightEstimateContext = {
+      usableWidthPx,
+      fontSizePt: doc.metadata.fontSize || 11,
+      lineSpacing: doc.metadata.lineSpacing || "1.15",
+    };
 
     // Helper: calculate total height of a heading plus its following content block
     // to strictly prevent "widow/orphan headings" from being stranded at page bottom
@@ -218,7 +266,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       for (let j = startIndex; j < Math.min(doc.blocks.length, startIndex + 3); j++) {
         const b = doc.blocks[j];
         if (b.type === "pageBreak") break;
-        leadH += estimateBlockHeight(b);
+        leadH += estimateBlockHeight(b, estimateCtx);
         if (b.type !== "heading") break; // Included at least one content item
       }
       return leadH;
@@ -234,7 +282,9 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
         continue;
       }
 
-      const h = estimateBlockHeight(block);
+      // Check if rendered in DOM for 100% exact pixel height measurement
+      const el = typeof document !== "undefined" ? document.getElementById(block.id) : null;
+      const h = el && el.offsetHeight > 0 ? el.offsetHeight : estimateBlockHeight(block, estimateCtx);
 
       // Orphan Heading Prevention ("Keep with next"):
       // If this block is a heading, ensure it is NOT stranded alone at the bottom of the page
@@ -261,7 +311,19 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
     }
 
     return result;
-  }, [doc.blocks, dim.height, viewMode, topMarginPx, bottomMarginPx]);
+  }, [
+    doc.blocks,
+    dim.height,
+    dim.width,
+    viewMode,
+    topMarginPx,
+    bottomMarginPx,
+    leftMarginPx,
+    rightMarginPx,
+    doc.metadata.fontSize,
+    doc.metadata.lineSpacing,
+    doc.metadata.columns,
+  ]);
 
   const handleOpenMathEditor = (blockId: string, currentLatex: string) => {
     setEditingMathBlockId(blockId);
