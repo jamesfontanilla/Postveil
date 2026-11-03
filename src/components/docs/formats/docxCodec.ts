@@ -1,5 +1,6 @@
 import { type UniversalDoc, type ExportOptions } from "../types";
 import { type DocumentCodec } from "./UniversalFormatEngine";
+import { OmmlMathEngine } from "../engine/OmmlMathEngine";
 import JSZip from "jszip";
 
 export const docxCodec: DocumentCodec = {
@@ -28,27 +29,78 @@ export const docxCodec: DocumentCodec = {
         throw new Error("Invalid DOCX container: missing word/document.xml");
       }
 
-      // Parse paragraphs from XML
+      // Bounded clean-room DOM parser (skips unknown namespaces, parses tables and math)
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(docXml, "application/xml");
-      const pElements = xmlDoc.getElementsByTagName("w:p");
+      const bodyNode = xmlDoc.getElementsByTagName("w:body")[0];
       const blocks: any[] = [];
 
-      for (let i = 0; i < pElements.length; i++) {
-        const p = pElements[i];
-        const tElements = p.getElementsByTagName("w:t");
-        let text = "";
-        for (let j = 0; j < tElements.length; j++) {
-          text += tElements[j].textContent || "";
-        }
-        text = text.trim();
-        if (text) {
-          blocks.push({
-            id: `b_docx_${i}`,
-            type: i === 0 ? "heading" : "paragraph",
-            level: i === 0 ? 1 : undefined,
-            content: text,
-          });
+      if (bodyNode) {
+        const childNodes = bodyNode.childNodes;
+        for (let i = 0; i < childNodes.length && blocks.length < 5000; i++) {
+          const node = childNodes[i];
+          if (node.nodeName === "w:p") {
+            // Check for Office Math equation: m:oMath
+            const mathElements = (node as Element).getElementsByTagName("m:oMath");
+            if (mathElements.length > 0) {
+              const mathText = Array.from(mathElements[0].getElementsByTagName("m:t"))
+                .map((t) => t.textContent || "")
+                .join("");
+              if (mathText.trim()) {
+                blocks.push({
+                  id: `b_docx_math_${blocks.length}`,
+                  type: "mathBlock",
+                  latex: mathText.trim(),
+                  content: mathText.trim(),
+                });
+                continue;
+              }
+            }
+
+            const tElements = (node as Element).getElementsByTagName("w:t");
+            let text = "";
+            for (let j = 0; j < tElements.length; j++) {
+              text += tElements[j].textContent || "";
+            }
+            text = text.trim();
+            if (text) {
+              const isHeading = (node as Element).getElementsByTagName("w:pStyle")[0]?.getAttribute("w:val")?.toLowerCase().includes("heading") || blocks.length === 0;
+              blocks.push({
+                id: `b_docx_${blocks.length}`,
+                type: isHeading ? "heading" : "paragraph",
+                level: isHeading ? 1 : undefined,
+                content: text,
+              });
+            }
+          } else if (node.nodeName === "w:tbl") {
+            const trElements = (node as Element).getElementsByTagName("w:tr");
+            const rows: any[] = [];
+            for (let r = 0; r < trElements.length && rows.length < 500; r++) {
+              const tcElements = trElements[r].getElementsByTagName("w:tc");
+              const cells: any[] = [];
+              for (let c = 0; c < tcElements.length && cells.length < 50; c++) {
+                const cellText = Array.from(tcElements[c].getElementsByTagName("w:t"))
+                  .map((t) => t.textContent || "")
+                  .join(" ")
+                  .trim();
+                cells.push({
+                  id: `c_${r}_${c}`,
+                  content: cellText,
+                  isHeader: r === 0,
+                });
+              }
+              if (cells.length > 0) {
+                rows.push({ id: `r_${r}`, cells });
+              }
+            }
+            if (rows.length > 0) {
+              blocks.push({
+                id: `b_docx_tbl_${blocks.length}`,
+                type: "table",
+                rows,
+              });
+            }
+          }
         }
       }
 
@@ -252,6 +304,20 @@ export const docxCodec: DocumentCodec = {
       <w:r>
         <w:t xml:space="preserve">${escapeXml(block.content || "")}</w:t>
       </w:r>
+    </w:p>`);
+          break;
+        }
+
+        case "mathBlock": {
+          const rawLatex = block.latex || block.content || "";
+          const omml = OmmlMathEngine.latexToOmml(rawLatex, { display: true });
+          bodyXml.push(`
+    <w:p>
+      <w:pPr>
+        <w:jc w:val="center"/>
+        <w:spacing w:before="160" w:after="160"/>
+      </w:pPr>
+      ${omml}
     </w:p>`);
           break;
         }
