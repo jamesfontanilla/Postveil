@@ -123,6 +123,26 @@ function estimateBlockHeight(block: DocBlock): number {
   }
 }
 
+/**
+ * Calculates absolute character offset within an HTMLElement, correctly accounting
+ * for nested formatting elements (<strong>, <em>, <span>, <a>, etc.).
+ */
+export function getCaretCharacterOffsetWithin(element: HTMLElement): number {
+  let caretOffset = 0;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    // Ensure the selection's start container actually resides inside this element
+    if (element.contains(range.startContainer)) {
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(element);
+      preCaretRange.setEnd(range.startContainer, range.startOffset);
+      caretOffset = preCaretRange.toString().length;
+    }
+  }
+  return caretOffset;
+}
+
 export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   doc,
   viewMode,
@@ -336,9 +356,8 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
         let contentAfter = "";
 
         if (sel && sel.rangeCount > 0) {
-          const range = sel.getRangeAt(0);
           const text = e.currentTarget.innerText || "";
-          const offset = range.startOffset;
+          const offset = getCaretCharacterOffsetWithin(e.currentTarget);
           contentBefore = text.slice(0, offset);
           contentAfter = text.slice(offset);
         }
