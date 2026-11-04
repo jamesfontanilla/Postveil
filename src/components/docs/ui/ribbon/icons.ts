@@ -62,6 +62,16 @@ import {
   FolderOpen,
   Share2,
   MoreHorizontal,
+  Mic,
+  Feather,
+  AppWindow,
+  ArrowDownUp,
+  Pilcrow,
+  Baseline,
+  Search,
+  Replace,
+  MousePointerClick,
+  PaintBucket,
 } from "lucide-react";
 
 export const RibbonIcons = {
@@ -152,4 +162,17 @@ export const RibbonIcons = {
   chevronDown: ChevronDown,
   aiSparkle: Sparkles,
   more: MoreHorizontal,
+
+  // Word Modern Parity Additions
+  dictate: Mic,
+  editorProofing: Feather,
+  addins: AppWindow,
+  sort: ArrowDownUp,
+  pilcrow: Pilcrow,
+  shadingBucket: PaintBucket,
+  borders: Square,
+  find: Search,
+  replace: Replace,
+  selectPointer: MousePointerClick,
+  textEffects: Baseline,
 };

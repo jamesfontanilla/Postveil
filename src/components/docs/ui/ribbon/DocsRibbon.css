@@ -246,11 +246,86 @@
   gap: 1px;
 }
 
+/* 2-Row Vertical Stack (68px Height = 32px + 4px gap + 32px) matching Word Ribbon */
+.pdocs-ribbon-stack-2 {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 68px;
+  gap: 4px;
+}
+
 .pdocs-ribbon-row {
   display: flex;
   align-items: center;
   gap: 2px;
   height: 22px;
+}
+
+.pdocs-ribbon-row-28 {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+}
+
+/* Far Left Shelf Undo / Redo Stack */
+.pdocs-shelf-undo-stack {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 68px;
+  padding-right: 6px;
+  margin-right: 4px;
+  position: relative;
+}
+.pdocs-shelf-undo-stack::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  right: 0;
+  width: 1px;
+  background: var(--ribbon-border-subtle);
+}
+
+/* Header Right Utility Strip (Comments, Catch up, Editing, Share) */
+.pdocs-header-utility-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-right: 8px;
+}
+.pdocs-util-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ribbon-text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+.pdocs-util-btn:hover {
+  background: var(--ribbon-hover);
+  border-color: var(--ribbon-border);
+}
+.pdocs-util-btn.share {
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 9999px;
+  padding: 0 14px;
+}
+.pdocs-util-btn.share:hover {
+  background: #1d4ed8;
 }
 
 /* Big Button (32px Icon Top + 2-line Label Below, 68px Total Height) */

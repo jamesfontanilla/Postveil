@@ -60,6 +60,8 @@ const RibbonShelf: React.FC<{
   currentBlockLevel?: number;
   onSelectStyle?: (type: BlockType, level?: number) => void;
   activeMarks?: any;
+  canUndo?: boolean;
+  canRedo?: boolean;
 }> = ({
   currentTab,
   fontFamily,
@@ -70,6 +72,8 @@ const RibbonShelf: React.FC<{
   currentBlockLevel = 1,
   onSelectStyle,
   activeMarks,
+  canUndo = false,
+  canRedo = false,
 }) => {
   const dispatcher = useRibbonDispatcher();
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -100,6 +104,30 @@ const RibbonShelf: React.FC<{
 
   return (
     <div className="pdocs-ribbon-shelf" role="toolbar" aria-label="Ribbon tool shelf">
+      {/* FAR-LEFT SHELF UNDO / REDO STACK (Home Tab) */}
+      {currentTab.id === "home" && (
+        <div className="pdocs-shelf-undo-stack">
+          <div className="flex flex-col gap-1 justify-center h-full">
+            <RibbonSmallButton
+              id="shelf-undo"
+              icon={RibbonIcons.undo}
+              tooltip="Undo (Ctrl+Z)"
+              shortcut="Ctrl+Z"
+              disabled={!canUndo}
+              onClick={() => dispatcher.dispatch("edit.undo")}
+            />
+            <RibbonSmallButton
+              id="shelf-redo"
+              icon={RibbonIcons.redo}
+              tooltip="Redo (Ctrl+Y)"
+              shortcut="Ctrl+Y"
+              disabled={!canRedo}
+              onClick={() => dispatcher.dispatch("edit.redo")}
+            />
+          </div>
+        </div>
+      )}
+
       {currentTab.groups.map((grp) => (
         <RibbonGroup
           key={grp.id}
@@ -121,37 +149,78 @@ const RibbonShelf: React.FC<{
                     label={item.label}
                     tooltip={item.tooltip}
                     shortcut={item.shortcut}
-                    hasDropdown={!!item.items}
+                    hasDropdown={true}
                     onClick={() => dispatcher.dispatch(item.commandId || "edit.paste")}
                   />
                 ))}
               <div className="pdocs-ribbon-stack-3">
-                {grp.items
-                  .filter((i) => i.kind === "small")
-                  .map((item) => (
-                    <RibbonSmallButton
-                      key={item.id}
-                      id={item.id}
-                      icon={item.icon as any}
-                      label={item.label}
-                      tooltip={item.tooltip}
-                      shortcut={item.shortcut}
-                      onClick={() => dispatcher.dispatch(item.commandId || "")}
-                    />
-                  ))}
+                <RibbonSmallButton
+                  id="cut"
+                  icon={RibbonIcons.cut}
+                  label="Cut"
+                  tooltip="Cut (Ctrl+X)"
+                  shortcut="Ctrl+X"
+                  onClick={() => dispatcher.dispatch("edit.cut")}
+                />
+                <RibbonSmallButton
+                  id="copy"
+                  icon={RibbonIcons.copy}
+                  label="Copy"
+                  tooltip="Copy (Ctrl+C)"
+                  shortcut="Ctrl+C"
+                  onClick={() => dispatcher.dispatch("edit.copy")}
+                />
+                <RibbonSmallButton
+                  id="painter"
+                  icon={RibbonIcons.formatPainter}
+                  label="Format Painter"
+                  tooltip="Format Painter"
+                  onClick={() => dispatcher.dispatch("edit.formatPainter")}
+                />
               </div>
             </>
           )}
 
           {grp.id === "home.font" && (
-            <div className="pdocs-ribbon-stack-3">
-              {/* Row 1: Font Family + Font Size */}
-              <div className="pdocs-ribbon-row">
+            <div className="pdocs-ribbon-stack-2">
+              {/* Row 1: Font Family + Font Size + Grow/Shrink + Case + Clear */}
+              <div className="pdocs-ribbon-row-28">
                 <FontPickerWidget currentFont={fontFamily} onFontChange={onFontChange} />
                 <FontSizeWidget currentSize={fontSize} onSizeChange={onFontSizeChange} />
+                <button
+                  type="button"
+                  className="pdocs-ribbon-small-btn text-[12px] font-bold px-1.5"
+                  title="Increase Font Size (Ctrl+Shift+>)"
+                  onClick={() => onFontSizeChange(Math.min(72, (fontSize || 12) + 1))}
+                >
+                  <span className="flex items-center text-[11px]">A<span className="text-[9px] -translate-y-1 font-bold">^</span></span>
+                </button>
+                <button
+                  type="button"
+                  className="pdocs-ribbon-small-btn text-[12px] font-bold px-1.5"
+                  title="Decrease Font Size (Ctrl+Shift+<)"
+                  onClick={() => onFontSizeChange(Math.max(8, (fontSize || 12) - 1))}
+                >
+                  <span className="flex items-center text-[11px]">A<span className="text-[9px] translate-y-1 font-bold">v</span></span>
+                </button>
+                <button
+                  type="button"
+                  className="pdocs-ribbon-small-btn px-1 text-[11px]"
+                  title="Change Case"
+                  onClick={() => {}}
+                >
+                  <span className="font-semibold">Aa <span className="text-[8px]">▾</span></span>
+                </button>
+                <RibbonSmallButton
+                  id="clear"
+                  icon={RibbonIcons.clearFormat}
+                  tooltip="Clear All Formatting"
+                  onClick={() => dispatcher.dispatch("format.clear")}
+                />
               </div>
-              {/* Row 2: Inline Styles */}
-              <div className="pdocs-ribbon-row">
+
+              {/* Row 2: B, I, U ▾, Strike, Sub, Super, Text Effects, Highlight ▾, Font Color ▾ */}
+              <div className="pdocs-ribbon-row-28">
                 <RibbonSmallButton
                   id="bold"
                   icon={RibbonIcons.bold}
@@ -168,14 +237,17 @@ const RibbonShelf: React.FC<{
                   active={activeMarks?.italic}
                   onClick={() => dispatcher.dispatch("format.italic")}
                 />
-                <RibbonSmallButton
-                  id="underline"
-                  icon={RibbonIcons.underline}
-                  tooltip="Underline (Ctrl+U)"
-                  shortcut="Ctrl+U"
-                  active={activeMarks?.underline}
-                  onClick={() => dispatcher.dispatch("format.underline")}
-                />
+                <div className="flex items-center">
+                  <RibbonSmallButton
+                    id="underline"
+                    icon={RibbonIcons.underline}
+                    tooltip="Underline (Ctrl+U)"
+                    shortcut="Ctrl+U"
+                    active={activeMarks?.underline}
+                    onClick={() => dispatcher.dispatch("format.underline")}
+                  />
+                  <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer">▾</span>
+                </div>
                 <RibbonSmallButton
                   id="strike"
                   icon={RibbonIcons.strike}
@@ -197,65 +269,100 @@ const RibbonShelf: React.FC<{
                   active={activeMarks?.superscript}
                   onClick={() => dispatcher.dispatch("format.superscript")}
                 />
-                <RibbonSmallButton
-                  id="clear"
-                  icon={RibbonIcons.clearFormat}
-                  tooltip="Clear Formatting"
-                  onClick={() => dispatcher.dispatch("format.clear")}
+                <button
+                  type="button"
+                  className="pdocs-ribbon-small-btn px-1 text-[12px]"
+                  title="Text Effects and Typography"
+                >
+                  <span className="font-semibold text-blue-600 dark:text-blue-400">A<span className="text-[8px] text-[var(--ribbon-text-dim)] ml-0.5">▾</span></span>
+                </button>
+                <RibbonSplitButton
+                  id="highlight-color"
+                  icon={RibbonIcons.highlightColor}
+                  tooltip="Text Highlight Color"
+                  colorBar={activeMarks?.highlightColor || "#fef08a"}
+                  onAction={() => dispatcher.dispatch("format.highlightColor", { color: "#fef08a" })}
+                  onDropdown={(e) => handleOpenColorPicker("highlightColor", e)}
                 />
-              </div>
-              {/* Row 3: Colors */}
-              <div className="pdocs-ribbon-row">
                 <RibbonSplitButton
                   id="text-color"
                   icon={RibbonIcons.textColor}
                   tooltip="Font Color"
-                  colorBar={activeMarks?.textColor || "#000000"}
-                  onAction={() => dispatcher.dispatch("format.textColor", { color: "#000000" })}
+                  colorBar={activeMarks?.textColor || "#dc2626"}
+                  onAction={() => dispatcher.dispatch("format.textColor", { color: "#dc2626" })}
                   onDropdown={(e) => handleOpenColorPicker("textColor", e)}
-                />
-                <RibbonSplitButton
-                  id="highlight-color"
-                  icon={RibbonIcons.highlightColor}
-                  tooltip="Highlight Color"
-                  colorBar={activeMarks?.highlightColor || "transparent"}
-                  onAction={() => dispatcher.dispatch("format.highlightColor", { color: "#fef08a" })}
-                  onDropdown={(e) => handleOpenColorPicker("highlightColor", e)}
                 />
               </div>
             </div>
           )}
 
           {grp.id === "home.paragraph" && (
-            <div className="pdocs-ribbon-stack-3">
-              <div className="pdocs-ribbon-row">
+            <div className="pdocs-ribbon-stack-2">
+              {/* Row 1: Bullets ▾, Numbering ▾, Multilevel ▾, Decrease Indent, Increase Indent, Sort, Show/Hide */}
+              <div className="pdocs-ribbon-row-28">
+                <div className="flex items-center">
+                  <RibbonSmallButton
+                    id="bullet-list"
+                    icon={RibbonIcons.bulletList}
+                    tooltip="Bullets"
+                    active={currentBlockType === "bulletList"}
+                    onClick={() => dispatcher.dispatch("para.blockType", { type: "bulletList" })}
+                  />
+                  <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer">▾</span>
+                </div>
+                <div className="flex items-center">
+                  <RibbonSmallButton
+                    id="numbered-list"
+                    icon={RibbonIcons.orderedList}
+                    tooltip="Numbering"
+                    active={currentBlockType === "orderedList"}
+                    onClick={() => dispatcher.dispatch("para.blockType", { type: "orderedList" })}
+                  />
+                  <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer">▾</span>
+                </div>
+                <div className="flex items-center">
+                  <RibbonSmallButton
+                    id="multilevel-list"
+                    icon={RibbonIcons.checkList}
+                    tooltip="Multilevel List"
+                    active={currentBlockType === "taskList"}
+                    onClick={() => dispatcher.dispatch("para.blockType", { type: "taskList" })}
+                  />
+                  <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer">▾</span>
+                </div>
                 <RibbonSmallButton
-                  id="bullet-list"
-                  icon={RibbonIcons.bulletList}
-                  tooltip="Bullet List"
-                  active={currentBlockType === "bulletList"}
-                  onClick={() => dispatcher.dispatch("para.blockType", { type: "bulletList" })}
+                  id="decrease-indent"
+                  icon={RibbonIcons.outdent}
+                  tooltip="Decrease Indent"
+                  onClick={() => {}}
                 />
                 <RibbonSmallButton
-                  id="numbered-list"
-                  icon={RibbonIcons.orderedList}
-                  tooltip="Numbered List"
-                  active={currentBlockType === "orderedList"}
-                  onClick={() => dispatcher.dispatch("para.blockType", { type: "orderedList" })}
+                  id="increase-indent"
+                  icon={RibbonIcons.indent}
+                  tooltip="Increase Indent"
+                  onClick={() => {}}
                 />
                 <RibbonSmallButton
-                  id="check-list"
-                  icon={RibbonIcons.checkList}
-                  tooltip="Checklist"
-                  active={currentBlockType === "taskList"}
-                  onClick={() => dispatcher.dispatch("para.blockType", { type: "taskList" })}
+                  id="sort-paras"
+                  icon={RibbonIcons.sort}
+                  tooltip="Sort"
+                  onClick={() => {}}
+                />
+                <RibbonSmallButton
+                  id="show-hide-marks"
+                  icon={RibbonIcons.pilcrow}
+                  tooltip="Show/Hide ¶"
+                  onClick={() => {}}
                 />
               </div>
-              <div className="pdocs-ribbon-row">
+
+              {/* Row 2: Align Left, Center, Right, Justify, Line Spacing ▾, Shading ▾, Borders ▾ */}
+              <div className="pdocs-ribbon-row-28">
                 <RibbonSmallButton
                   id="align-left"
                   icon={RibbonIcons.alignLeft}
                   tooltip="Align Left (Ctrl+L)"
+                  shortcut="Ctrl+L"
                   active={activeMarks?.alignment === "left" || !activeMarks?.alignment}
                   onClick={() => dispatcher.dispatch("para.align", { alignment: "left" })}
                 />
@@ -263,6 +370,7 @@ const RibbonShelf: React.FC<{
                   id="align-center"
                   icon={RibbonIcons.alignCenter}
                   tooltip="Center (Ctrl+E)"
+                  shortcut="Ctrl+E"
                   active={activeMarks?.alignment === "center"}
                   onClick={() => dispatcher.dispatch("para.align", { alignment: "center" })}
                 />
@@ -270,6 +378,7 @@ const RibbonShelf: React.FC<{
                   id="align-right"
                   icon={RibbonIcons.alignRight}
                   tooltip="Align Right (Ctrl+R)"
+                  shortcut="Ctrl+R"
                   active={activeMarks?.alignment === "right"}
                   onClick={() => dispatcher.dispatch("para.align", { alignment: "right" })}
                 />
@@ -277,33 +386,37 @@ const RibbonShelf: React.FC<{
                   id="align-justify"
                   icon={RibbonIcons.alignJustify}
                   tooltip="Justify (Ctrl+J)"
+                  shortcut="Ctrl+J"
                   active={activeMarks?.alignment === "justify"}
                   onClick={() => dispatcher.dispatch("para.align", { alignment: "justify" })}
                 />
-              </div>
-              <div className="pdocs-ribbon-row">
-                {grp.items
-                  .filter((i) => i.id === "line-spacing")
-                  .map((item) => (
-                    <div key={item.id} className="relative">
-                      <RibbonSmallButton
-                        id={item.id}
-                        icon={item.icon as any}
-                        label="1.15"
-                        tooltip={item.tooltip}
-                        onClick={() => {}}
-                      />
-                      {openMenuId === item.id && item.items && (
-                        <RibbonDropdownMenu
-                          isOpen={true}
-                          anchorEl={anchorEl}
-                          items={item.items}
-                          onSelect={(cmd, params) => dispatcher.dispatch(cmd, params)}
-                          onClose={() => setOpenMenuId(null)}
-                        />
-                      )}
-                    </div>
-                  ))}
+                <div className="flex items-center">
+                  <RibbonSmallButton
+                    id="line-spacing"
+                    icon={RibbonIcons.lineSpacing}
+                    tooltip="Line and Paragraph Spacing"
+                    onClick={() => {}}
+                  />
+                  <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer">▾</span>
+                </div>
+                <div className="flex items-center">
+                  <RibbonSmallButton
+                    id="shading-bucket"
+                    icon={RibbonIcons.shadingBucket}
+                    tooltip="Shading"
+                    onClick={() => {}}
+                  />
+                  <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer">▾</span>
+                </div>
+                <div className="flex items-center">
+                  <RibbonSmallButton
+                    id="borders-menu"
+                    icon={RibbonIcons.borders}
+                    tooltip="Borders"
+                    onClick={() => {}}
+                  />
+                  <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer">▾</span>
+                </div>
               </div>
             </div>
           )}
@@ -323,17 +436,69 @@ const RibbonShelf: React.FC<{
             <div className="pdocs-ribbon-stack-3">
               <RibbonSmallButton
                 id="find"
-                icon={RibbonIcons.aiSparkle}
-                label="Find & Replace"
-                tooltip="Find & Replace (Ctrl+H)"
+                icon={RibbonIcons.find}
+                label="Find"
+                tooltip="Find (Ctrl+F)"
+                shortcut="Ctrl+F"
                 onClick={() => dispatcher.dispatch("ui.dialog", { name: "findReplace" })}
               />
               <RibbonSmallButton
-                id="select-all"
-                icon={RibbonIcons.check}
-                label="Select All"
-                tooltip="Select All (Ctrl+A)"
-                onClick={() => document.execCommand("selectAll")}
+                id="replace"
+                icon={RibbonIcons.replace}
+                label="Replace"
+                tooltip="Replace (Ctrl+H)"
+                shortcut="Ctrl+H"
+                onClick={() => dispatcher.dispatch("ui.dialog", { name: "findReplace" })}
+              />
+              <div className="flex items-center">
+                <RibbonSmallButton
+                  id="select"
+                  icon={RibbonIcons.selectPointer}
+                  label="Select"
+                  tooltip="Select All (Ctrl+A)"
+                  shortcut="Ctrl+A"
+                  onClick={() => document.execCommand("selectAll")}
+                />
+                <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1">▾</span>
+              </div>
+            </div>
+          )}
+
+          {grp.id === "home.voice" && (
+            <div className="flex items-center">
+              <RibbonBigButton
+                id="dictate"
+                icon={RibbonIcons.dictate}
+                label="Dictate"
+                tooltip="Dictate (Voice typing)"
+                hasDropdown={true}
+                onClick={() => dispatcher.dispatch("voice.dictate")}
+              />
+            </div>
+          )}
+
+          {grp.id === "home.editor" && (
+            <div className="flex items-center">
+              <RibbonBigButton
+                id="editor-proofing"
+                icon={RibbonIcons.editorProofing}
+                label="Editor"
+                tooltip="Grammar & Proofing Editor"
+                hasDropdown={true}
+                onClick={() => dispatcher.dispatch("review.proofing")}
+              />
+            </div>
+          )}
+
+          {grp.id === "home.addins" && (
+            <div className="flex items-center">
+              <RibbonBigButton
+                id="addins-store"
+                icon={RibbonIcons.addins}
+                label="Add-ins"
+                tooltip="Office Add-ins"
+                hasDropdown={true}
+                onClick={() => dispatcher.dispatch("ui.dialog", { name: "addins" })}
               />
             </div>
           )}
@@ -371,6 +536,9 @@ const RibbonShelf: React.FC<{
             grp.id !== "home.paragraph" &&
             grp.id !== "home.styles" &&
             grp.id !== "home.editing" &&
+            grp.id !== "home.voice" &&
+            grp.id !== "home.editor" &&
+            grp.id !== "home.addins" &&
             grp.id !== "insert.tables" && (
               <div className="flex items-center gap-1">
                 {grp.items.map((item) => {
@@ -708,8 +876,50 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
             );
           })}
 
+          {/* Header Right Utilities: Comments, Catch up, Editing mode, Share */}
+          <div className="pdocs-header-utility-strip hidden md:flex">
+            <button
+              type="button"
+              className="pdocs-util-btn"
+              title="Comments & Annotations"
+              onClick={() => props.onOpenNewCommentModal?.()}
+            >
+              <RibbonIcons.comment size={14} />
+              <span>Comments</span>
+            </button>
+            <button
+              type="button"
+              className="pdocs-util-btn"
+              title="Catch up with changes"
+              onClick={() => {}}
+            >
+              <RibbonIcons.aiSparkle size={14} className="text-blue-500" />
+              <span>Catch up</span>
+            </button>
+            <button
+              type="button"
+              className="pdocs-util-btn"
+              title="Editing Mode"
+              onClick={() => {}}
+            >
+              <RibbonIcons.suggesting size={14} />
+              <span>Editing</span>
+              <span className="text-[9px]">▾</span>
+            </button>
+            <button
+              type="button"
+              className="pdocs-util-btn share"
+              title="Share Document"
+              onClick={() => {}}
+            >
+              <RibbonIcons.share size={13} />
+              <span>Share</span>
+              <span className="text-[9px] ml-0.5">▾</span>
+            </button>
+          </div>
+
           {/* Ribbon Controls: Mode Switcher & Pin / Collapse Button */}
-          <div className="flex items-center gap-0.5 ml-auto mr-1.5">
+          <div className="flex items-center gap-0.5 ml-1 mr-1.5">
             <button
               type="button"
               className="pdocs-ribbon-mode-btn"
@@ -761,6 +971,8 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
                 currentBlockLevel={props.currentBlockLevel}
                 onSelectStyle={props.onSelectStyle}
                 activeMarks={props.activeMarks}
+                canUndo={props.canUndo}
+                canRedo={props.canRedo}
               />
             )
           )}
