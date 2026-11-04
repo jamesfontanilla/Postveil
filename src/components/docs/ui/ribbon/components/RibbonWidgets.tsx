@@ -1,4 +1,5 @@
 import React from "react";
+import { ChevronDown } from "lucide-react";
 import { FontPicker } from "../../FontPicker";
 
 export interface FontPickerWidgetProps {
@@ -11,8 +12,14 @@ export const FontPickerWidget: React.FC<FontPickerWidgetProps> = ({
   onFontChange,
 }) => {
   return (
-    <div className="flex items-center" style={{ width: 140 }}>
-      <FontPicker currentFont={currentFont} onSelectFont={onFontChange} />
+    <div className="flex items-center" style={{ width: 140, height: 24 }}>
+      <FontPicker
+        currentFont={currentFont}
+        onSelectFont={onFontChange}
+        compact={true}
+        width={140}
+        height={24}
+      />
     </div>
   );
 };
@@ -29,19 +36,24 @@ export const FontSizeWidget: React.FC<FontSizeWidgetProps> = ({
   onSizeChange,
 }) => {
   return (
-    <div className="flex items-center">
+    <div className="relative flex items-center">
       <select
-        value={currentSize || 11}
+        value={currentSize || 12}
         onChange={(e) => onSizeChange(Number(e.target.value))}
-        className="pdocs-font-size-select text-xs h-[22px] px-1 rounded border border-[var(--ribbon-border)] bg-[var(--ribbon-bg)] text-[var(--ribbon-text)] focus:outline-none"
+        className="pdocs-font-size-select text-[12px] font-medium h-[24px] pl-2 pr-5 rounded-[3px] border border-[var(--ribbon-border,#cbd5e1)] bg-[var(--ribbon-bg,#ffffff)] text-[var(--ribbon-text)] focus:outline-none appearance-none cursor-pointer hover:bg-[var(--ribbon-hover,#f1f5f9)] transition-colors"
+        style={{ width: "48px" }}
         title="Font Size"
       >
         {COMMON_FONT_SIZES.map((size) => (
-          <option key={size} value={size} className="bg-[var(--ribbon-bg)] text-[var(--ribbon-text)]">
+          <option key={size} value={size} className="bg-[var(--ribbon-bg,#ffffff)] text-[var(--ribbon-text)]">
             {size}
           </option>
         ))}
       </select>
+      <ChevronDown
+        size={11}
+        className="absolute right-1.5 pointer-events-none text-[var(--ribbon-text-dim,#64748b)]"
+      />
     </div>
   );
 };

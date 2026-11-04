@@ -5,9 +5,18 @@ import { FONT_CATALOG, type FontOption, ensureFontLoaded } from "../engine/FontC
 interface FontPickerProps {
   currentFont: string;
   onSelectFont: (fontFamily: string) => void;
+  compact?: boolean;
+  width?: number | string;
+  height?: number | string;
 }
 
-export const FontPicker: React.FC<FontPickerProps> = ({ currentFont, onSelectFont }) => {
+export const FontPicker: React.FC<FontPickerProps> = ({
+  currentFont,
+  onSelectFont,
+  compact = false,
+  width,
+  height,
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
@@ -93,19 +102,20 @@ export const FontPicker: React.FC<FontPickerProps> = ({ currentFont, onSelectFon
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          minWidth: "155px",
-          maxWidth: "185px",
-          height: "30px",
-          padding: "0 10px",
-          borderRadius: "6px",
-          border: "1px solid var(--pdocs-border)",
-          backgroundColor: isOpen ? "#f1f5f9" : "#ffffff",
+          width: width ? (typeof width === "number" ? `${width}px` : width) : (compact ? "138px" : "155px"),
+          minWidth: compact ? "110px" : "140px",
+          maxWidth: compact ? "160px" : "185px",
+          height: height ? (typeof height === "number" ? `${height}px` : height) : (compact ? "24px" : "30px"),
+          padding: compact ? "0 6px 0 8px" : "0 10px",
+          borderRadius: compact ? "3px" : "6px",
+          border: "1px solid var(--ribbon-border, #cbd5e1)",
+          backgroundColor: isOpen ? "var(--ribbon-hover, #f1f5f9)" : "var(--ribbon-bg, #ffffff)",
           cursor: "pointer",
-          gap: "8px",
+          gap: "4px",
           fontFamily: currentFont,
-          fontSize: "13px",
-          color: "var(--pdocs-text-primary)",
-          transition: "all 0.15s ease",
+          fontSize: compact ? "12px" : "13px",
+          color: "var(--ribbon-text, var(--pdocs-text-primary))",
+          transition: "all 0.12s ease",
         }}
       >
         <span
@@ -116,11 +126,12 @@ export const FontPicker: React.FC<FontPickerProps> = ({ currentFont, onSelectFon
             flex: 1,
             textAlign: "left",
             fontWeight: 500,
+            lineHeight: 1,
           }}
         >
           {currentFont}
         </span>
-        <ChevronDown size={14} style={{ color: "#64748b", flexShrink: 0 }} />
+        <ChevronDown size={compact ? 12 : 14} style={{ color: "var(--ribbon-text-dim, #64748b)", flexShrink: 0 }} />
       </button>
 
       {/* Floating Font Menu with Search & In-Menu Typography Preview */}

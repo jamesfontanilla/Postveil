@@ -246,13 +246,13 @@
   gap: 1px;
 }
 
-/* 2-Row Vertical Stack (68px Height = 32px + 4px gap + 32px) matching Word Ribbon */
+/* 2-Row Vertical Stack (68px Height = 26px + 6px + 26px, centered vertically) */
 .pdocs-ribbon-stack-2 {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: center;
   height: 68px;
-  gap: 4px;
+  gap: 5px;
 }
 
 .pdocs-ribbon-row {
@@ -266,7 +266,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  height: 28px;
+  height: 26px;
 }
 
 /* Far Left Shelf Undo / Redo Stack */
@@ -387,13 +387,13 @@
   right: 3px;
 }
 
-/* Small Button (22px Height, 16px Icon) */
+/* Small Button (24px Height, 16px Icon) */
 .pdocs-ribbon-small-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 22px;
-  min-width: 22px;
+  height: 24px;
+  min-width: 24px;
   padding: 0 4px;
   background: transparent;
   border: 1px solid transparent;
@@ -432,7 +432,7 @@
 .pdocs-ribbon-split-btn {
   display: inline-flex;
   align-items: stretch;
-  height: 22px;
+  height: 24px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 3px;
