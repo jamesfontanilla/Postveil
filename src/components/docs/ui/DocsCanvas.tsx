@@ -1023,7 +1023,7 @@ function renderBlock({
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             data-placeholder="Heading..."
-            style={{ flex: 1 }}
+            style={{ flex: 1, textAlign: block.align }}
             dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
             {block.html ? undefined : block.content}
@@ -1063,7 +1063,7 @@ function renderBlock({
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             data-placeholder="Type '/' or paste text/math/code from chatbot..."
-            style={{ flex: 1 }}
+            style={{ flex: 1, textAlign: block.align }}
             dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
           >
             {block.html ? undefined : block.content}

@@ -85,6 +85,7 @@ interface DocsToolbarProps {
   onReviewModeChange?: (mode: ReviewMode) => void;
   onOpenNewCommentModal?: () => void;
   onOpenSignatureModal?: () => void;
+  onFormatCommand?: (command: string, value?: string) => void;
 }
 
 import { ColorPickerPopover } from "../../platform/ribbon";
@@ -120,6 +121,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   onReviewModeChange,
   onOpenNewCommentModal,
   onOpenSignatureModal,
+  onFormatCommand,
 }) => {
   const [activeTextColor, setActiveTextColor] = useState("#000000");
   const [activeHighlightColor, setActiveHighlightColor] = useState("transparent");
@@ -132,16 +134,24 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
 
   const applyTextColor = (color: string) => {
     setActiveTextColor(color);
-    document.execCommand("foreColor", false, color);
+    if (onFormatCommand) {
+      onFormatCommand("foreColor", color);
+    } else {
+      document.execCommand("foreColor", false, color);
+    }
     setIsTextColorOpen(false);
   };
 
   const applyHighlightColor = (color: string) => {
     setActiveHighlightColor(color);
-    if (color === "transparent") {
-      document.execCommand("removeFormat");
+    if (onFormatCommand) {
+      onFormatCommand("hiliteColor", color === "transparent" ? "transparent" : color);
     } else {
-      document.execCommand("hiliteColor", false, color);
+      if (color === "transparent") {
+        document.execCommand("removeFormat");
+      } else {
+        document.execCommand("hiliteColor", false, color);
+      }
     }
     setIsHighlightOpen(false);
   };
@@ -255,7 +265,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Bold (Ctrl+B)"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("bold");
+          if (onFormatCommand) onFormatCommand("bold");
+          else document.execCommand("bold");
         }}
       >
         <Bold size={16} />
@@ -265,7 +276,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Italic (Ctrl+I)"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("italic");
+          if (onFormatCommand) onFormatCommand("italic");
+          else document.execCommand("italic");
         }}
       >
         <Italic size={16} />
@@ -275,7 +287,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Underline (Ctrl+U)"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("underline");
+          if (onFormatCommand) onFormatCommand("underline");
+          else document.execCommand("underline");
         }}
       >
         <Underline size={16} />
@@ -285,7 +298,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Strikethrough"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("strikeThrough");
+          if (onFormatCommand) onFormatCommand("strikeThrough");
+          else document.execCommand("strikeThrough");
         }}
       >
         <Strikethrough size={16} />
@@ -374,7 +388,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Subscript (Ctrl+,)"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("subscript");
+          if (onFormatCommand) onFormatCommand("subscript");
+          else document.execCommand("subscript");
         }}
       >
         <Subscript size={15} />
@@ -384,7 +399,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Superscript (Ctrl+.)"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("superscript");
+          if (onFormatCommand) onFormatCommand("superscript");
+          else document.execCommand("superscript");
         }}
       >
         <Superscript size={15} />
@@ -396,7 +412,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Clear formatting (Ctrl+\)"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("removeFormat");
+          if (onFormatCommand) onFormatCommand("removeFormat");
+          else document.execCommand("removeFormat");
         }}
       >
         <RemoveFormatting size={15} />
@@ -407,6 +424,10 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Inline Code"
         onMouseDown={(e) => {
           e.preventDefault();
+          if (onFormatCommand) {
+            onFormatCommand("code");
+            return;
+          }
           const sel = window.getSelection();
           if (!sel || sel.rangeCount === 0) return;
           const range = sel.getRangeAt(0);
@@ -435,7 +456,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Align Left"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("justifyLeft");
+          if (onFormatCommand) onFormatCommand("justifyLeft");
+          else document.execCommand("justifyLeft");
         }}
       >
         <AlignLeft size={16} />
@@ -445,7 +467,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Align Center"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("justifyCenter");
+          if (onFormatCommand) onFormatCommand("justifyCenter");
+          else document.execCommand("justifyCenter");
         }}
       >
         <AlignCenter size={16} />
@@ -455,7 +478,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Align Right"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("justifyRight");
+          if (onFormatCommand) onFormatCommand("justifyRight");
+          else document.execCommand("justifyRight");
         }}
       >
         <AlignRight size={16} />
@@ -465,7 +489,8 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         title="Justify"
         onMouseDown={(e) => {
           e.preventDefault();
-          document.execCommand("justifyFull");
+          if (onFormatCommand) onFormatCommand("justifyFull");
+          else document.execCommand("justifyFull");
         }}
       >
         <AlignJustify size={16} />

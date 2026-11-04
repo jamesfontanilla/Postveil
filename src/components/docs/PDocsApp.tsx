@@ -315,6 +315,99 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     }
   };
 
+  const handleFormatCommand = (command: string, value?: string) => {
+    // 1. Identify which block container owns the current selection or fallback to activeBlockId
+    let targetBlockId = activeBlockId;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const anchorNode = sel.anchorNode;
+      if (anchorNode) {
+        let curr: Node | null = anchorNode.nodeType === Node.ELEMENT_NODE ? anchorNode : anchorNode.parentElement;
+        while (curr && curr !== document.body) {
+          if (curr instanceof HTMLElement) {
+            const elId = curr.id;
+            if (elId && doc.blocks.some((b) => b.id === elId)) {
+              targetBlockId = elId;
+              break;
+            }
+          }
+          curr = curr.parentNode;
+        }
+      }
+    }
+
+    if (!targetBlockId && doc.blocks.length > 0) {
+      targetBlockId = doc.blocks[0].id;
+    }
+
+    // 2. Alignment handling: updates block attribute directly via transaction
+    if (command === "justifyLeft" || command === "justifyCenter" || command === "justifyRight" || command === "justifyFull") {
+      if (!targetBlockId) return;
+      const alignMap: Record<string, "left" | "center" | "right" | "justify"> = {
+        justifyLeft: "left",
+        justifyCenter: "center",
+        justifyRight: "right",
+        justifyFull: "justify",
+      };
+      const alignVal = alignMap[command] || "left";
+      const targetBlock = doc.blocks.find((b) => b.id === targetBlockId);
+      if (targetBlock) {
+        // Also apply text-align style to the DOM node for instant visual feedback
+        const el = document.getElementById(targetBlockId);
+        if (el) {
+          const contentEl = el.querySelector(".pdocs-block-content") as HTMLElement || el;
+          contentEl.style.textAlign = alignVal;
+        }
+        // Save via DocumentEngine dispatch
+        engineRef.current.updateBlockAttrs(targetBlockId, { align: alignVal });
+        setDoc({ ...engineRef.current.getDocument() });
+      }
+      return;
+    }
+
+    // 3. Inline markup formatting: execute command inside the active block and record HTML transaction
+    if (command === "code") {
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        const text = range.toString();
+        if (text) {
+          const code = document.createElement("code");
+          code.style.backgroundColor = "#f1f5f9";
+          code.style.padding = "2px 6px";
+          code.style.borderRadius = "4px";
+          code.style.fontFamily = "'JetBrains Mono', monospace";
+          code.style.fontSize = "0.9em";
+          code.style.color = "#0f5132";
+          code.textContent = text;
+          range.deleteContents();
+          range.insertNode(code);
+        }
+      }
+    } else if (command === "foreColor") {
+      document.execCommand("foreColor", false, value || "#000000");
+    } else if (command === "hiliteColor") {
+      if (value === "transparent") {
+        document.execCommand("removeFormat");
+      } else {
+        document.execCommand("hiliteColor", false, value || "#fef08a");
+      }
+    } else {
+      document.execCommand(command, false, value);
+    }
+
+    // 4. Capture mutated HTML and commit atomic UpdateContentStep into DocumentEngine history
+    if (targetBlockId) {
+      const el = document.getElementById(targetBlockId);
+      if (el) {
+        const contentEl = el.querySelector(".pdocs-block-content") as HTMLElement || el;
+        const newHtml = contentEl.innerHTML;
+        const newText = contentEl.textContent || "";
+        engineRef.current.updateBlockContent(targetBlockId, newText, newHtml);
+        setDoc({ ...engineRef.current.getDocument() });
+      }
+    }
+  };
+
   const handleUndo = () => {
     const prev = engineRef.current.undo();
     if (prev) setDoc({ ...prev });
@@ -690,6 +783,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onReviewModeChange={setReviewMode}
         onOpenNewCommentModal={() => handleOpenNewCommentModal()}
         onOpenSignatureModal={() => setIsSignatureModalOpen(true)}
+        onFormatCommand={handleFormatCommand}
       />
 
       {/* Main Workspace */}

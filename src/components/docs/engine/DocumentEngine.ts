@@ -77,10 +77,7 @@ export class DocumentEngine {
 
   public updateBlockContent(id: string, content: string, html?: string) {
     const tr = this.state.tr().updateContent(id, content, html);
-    this.state = this.state.apply(tr);
-    this.doc.blocks = this.state.toDocBlocks();
-    this.recalculateStats();
-    this.doc.metadata.updatedAt = new Date().toISOString();
+    this.dispatch(tr);
   }
 
   public toggleTaskItem(id: string) {
@@ -90,6 +87,11 @@ export class DocumentEngine {
       const tr = this.state.tr().updateAttrs(id, { checked: nextChecked });
       this.dispatch(tr);
     }
+  }
+
+  public updateBlockAttrs(id: string, attrs: Partial<DocBlock>) {
+    const tr = this.state.tr().updateAttrs(id, attrs);
+    this.dispatch(tr);
   }
 
   public insertBlockAfter(afterId: string, type: BlockType = "paragraph", content = ""): DocBlock {
