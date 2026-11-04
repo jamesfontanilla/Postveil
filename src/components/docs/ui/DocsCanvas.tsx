@@ -391,6 +391,66 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
         }
       }
 
+      // Long-block dynamic text overflow chunking (W3C Paged Media / Paged.js Line-Splitting):
+      // If a single paragraph is taller than the remaining page budget (or taller than the entire page),
+      // partition it across page boundaries at natural word breaks rather than clipping or leaving empty space.
+      if (block.type === "paragraph" && block.content && block.content.length > 150) {
+        const availableHeight = usableHeight - currentHeight;
+        const fontBasePx = estimateCtx.fontSizePt ? (estimateCtx.fontSizePt * 96) / 72 : 15;
+        const lineSpacingMult =
+          estimateCtx.lineSpacing === "2.0" ? 2.0 : estimateCtx.lineSpacing === "1.5" ? 1.5 : 1.15;
+        const linePx = Math.round(fontBasePx * lineSpacingMult);
+        const avgGlyphWidth = Math.max(7, fontBasePx * 0.52);
+        const charsPerLine = Math.max(25, Math.floor(usableWidthPx / avgGlyphWidth));
+
+        // If the remaining space can hold at least 3 lines, or if the paragraph is taller than usableHeight
+        if (h > usableHeight || (currentHeight > 0 && currentHeight + h > usableHeight && availableHeight > linePx * 3)) {
+          const targetBudget = currentHeight + h > usableHeight && availableHeight > linePx * 3 ? availableHeight - 16 : usableHeight - 24;
+          const maxLinesFirstPart = Math.max(2, Math.floor(targetBudget / linePx));
+          const maxCharsFirstPart = Math.min(block.content.length - 30, maxLinesFirstPart * charsPerLine);
+
+          if (maxCharsFirstPart > 40 && maxCharsFirstPart < block.content.length - 20) {
+            // Find natural word boundary
+            let splitIndex = block.content.lastIndexOf(" ", maxCharsFirstPart);
+            if (splitIndex <= 20) splitIndex = maxCharsFirstPart;
+
+            const part1Text = block.content.slice(0, splitIndex).trim();
+            const part2Text = block.content.slice(splitIndex).trim();
+
+            if (part1Text && part2Text) {
+              const part1Block: DocBlock = {
+                ...block,
+                id: `${block.id}_p1`,
+                content: part1Text,
+              };
+              const part2Block: DocBlock = {
+                ...block,
+                id: `${block.id}_p2`,
+                content: part2Text,
+              };
+
+              const part1Height = estimateBlockHeight(part1Block, estimateCtx);
+              const part2Height = estimateBlockHeight(part2Block, estimateCtx);
+
+              if (currentHeight + part1Height > usableHeight && currentPage.length > 0) {
+                result.push(currentPage);
+                currentPage = [part1Block];
+                currentHeight = part1Height;
+              } else {
+                currentPage.push(part1Block);
+                currentHeight += part1Height;
+              }
+
+              // Part 2 flows to next page
+              result.push(currentPage);
+              currentPage = [part2Block];
+              currentHeight = part2Height;
+              continue;
+            }
+          }
+        }
+      }
+
       if ((orphanHeadingBreak || currentHeight + h > usableHeight) && currentPage.length > 0) {
         result.push(currentPage);
         currentPage = [block];
