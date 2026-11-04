@@ -1217,6 +1217,13 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             };
             handleFormatCommand(map[alignment] || "justifyLeft");
           }}
+          fontFamily={fontFamily}
+          fontSize={fontSize}
+          onFontChange={setFontFamily}
+          onFontSizeChange={setFontSize}
+          onChangeBlockType={(type) => {
+            if (activeBlockId) handleChangeBlockType(activeBlockId, type);
+          }}
           activeMarks={activeMarks}
         />
 

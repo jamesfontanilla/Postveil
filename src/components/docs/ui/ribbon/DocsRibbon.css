@@ -880,14 +880,15 @@
 .pdocs-selection-mini-toolbar {
   background: var(--ribbon-bg);
   border: 1px solid var(--ribbon-border);
-  border-radius: 6px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
-  opacity: 0.95;
-  transition: opacity 0.15s ease, transform 0.1s ease;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: opacity 0.15s cubic-bezier(0, 0, 0.2, 1), transform 0.12s ease-out;
   user-select: none;
 }
 .pdocs-selection-mini-toolbar:hover {
-  opacity: 1;
+  opacity: 1 !important;
 }
 
 .pdocs-mini-btn {
