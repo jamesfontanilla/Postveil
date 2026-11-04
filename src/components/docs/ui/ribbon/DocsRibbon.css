@@ -1,0 +1,366 @@
+/* ==========================================================================
+   P-DOCS SOVEREIGN RIBBON - PRECISION STYLESHEET
+   Implements WordCraft & Office dimensional geometry (92px shelf, 68px content, 20px label)
+   ========================================================================== */
+
+:root {
+  --ribbon-bg: #0b0f19;
+  --ribbon-tab-bar: #070a10;
+  --ribbon-border: #1e293b;
+  --ribbon-border-subtle: rgba(255, 255, 255, 0.07);
+  --ribbon-hover: rgba(255, 255, 255, 0.08);
+  --ribbon-active: rgba(37, 99, 235, 0.25);
+  --ribbon-active-border: #3b82f6;
+  --ribbon-text: #f8fafc;
+  --ribbon-text-dim: #94a3b8;
+  --ribbon-accent: #38bdf8;
+  --ribbon-shelf-h: 92px;
+  --ribbon-content-h: 68px;
+  --ribbon-label-h: 20px;
+}
+
+/* Light Theme Variables */
+.pdocs-theme-light {
+  --ribbon-bg: #f8fafc;
+  --ribbon-tab-bar: #f1f5f9;
+  --ribbon-border: #e2e8f0;
+  --ribbon-border-subtle: rgba(0, 0, 0, 0.06);
+  --ribbon-hover: rgba(0, 0, 0, 0.05);
+  --ribbon-active: rgba(37, 99, 235, 0.12);
+  --ribbon-active-border: #2563eb;
+  --ribbon-text: #0f172a;
+  --ribbon-text-dim: #64748b;
+  --ribbon-accent: #0284c7;
+}
+
+/* Base Ribbon Container */
+.pdocs-ribbon-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: var(--ribbon-bg);
+  border-bottom: 1px solid var(--ribbon-border);
+  user-select: none;
+  font-family: inherit;
+  z-index: 40;
+}
+
+/* Tab Bar Strip */
+.pdocs-ribbon-tab-bar {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  background: var(--ribbon-tab-bar);
+  border-bottom: 1px solid var(--ribbon-border);
+  padding: 0 8px;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pdocs-ribbon-tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Individual Tab Pill */
+.pdocs-ribbon-tab-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ribbon-text-dim);
+  background: transparent;
+  border: none;
+  border-top: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  border-radius: 4px 4px 0 0;
+}
+.pdocs-ribbon-tab-btn:hover {
+  color: var(--ribbon-text);
+  background: var(--ribbon-hover);
+}
+.pdocs-ribbon-tab-btn.active {
+  color: var(--ribbon-accent);
+  background: var(--ribbon-bg);
+  border-top: 2px solid var(--ribbon-accent);
+  font-weight: 600;
+}
+
+/* Contextual Tab Pill (e.g. Table Tools, Picture Tools) */
+.pdocs-ribbon-tab-btn.contextual {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border-top: 2px solid #38bdf8;
+}
+
+/* Main Command Shelf */
+.pdocs-ribbon-shelf {
+  display: flex;
+  align-items: stretch;
+  height: var(--ribbon-shelf-h);
+  padding: 2px 8px;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+/* Ribbon Group */
+.pdocs-ribbon-group {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  padding: 0 4px;
+  border-right: 1px solid var(--ribbon-border-subtle);
+  flex-shrink: 0;
+}
+
+.pdocs-ribbon-group-content {
+  display: flex;
+  align-items: center;
+  height: var(--ribbon-content-h);
+  gap: 3px;
+}
+
+.pdocs-ribbon-group-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--ribbon-label-h);
+  position: relative;
+}
+
+.pdocs-ribbon-group-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ribbon-text-dim);
+  text-align: center;
+}
+
+.pdocs-ribbon-dialog-launcher {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--ribbon-text-dim);
+  cursor: pointer;
+  border-radius: 2px;
+}
+.pdocs-ribbon-dialog-launcher:hover {
+  background: var(--ribbon-hover);
+  color: var(--ribbon-text);
+}
+
+/* 3-Row Vertical Stack */
+.pdocs-ribbon-stack-3 {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 66px;
+  gap: 1px;
+}
+
+.pdocs-ribbon-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+}
+
+/* Big Button (32px Icon on Top + 2-line Label Below) */
+.pdocs-ribbon-big-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  height: 66px;
+  padding: 4px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--ribbon-text);
+  transition: all 0.15s ease;
+  position: relative;
+  text-decoration: none;
+}
+.pdocs-ribbon-big-btn:hover {
+  background: var(--ribbon-hover);
+}
+.pdocs-ribbon-big-btn:active {
+  background: var(--ribbon-active);
+}
+.pdocs-ribbon-big-btn.active {
+  background: var(--ribbon-active);
+  border-color: var(--ribbon-active-border);
+}
+.pdocs-ribbon-big-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.pdocs-ribbon-big-btn .big-icon {
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pdocs-ribbon-big-btn .big-label {
+  font-size: 10.5px;
+  line-height: 12px;
+  text-align: center;
+  color: var(--ribbon-text);
+  white-space: pre-line;
+  max-width: 68px;
+}
+
+.pdocs-ribbon-big-btn .dropdown-chevron {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+}
+
+/* Small Button (22px Height) */
+.pdocs-ribbon-small-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--ribbon-text);
+  font-size: 11px;
+  gap: 4px;
+  transition: all 0.12s ease;
+}
+.pdocs-ribbon-small-btn:hover {
+  background: var(--ribbon-hover);
+}
+.pdocs-ribbon-small-btn:active {
+  background: var(--ribbon-active);
+}
+.pdocs-ribbon-small-btn.active {
+  background: var(--ribbon-active);
+  border-color: var(--ribbon-active-border);
+  color: var(--ribbon-accent);
+}
+.pdocs-ribbon-small-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Split Button (Action on Left + Dropdown on Right) */
+.pdocs-ribbon-split-btn {
+  display: inline-flex;
+  align-items: stretch;
+  height: 22px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.pdocs-ribbon-split-btn:hover {
+  border-color: var(--ribbon-border);
+}
+.pdocs-ribbon-split-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--ribbon-text);
+  border-radius: 2px 0 0 2px;
+  position: relative;
+}
+.pdocs-ribbon-split-action:hover {
+  background: var(--ribbon-hover);
+}
+.pdocs-ribbon-split-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--ribbon-border-subtle);
+  cursor: pointer;
+  color: var(--ribbon-text-dim);
+  border-radius: 0 2px 2px 0;
+}
+.pdocs-ribbon-split-trigger:hover {
+  background: var(--ribbon-hover);
+  color: var(--ribbon-text);
+}
+
+/* Swatch Color Bar under Split Buttons */
+.pdocs-ribbon-color-bar {
+  position: absolute;
+  bottom: 1px;
+  left: 3px;
+  right: 3px;
+  height: 3px;
+  border-radius: 1px;
+}
+
+/* Popover Dropdown Menu */
+.pdocs-ribbon-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 180px;
+  background: var(--ribbon-bg);
+  border: 1px solid var(--ribbon-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pdocs-ribbon-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--ribbon-text);
+  cursor: pointer;
+  text-align: left;
+}
+.pdocs-ribbon-menu-item:hover {
+  background: var(--ribbon-hover);
+}
+.pdocs-ribbon-menu-item.active {
+  background: var(--ribbon-active);
+  color: var(--ribbon-accent);
+}
+.pdocs-ribbon-menu-separator {
+  height: 1px;
+  background: var(--ribbon-border);
+  margin: 4px 0;
+}
