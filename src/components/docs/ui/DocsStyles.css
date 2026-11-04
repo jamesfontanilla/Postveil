@@ -691,8 +691,26 @@
   .pdocs-page-footer {
     opacity: 1 !important;
     visibility: visible !important;
+    display: flex !important;
     border-color: #e2e8f0 !important;
     color: #64748b !important;
+    font-size: 10px !important;
+    user-select: none !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Force footers to sit cleanly at physical bottom margin */
+  .pdocs-page-footer {
+    border-top: 1px solid #cbd5e1 !important;
+  }
+
+  /* Hide interactive header/footer input boxes and controls in print */
+  .pdocs-page-header input,
+  .pdocs-page-footer input,
+  .pdocs-page-header button,
+  .pdocs-page-footer button {
+    display: none !important;
   }
 }
 
