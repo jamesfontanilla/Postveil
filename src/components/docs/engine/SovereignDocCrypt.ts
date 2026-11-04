@@ -125,7 +125,83 @@ export class SovereignDocCrypt {
     );
   }
 
-  private static bytesToBase64(bytes: Uint8Array): string {
+  /* --------------------------------------------------------------------------
+     Ed25519 Sovereign Cryptographic Digital Signatures & Seal Verification
+     -------------------------------------------------------------------------- */
+
+  /**
+   * Generates or imports an Ed25519 cryptographic keypair in browser Web Crypto
+   */
+  public static async generateSigningKeyPair(): Promise<CryptoKeyPair> {
+    return crypto.subtle.generateKey(
+      { name: "Ed25519" },
+      true, // extractable
+      ["sign", "verify"]
+    );
+  }
+
+  /**
+   * Signs a canonical document hash (SHA-256 hex or raw data) with an Ed25519 private key
+   */
+  public static async signDocumentHash(
+    docHash: string,
+    privateKey: CryptoKey
+  ): Promise<string> {
+    const dataBytes = new TextEncoder().encode(docHash);
+    const signatureBuffer = await crypto.subtle.sign(
+      { name: "Ed25519" },
+      privateKey,
+      dataBytes
+    );
+    return this.bytesToBase64(new Uint8Array(signatureBuffer));
+  }
+
+  /**
+   * Verifies an Ed25519 signature against the document hash using the public key
+   */
+  public static async verifyDocumentSignature(
+    docHash: string,
+    signatureBase64: string,
+    publicKey: CryptoKey | string
+  ): Promise<boolean> {
+    try {
+      let key: CryptoKey;
+      if (typeof publicKey === "string") {
+        const keyBytes = this.base64ToBytes(publicKey);
+        key = await crypto.subtle.importKey(
+          "raw",
+          keyBytes.buffer as ArrayBuffer,
+          { name: "Ed25519" },
+          true,
+          ["verify"]
+        );
+      } else {
+        key = publicKey;
+      }
+
+      const sigBytes = this.base64ToBytes(signatureBase64);
+      const dataBytes = new TextEncoder().encode(docHash);
+
+      return await crypto.subtle.verify(
+        { name: "Ed25519" },
+        key,
+        sigBytes.buffer as ArrayBuffer,
+        dataBytes.buffer as ArrayBuffer
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Exports an Ed25519 CryptoKey to Base64
+   */
+  public static async exportKeyBase64(key: CryptoKey): Promise<string> {
+    const raw = await crypto.subtle.exportKey("raw", key);
+    return this.bytesToBase64(new Uint8Array(raw));
+  }
+
+  public static bytesToBase64(bytes: Uint8Array): string {
     let binary = "";
     for (let i = 0; i < bytes.length; i++) {
       binary += String.fromCharCode(bytes[i]);
@@ -133,7 +209,7 @@ export class SovereignDocCrypt {
     return btoa(binary);
   }
 
-  private static base64ToBytes(base64: string): Uint8Array {
+  public static base64ToBytes(base64: string): Uint8Array {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
