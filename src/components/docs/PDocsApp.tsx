@@ -725,6 +725,22 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     }
   };
 
+  const handleEquationAction = (action: string, params: Record<string, any> = {}) => {
+    if (!activeBlockId) return;
+    const targetBlock = doc.blocks.find((b) => b.id === activeBlockId);
+    if (!targetBlock || targetBlock.type !== "mathBlock") return;
+
+    if (action === "equation.insertSymbol" && params.latex) {
+      const current = targetBlock.latex || targetBlock.content || "";
+      const updated = current ? `${current} ${params.latex}` : params.latex;
+      handleUpdateMathLatex(activeBlockId, updated);
+    } else if (action === "equation.insertStructure" && params.snippet) {
+      const current = targetBlock.latex || targetBlock.content || "";
+      const updated = current ? `${current} ${params.snippet}` : params.snippet;
+      handleUpdateMathLatex(activeBlockId, updated);
+    }
+  };
+
   const handleUpdateCallout = (blockId: string, variant?: import("./types").CalloutVariant, title?: string) => {
     engineRef.current.updateCallout(blockId, variant, title);
     setDoc({ ...engineRef.current.getDocument() });
@@ -1053,8 +1069,12 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         hasImageSelected={
           activeBlockId ? doc.blocks.find((b) => b.id === activeBlockId)?.type === "image" : false
         }
+        hasMathSelected={
+          activeBlockId ? doc.blocks.find((b) => b.id === activeBlockId)?.type === "mathBlock" : false
+        }
         onTableAction={handleTableAction}
         onPictureAction={handlePictureAction}
+        onEquationAction={handleEquationAction}
         doc={doc}
         onNewDoc={handleNewDoc}
         onOpenLibrary={() => setIsLibraryOpen(true)}

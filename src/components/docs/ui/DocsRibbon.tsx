@@ -21,6 +21,7 @@ import {
   CollapsedGroupButton,
   RibbonIcons,
   useRibbonDispatcher,
+  EquationSymbolsGallery,
 } from "./ribbon";
 import { TableGridPicker } from "./ribbon/components/TableGridPicker";
 import { StylesGallery } from "./ribbon/components/StylesGallery";
@@ -38,6 +39,7 @@ export interface DocsRibbonProps extends RibbonCommandContext {
   onSelectStyle?: (type: BlockType, level?: number) => void;
   hasTableSelected?: boolean;
   hasImageSelected?: boolean;
+  hasMathSelected?: boolean;
   doc?: UniversalDoc;
   onNewDoc?: () => void;
   onOpenLibrary?: () => void;
@@ -379,6 +381,47 @@ const RibbonShelf: React.FC<{
                       </div>
                     );
                   }
+                  if (item.customRender === "EquationSymbolsGallery") {
+                    return (
+                      <div key={item.id} className="flex items-center">
+                        <EquationSymbolsGallery />
+                      </div>
+                    );
+                  }
+                  if (item.kind === "menu" && item.items) {
+                    return (
+                      <div key={item.id} className="relative">
+                        <RibbonSmallButton
+                          id={item.id}
+                          icon={item.icon as any}
+                          label={item.label}
+                          tooltip={item.tooltip}
+                          onClick={() => {
+                            if (openMenuId === item.id) {
+                              setOpenMenuId(null);
+                              setAnchorEl(null);
+                            } else {
+                              setOpenMenuId(item.id);
+                              const el = document.querySelector(`[data-command-id="${item.id}"]`) as HTMLElement;
+                              setAnchorEl(el);
+                            }
+                          }}
+                        />
+                        {openMenuId === item.id && (
+                          <RibbonDropdownMenu
+                            isOpen={true}
+                            anchorEl={anchorEl}
+                            items={item.items}
+                            onSelect={(cmd, params) => {
+                              dispatcher.dispatch(cmd, params);
+                              setOpenMenuId(null);
+                            }}
+                            onClose={() => setOpenMenuId(null)}
+                          />
+                        )}
+                      </div>
+                    );
+                  }
                   if (item.kind === "big") {
                     return (
                       <RibbonBigButton
@@ -453,27 +496,73 @@ const RibbonShelf: React.FC<{
 };
 
 export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
-  const [activeTabId, setActiveTabId] = useState<string>("home");
+  const [activeTabId, setActiveTabId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("pdocs_ribbon_active_tab") || "home";
+    } catch {
+      return "home";
+    }
+  });
   const [isBackstageOpen, setIsBackstageOpen] = useState(false);
   const [isKeyTipsActive, setIsKeyTipsActive] = useState(false);
-  const [isRibbonCollapsed, setIsRibbonCollapsed] = useState(false);
+  const [isRibbonCollapsed, setIsRibbonCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("pdocs_ribbon_minimized") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [isFlyoutOpen, setIsFlyoutOpen] = useState(false);
-  const [isQatBelowRibbon, setIsQatBelowRibbon] = useState(false);
+  const [isQatBelowRibbon, setIsQatBelowRibbon] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("pdocs_qat_position") === "below";
+    } catch {
+      return false;
+    }
+  });
 
   const shelfWrapperRef = React.useRef<HTMLDivElement>(null);
   const { tier } = useRibbonReflow(shelfWrapperRef);
 
+  // Synchronize state preferences to localStorage
+  const handleSetRibbonCollapsed = (collapsed: boolean | ((prev: boolean) => boolean)) => {
+    setIsRibbonCollapsed((prev) => {
+      const next = typeof collapsed === "function" ? collapsed(prev) : collapsed;
+      try {
+        localStorage.setItem("pdocs_ribbon_minimized", next ? "true" : "false");
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleSetActiveTab = (tabId: string) => {
+    setActiveTabId(tabId);
+    try {
+      if (tabId !== "file") {
+        localStorage.setItem("pdocs_ribbon_active_tab", tabId);
+      }
+    } catch {}
+  };
+
+  const handleSetQatBelow = (below: boolean) => {
+    setIsQatBelowRibbon(below);
+    try {
+      localStorage.setItem("pdocs_qat_position", below ? "below" : "above");
+    } catch {}
+  };
+
   // Track contextual tab states & auto-switching
   const prevTableSelected = React.useRef(false);
   const prevImageSelected = React.useRef(false);
+  const prevMathSelected = React.useRef(false);
 
   React.useEffect(() => {
     if (props.hasTableSelected && !prevTableSelected.current) {
-      setActiveTabId("table-layout");
+      handleSetActiveTab("table-layout");
       if (isRibbonCollapsed) setIsFlyoutOpen(true);
     } else if (!props.hasTableSelected && prevTableSelected.current) {
       if (activeTabId === "table-layout" || activeTabId === "table-design") {
-        setActiveTabId("home");
+        handleSetActiveTab("home");
       }
     }
     prevTableSelected.current = !!props.hasTableSelected;
@@ -481,22 +570,34 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
 
   React.useEffect(() => {
     if (props.hasImageSelected && !prevImageSelected.current) {
-      setActiveTabId("picture-format");
+      handleSetActiveTab("picture-format");
       if (isRibbonCollapsed) setIsFlyoutOpen(true);
     } else if (!props.hasImageSelected && prevImageSelected.current) {
       if (activeTabId === "picture-format") {
-        setActiveTabId("home");
+        handleSetActiveTab("home");
       }
     }
     prevImageSelected.current = !!props.hasImageSelected;
   }, [props.hasImageSelected, activeTabId, isRibbonCollapsed]);
+
+  React.useEffect(() => {
+    if (props.hasMathSelected && !prevMathSelected.current) {
+      handleSetActiveTab("equation-design");
+      if (isRibbonCollapsed) setIsFlyoutOpen(true);
+    } else if (!props.hasMathSelected && prevMathSelected.current) {
+      if (activeTabId === "equation-design") {
+        handleSetActiveTab("home");
+      }
+    }
+    prevMathSelected.current = !!props.hasMathSelected;
+  }, [props.hasMathSelected, activeTabId, isRibbonCollapsed]);
 
   // Global hotkeys: Ctrl+F1 for collapse, Alt for KeyTips
   React.useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === "F1") {
         e.preventDefault();
-        setIsRibbonCollapsed((prev) => !prev);
+        handleSetRibbonCollapsed((prev) => !prev);
         setIsFlyoutOpen(false);
       } else if (e.key === "Alt" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
         // Toggle KeyTips
@@ -517,6 +618,9 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
   if (props.hasImageSelected) {
     visibleTabs.push(CONTEXTUAL_RIBBON_TABS["picture-format"]);
   }
+  if (props.hasMathSelected) {
+    visibleTabs.push(CONTEXTUAL_RIBBON_TABS["equation-design"]);
+  }
 
   const currentTab =
     visibleTabs.find((t) => t.id === activeTabId) || visibleTabs[1] || visibleTabs[0];
@@ -530,17 +634,17 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
       if (activeTabId === tabId && isFlyoutOpen) {
         setIsFlyoutOpen(false);
       } else {
-        setActiveTabId(tabId);
+        handleSetActiveTab(tabId);
         setIsFlyoutOpen(true);
       }
     } else {
-      setActiveTabId(tabId);
+      handleSetActiveTab(tabId);
     }
   };
 
   const handleTabDoubleClick = (tabId: string) => {
     if (tabId === "file") return;
-    setIsRibbonCollapsed((prev) => !prev);
+    handleSetRibbonCollapsed((prev) => !prev);
     setIsFlyoutOpen(false);
   };
 
@@ -555,7 +659,7 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
             canUndo={props.canUndo}
             canRedo={props.canRedo}
             isBelowRibbon={false}
-            onTogglePlacement={setIsQatBelowRibbon}
+            onTogglePlacement={handleSetQatBelow}
           />
         )}
 
@@ -565,6 +669,13 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
             const isContextual = !!tab.isContextual;
             const isFile = tab.id === "file";
             const isActive = !isFile && activeTabId === tab.id;
+            const contextualClass = isContextual
+              ? tab.contextualType === "math"
+                ? "contextual math"
+                : tab.contextualType === "image"
+                ? "contextual pic"
+                : "contextual"
+              : "";
 
             return (
               <button
@@ -572,7 +683,7 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
                 type="button"
                 role="tab"
                 aria-selected={isActive}
-                className={`pdocs-ribbon-tab-btn ${isFile ? "bg-blue-600! text-white! font-bold" : ""} ${isContextual ? "contextual" : ""} ${isActive ? "active" : ""}`}
+                className={`pdocs-ribbon-tab-btn ${isFile ? "bg-blue-600! text-white! font-bold" : ""} ${contextualClass} ${isActive ? "active" : ""}`}
                 onClick={() => handleTabClick(tab.id)}
                 onDoubleClick={() => handleTabDoubleClick(tab.id)}
                 data-keytip={tab.keyTip}
@@ -586,7 +697,7 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
           <RibbonPinButton
             isCollapsed={isRibbonCollapsed}
             onToggleCollapse={() => {
-              setIsRibbonCollapsed((prev) => !prev);
+              handleSetRibbonCollapsed((prev) => !prev);
               setIsFlyoutOpen(false);
             }}
           />
@@ -618,7 +729,7 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
             canUndo={props.canUndo}
             canRedo={props.canRedo}
             isBelowRibbon={true}
-            onTogglePlacement={setIsQatBelowRibbon}
+            onTogglePlacement={handleSetQatBelow}
           />
         )}
 

@@ -56,6 +56,9 @@ export interface RibbonCommandContext {
 
   // Contextual Picture actions
   onPictureAction?: (action: string, params?: Record<string, any>) => void;
+
+  // Contextual Equation actions
+  onEquationAction?: (action: string, params?: Record<string, any>) => void;
 }
 
 export class RibbonDispatcher {
@@ -224,6 +227,13 @@ export class RibbonDispatcher {
       case "picture.align":
       case "picture.dimensions":
         this.ctx.onPictureAction?.(commandId, params);
+        return true;
+
+      // --- Contextual Equation Commands ---
+      case "equation.insertSymbol":
+      case "equation.insertStructure":
+      case "equation.toggleMode":
+        this.ctx.onEquationAction?.(commandId, params);
         return true;
 
       default:

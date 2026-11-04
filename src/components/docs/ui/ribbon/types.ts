@@ -15,7 +15,8 @@ export type RibbonTabId =
   | "table-design"
   | "table-layout"
   | "picture-format"
-  | "shape-format";
+  | "shape-format"
+  | "equation-design";
 
 export type RibbonItemKind =
   | "big"
@@ -62,7 +63,7 @@ export interface RibbonTabDef {
   id: RibbonTabId;
   label: string;
   isContextual?: boolean;
-  contextualType?: "table" | "image" | "shape";
+  contextualType?: "table" | "image" | "shape" | "math";
   keyTip?: string;
   groups: RibbonGroupDef[];
 }

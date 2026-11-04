@@ -543,7 +543,7 @@ export const DEFAULT_RIBBON_TABS: RibbonTabDef[] = [
   },
 ];
 
-export const CONTEXTUAL_RIBBON_TABS: Record<"table-design" | "table-layout" | "picture-format", RibbonTabDef> = {
+export const CONTEXTUAL_RIBBON_TABS: Record<"table-design" | "table-layout" | "picture-format" | "equation-design", RibbonTabDef> = {
   "table-design": {
     id: "table-design",
     label: "Table Design",
@@ -854,6 +854,132 @@ export const CONTEXTUAL_RIBBON_TABS: Record<"table-design" | "table-layout" | "p
               { id: "pw-50", label: "50% Margin Width", commandId: "picture.dimensions", params: { width: "50%" } },
               { id: "pw-75", label: "75% Margin Width", commandId: "picture.dimensions", params: { width: "75%" } },
               { id: "pw-100", label: "100% Full Width", commandId: "picture.dimensions", params: { width: "100%" } },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+
+  "equation-design": {
+    id: "equation-design",
+    label: "Equation Design",
+    isContextual: true,
+    contextualType: "math",
+    groups: [
+      {
+        id: "equation.tools",
+        name: "Tools",
+        items: [
+          {
+            id: "eq-latex-mode",
+            kind: "small",
+            label: "LaTeX Source",
+            tooltip: "Toggle Direct LaTeX Code Mode",
+            icon: RibbonIcons.editing,
+            commandId: "equation.toggleMode",
+            priority: 1,
+          },
+        ],
+      },
+      {
+        id: "equation.symbols",
+        name: "Symbols",
+        items: [
+          {
+            id: "eq-symbols-gallery",
+            kind: "custom",
+            label: "Math Symbols",
+            tooltip: "Common Greek Letters and Math Operators",
+            customRender: "EquationSymbolsGallery",
+            priority: 1,
+          },
+        ],
+      },
+      {
+        id: "equation.structures",
+        name: "Structures",
+        items: [
+          {
+            id: "eq-fraction-menu",
+            kind: "menu",
+            label: "Fraction",
+            tooltip: "Insert Fraction",
+            icon: RibbonIcons.tableSplit,
+            commandId: "equation.insertStructure",
+            priority: 1,
+            items: [
+              { id: "eq-f-simple", label: "Simple Fraction (\\frac{a}{b})", commandId: "equation.insertStructure", params: { snippet: "\\frac{a}{b}" } },
+              { id: "eq-f-deriv", label: "Derivative (\\frac{df}{dx})", commandId: "equation.insertStructure", params: { snippet: "\\frac{df}{dx}" } },
+              { id: "eq-f-partial", label: "Partial Derivative (\\frac{\\partial f}{\\partial x})", commandId: "equation.insertStructure", params: { snippet: "\\frac{\\partial f}{\\partial x}" } },
+            ],
+          },
+          {
+            id: "eq-radical-menu",
+            kind: "menu",
+            label: "Radical",
+            tooltip: "Insert Square or N-th Root",
+            icon: RibbonIcons.check,
+            commandId: "equation.insertStructure",
+            priority: 1,
+            items: [
+              { id: "eq-r-sqrt", label: "Square Root (\\sqrt{x})", commandId: "equation.insertStructure", params: { snippet: "\\sqrt{x}" } },
+              { id: "eq-r-nroot", label: "N-th Root (\\sqrt[n]{x})", commandId: "equation.insertStructure", params: { snippet: "\\sqrt[n]{x}" } },
+            ],
+          },
+          {
+            id: "eq-script-menu",
+            kind: "menu",
+            label: "Script",
+            tooltip: "Insert Subscript or Superscript",
+            icon: RibbonIcons.superscript,
+            commandId: "equation.insertStructure",
+            priority: 2,
+            items: [
+              { id: "eq-s-super", label: "Superscript (x^{2})", commandId: "equation.insertStructure", params: { snippet: "x^{2}" } },
+              { id: "eq-s-sub", label: "Subscript (x_{i})", commandId: "equation.insertStructure", params: { snippet: "x_{i}" } },
+              { id: "eq-s-both", label: "Sub & Super (x_{i}^{2})", commandId: "equation.insertStructure", params: { snippet: "x_{i}^{2}" } },
+            ],
+          },
+          {
+            id: "eq-integral-menu",
+            kind: "menu",
+            label: "Integral",
+            tooltip: "Insert Integral",
+            icon: RibbonIcons.equation,
+            commandId: "equation.insertStructure",
+            priority: 2,
+            items: [
+              { id: "eq-int-indef", label: "Indefinite (\\int f(x) dx)", commandId: "equation.insertStructure", params: { snippet: "\\int f(x) dx" } },
+              { id: "eq-int-def", label: "Definite (\\int_{a}^{b} f(x) dx)", commandId: "equation.insertStructure", params: { snippet: "\\int_{a}^{b} f(x) dx" } },
+              { id: "eq-int-double", label: "Double Integral (\\iint)", commandId: "equation.insertStructure", params: { snippet: "\\iint f(x,y) dx dy" } },
+            ],
+          },
+          {
+            id: "eq-large-menu",
+            kind: "menu",
+            label: "Large Operator",
+            tooltip: "Summation and Products",
+            icon: RibbonIcons.equation,
+            commandId: "equation.insertStructure",
+            priority: 3,
+            items: [
+              { id: "eq-op-sum", label: "Summation (\\sum_{i=1}^{n})", commandId: "equation.insertStructure", params: { snippet: "\\sum_{i=1}^{n} x_i" } },
+              { id: "eq-op-prod", label: "Product (\\prod_{i=1}^{n})", commandId: "equation.insertStructure", params: { snippet: "\\prod_{i=1}^{n} x_i" } },
+            ],
+          },
+          {
+            id: "eq-matrix-menu",
+            kind: "menu",
+            label: "Matrix",
+            tooltip: "Insert Bracketed Matrix",
+            icon: RibbonIcons.grid,
+            commandId: "equation.insertStructure",
+            priority: 3,
+            items: [
+              { id: "eq-mat-2x2", label: "2 × 2 Matrix", commandId: "equation.insertStructure", params: { snippet: "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}" } },
+              { id: "eq-mat-3x3", label: "3 × 3 Matrix", commandId: "equation.insertStructure", params: { snippet: "\\begin{pmatrix} a & b & c \\\\ d & e & f \\\\ g & h & i \\end{pmatrix}" } },
+              { id: "eq-mat-det", label: "2 × 2 Determinant", commandId: "equation.insertStructure", params: { snippet: "\\begin{vmatrix} a & b \\\\ c & d \\end{vmatrix}" } },
             ],
           },
         ],
