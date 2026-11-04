@@ -200,6 +200,8 @@ export interface DocComment {
   id: string;
   blockId: string;
   quotedText?: string;
+  startIndex?: number;
+  endIndex?: number;
   author: string;
   authorEmail?: string;
   timestamp: string;
@@ -215,6 +217,8 @@ export interface DocSuggestion {
   authorEmail?: string;
   timestamp: string;
   type: "insert" | "delete" | "replace";
+  startIndex?: number;
+  endIndex?: number;
   originalText?: string;
   suggestedText: string;
   status: "pending" | "accepted" | "rejected";

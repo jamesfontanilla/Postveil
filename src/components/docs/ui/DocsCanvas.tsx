@@ -68,7 +68,7 @@ interface DocsCanvasProps {
   onUpdateHeaderFooter?: (headerText?: string, footerText?: string, differentFirstPage?: boolean, pageNumberStyle?: "standard" | "pageOfTotal" | "none") => void;
   onOpenHyperlinkModal?: (initialText?: string, initialUrl?: string) => void;
   reviewMode?: ReviewMode;
-  onOpenNewCommentModal?: (blockId: string, quotedText?: string) => void;
+  onOpenNewCommentModal?: (blockId: string, quotedText?: string, startIndex?: number, endIndex?: number) => void;
   onChangeBlockType?: (blockId: string, type: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) => void;
   onMergeWithPreviousBlock?: (blockId: string) => void;
   onActiveMarksChange?: (marks: ActiveMarks) => void;
@@ -823,8 +823,31 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                     </button>
                     <button
                       onClick={() => {
-                        const sel = window.getSelection()?.toString() || "";
-                        onOpenNewCommentModal?.(block.id, sel || (block.content || "").slice(0, 50));
+                        const sel = window.getSelection();
+                        const selectedText = sel?.toString() || "";
+                        let startOffset: number | undefined = undefined;
+                        let endOffset: number | undefined = undefined;
+
+                        if (sel && sel.rangeCount > 0) {
+                          const blockEl = document.getElementById(block.id);
+                          if (blockEl && blockEl.contains(sel.anchorNode)) {
+                            const offset = getCaretCharacterOffsetWithin(blockEl);
+                            if (selectedText) {
+                              startOffset = Math.max(0, offset - selectedText.length);
+                              endOffset = offset;
+                            } else {
+                              startOffset = offset;
+                              endOffset = offset;
+                            }
+                          }
+                        }
+
+                        onOpenNewCommentModal?.(
+                          block.id,
+                          selectedText || (block.content || "").slice(0, 50),
+                          startOffset,
+                          endOffset
+                        );
                       }}
                       title="Add comment (Ctrl+Alt+M)"
                       className="pdocs-block-add-btn"

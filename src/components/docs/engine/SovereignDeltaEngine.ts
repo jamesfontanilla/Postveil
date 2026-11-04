@@ -79,38 +79,65 @@ export class SovereignDeltaEngine {
   }
 
   /**
-   * Computes a character-level diff between original and updated text in suggesting mode
+   * Computes a fine-grained character-level diff between original and updated text in suggesting mode,
+   * returning exact offset boundaries and delta categorization.
    */
   public static computeSuggestion(
     originalText: string,
     newText: string,
     author: string,
     authorEmail?: string
-  ): { type: "insert" | "delete" | "replace"; originalText?: string; suggestedText: string } | null {
+  ): {
+    type: "insert" | "delete" | "replace";
+    originalText?: string;
+    suggestedText: string;
+    startIndex: number;
+    endIndex: number;
+  } | null {
     if (originalText === newText) return null;
 
-    // Fast-path: simple append
-    if (newText.startsWith(originalText)) {
-      return {
-        type: "insert",
-        suggestedText: newText.slice(originalText.length),
-      };
+    // Find common prefix length
+    let prefixLen = 0;
+    const minLen = Math.min(originalText.length, newText.length);
+    while (prefixLen < minLen && originalText[prefixLen] === newText[prefixLen]) {
+      prefixLen++;
     }
 
-    // Fast-path: simple prepend
-    if (newText.endsWith(originalText)) {
-      return {
-        type: "insert",
-        suggestedText: newText.slice(0, newText.length - originalText.length),
-      };
+    // Find common suffix length (ensuring no overlap with prefix)
+    let origSuffix = originalText.length;
+    let newSuffix = newText.length;
+    while (origSuffix > prefixLen && newSuffix > prefixLen && originalText[origSuffix - 1] === newText[newSuffix - 1]) {
+      origSuffix--;
+      newSuffix--;
     }
 
-    // General replace
-    return {
-      type: "replace",
-      originalText,
-      suggestedText: newText,
-    };
+    const removed = originalText.slice(prefixLen, origSuffix);
+    const added = newText.slice(prefixLen, newSuffix);
+
+    if (removed.length === 0 && added.length > 0) {
+      return {
+        type: "insert",
+        suggestedText: added,
+        startIndex: prefixLen,
+        endIndex: prefixLen,
+      };
+    } else if (added.length === 0 && removed.length > 0) {
+      return {
+        type: "delete",
+        originalText: removed,
+        suggestedText: "",
+        startIndex: prefixLen,
+        endIndex: origSuffix,
+      };
+    } else {
+      return {
+        type: "replace",
+        originalText: removed,
+        suggestedText: added,
+        startIndex: prefixLen,
+        endIndex: origSuffix,
+      };
+    }
   }
 
   /**

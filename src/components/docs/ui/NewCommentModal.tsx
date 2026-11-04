@@ -5,14 +5,18 @@ interface NewCommentModalProps {
   isOpen: boolean;
   onClose: () => void;
   quotedText?: string;
+  startIndex?: number;
+  endIndex?: number;
   blockId: string;
-  onAddComment: (blockId: string, text: string, quotedText?: string) => void;
+  onAddComment: (blockId: string, text: string, quotedText?: string, startIndex?: number, endIndex?: number) => void;
 }
 
 export const NewCommentModal: React.FC<NewCommentModalProps> = ({
   isOpen,
   onClose,
   quotedText,
+  startIndex,
+  endIndex,
   blockId,
   onAddComment,
 }) => {
@@ -23,7 +27,7 @@ export const NewCommentModal: React.FC<NewCommentModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentText.trim()) return;
-    onAddComment(blockId, commentText.trim(), quotedText);
+    onAddComment(blockId, commentText.trim(), quotedText, startIndex, endIndex);
     setCommentText("");
     onClose();
   };

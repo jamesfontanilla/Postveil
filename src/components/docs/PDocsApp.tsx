@@ -74,6 +74,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [isNewCommentModalOpen, setIsNewCommentModalOpen] = useState(false);
   const [commentTargetBlockId, setCommentTargetBlockId] = useState<string>("");
   const [commentQuotedText, setCommentQuotedText] = useState<string>("");
+  const [commentStartIndex, setCommentStartIndex] = useState<number | undefined>(undefined);
+  const [commentEndIndex, setCommentEndIndex] = useState<number | undefined>(undefined);
   const [reviewMode, setReviewMode] = useState<ReviewMode>("editing");
   const [hyperlinkInitialText, setHyperlinkInitialText] = useState("");
   const [hyperlinkInitialUrl, setHyperlinkInitialUrl] = useState("");
@@ -261,7 +263,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             computed.suggestedText,
             computed.originalText,
             userName || (userEmail ? userEmail.split("@")[0] : "Reviewer"),
-            userEmail
+            userEmail,
+            computed.startIndex,
+            computed.endIndex
           );
           setDoc({ ...engineRef.current.getDocument() });
           return;
@@ -726,16 +730,18 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     setIsVersionHistoryOpen(false);
   };
 
-  const handleOpenNewCommentModal = (blockId?: string, quotedText?: string) => {
+  const handleOpenNewCommentModal = (blockId?: string, quotedText?: string, startIndex?: number, endIndex?: number) => {
     const sel = window.getSelection();
     const text = quotedText || (sel ? sel.toString().trim() : "");
     setCommentTargetBlockId(blockId || activeBlockId || doc.blocks[0]?.id || "");
     setCommentQuotedText(text);
+    setCommentStartIndex(startIndex);
+    setCommentEndIndex(endIndex);
     setIsNewCommentModalOpen(true);
   };
 
-  const handleAddComment = (blockId: string, text: string, quotedText?: string) => {
-    engineRef.current.addComment(blockId, text, userName, userEmail, quotedText);
+  const handleAddComment = (blockId: string, text: string, quotedText?: string, startIndex?: number, endIndex?: number) => {
+    engineRef.current.addComment(blockId, text, userName, userEmail, quotedText, startIndex, endIndex);
     setDoc({ ...engineRef.current.getDocument() });
   };
 
@@ -1060,6 +1066,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onClose={() => setIsNewCommentModalOpen(false)}
         blockId={commentTargetBlockId}
         quotedText={commentQuotedText}
+        startIndex={commentStartIndex}
+        endIndex={commentEndIndex}
         onAddComment={handleAddComment}
       />
     </div>

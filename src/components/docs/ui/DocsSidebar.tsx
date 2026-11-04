@@ -472,9 +472,11 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
                     </div>
                   </div>
 
-                  {/* Quoted Text Snippet */}
+                  {/* Quoted Text Snippet (Clickable to jump to anchored block) */}
                   {comment.quotedText && (
                     <div
+                      onClick={() => onScrollToBlock(comment.blockId)}
+                      title="Click to jump to comment position"
                       style={{
                         padding: "4px 8px",
                         backgroundColor: "#f1f5f9",
@@ -484,6 +486,7 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
                         color: "#475569",
                         fontStyle: "italic",
                         marginBottom: 6,
+                        cursor: "pointer",
                       }}
                     >
                       "{comment.quotedText}"

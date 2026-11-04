@@ -146,12 +146,41 @@ export class DocumentEngine {
     tr.setMeta("mergeTarget", prevBlock.id);
     tr.setMeta("joinOffset", joinOffset);
 
+    // Re-anchor any comments & suggestions from currentBlock into prevBlock with shifted offsets
+    const updatedComments = (this.doc.metadata.comments || []).map((c) => {
+      if (c.blockId === currentId) {
+        return {
+          ...c,
+          blockId: prevBlock.id,
+          startIndex: c.startIndex !== undefined ? c.startIndex + joinOffset : undefined,
+          endIndex: c.endIndex !== undefined ? c.endIndex + joinOffset : undefined,
+        };
+      }
+      return c;
+    });
+
+    const updatedSuggestions = (this.doc.metadata.suggestions || []).map((s) => {
+      if (s.blockId === currentId) {
+        return {
+          ...s,
+          blockId: prevBlock.id,
+          startIndex: s.startIndex !== undefined ? s.startIndex + joinOffset : undefined,
+          endIndex: s.endIndex !== undefined ? s.endIndex + joinOffset : undefined,
+        };
+      }
+      return s;
+    });
+
     const ok = tr.stepAtomic([
       new UpdateContentStep(prevBlock.id, joinedText),
       new DeleteNodeStep(currentId),
     ]);
 
     if (ok) {
+      tr.updateDocMetadata({
+        comments: updatedComments,
+        suggestions: updatedSuggestions,
+      });
       this.dispatch(tr);
       return { targetBlockId: prevBlock.id, joinOffset };
     }
@@ -170,12 +199,44 @@ export class DocumentEngine {
     tr.setMeta("splitOrigin", currentId);
     tr.setMeta("splitTarget", newBlock.id);
 
+    const splitOffset = currentContent.length;
+
+    // Migrate comments that start at or beyond splitOffset to the new block
+    const updatedComments = (this.doc.metadata.comments || []).map((c) => {
+      if (c.blockId === currentId && c.startIndex !== undefined && c.startIndex >= splitOffset) {
+        return {
+          ...c,
+          blockId: newBlock.id,
+          startIndex: c.startIndex - splitOffset,
+          endIndex: c.endIndex !== undefined ? c.endIndex - splitOffset : undefined,
+        };
+      }
+      return c;
+    });
+
+    // Migrate suggestions that start at or beyond splitOffset to the new block
+    const updatedSuggestions = (this.doc.metadata.suggestions || []).map((s) => {
+      if (s.blockId === currentId && s.startIndex !== undefined && s.startIndex >= splitOffset) {
+        return {
+          ...s,
+          blockId: newBlock.id,
+          startIndex: s.startIndex - splitOffset,
+          endIndex: s.endIndex !== undefined ? s.endIndex - splitOffset : undefined,
+        };
+      }
+      return s;
+    });
+
     const ok = tr.stepAtomic([
       new UpdateContentStep(currentId, currentContent, currentHtml),
       new InsertNodeStep(currentId, node),
     ]);
 
     if (ok) {
+      tr.updateDocMetadata({
+        comments: updatedComments,
+        suggestions: updatedSuggestions,
+      });
       this.dispatch(tr);
     }
     return newBlock;
@@ -404,13 +465,17 @@ export class DocumentEngine {
     text: string,
     author: string,
     authorEmail?: string,
-    quotedText?: string
+    quotedText?: string,
+    startIndex?: number,
+    endIndex?: number
   ): DocComment {
     const comments = [...(this.doc.metadata.comments || [])];
     const comment: DocComment = {
       id: `c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       blockId,
       quotedText,
+      startIndex,
+      endIndex,
       author,
       authorEmail,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" }),
@@ -466,7 +531,9 @@ export class DocumentEngine {
     suggestedText: string,
     originalText: string = "",
     author: string = "Reviewer",
-    authorEmail?: string
+    authorEmail?: string,
+    startIndex?: number,
+    endIndex?: number
   ): DocSuggestion {
     const suggestions = [...(this.doc.metadata.suggestions || [])];
     const suggestion: DocSuggestion = {
@@ -476,6 +543,8 @@ export class DocumentEngine {
       authorEmail,
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "numeric" }),
       type,
+      startIndex,
+      endIndex,
       originalText,
       suggestedText,
       status: "pending",
@@ -494,18 +563,46 @@ export class DocumentEngine {
     const tr = this.state.tr();
     const block = this.doc.blocks.find((b) => b.id === s.blockId);
     if (block) {
-      let nextContent = block.content || "";
-      if (s.type === "insert") {
-        nextContent = nextContent ? `${nextContent} ${s.suggestedText}` : s.suggestedText;
-      } else if (s.type === "delete" && s.originalText) {
-        nextContent = nextContent.replace(s.originalText, "");
-      } else if (s.type === "replace") {
-        if (s.originalText && nextContent.includes(s.originalText)) {
-          nextContent = nextContent.replace(s.originalText, s.suggestedText);
+      const content = block.content || "";
+      let nextContent = content;
+
+      // Exact offset-bounded splicing if startIndex and endIndex are recorded
+      if (s.startIndex !== undefined && s.startIndex >= 0 && s.startIndex <= content.length) {
+        const start = s.startIndex;
+        const end = s.endIndex !== undefined ? Math.min(s.endIndex, content.length) : start;
+
+        // Verify that the segment at [start, end] matches originalText if provided
+        const targetedSegment = content.slice(start, end);
+        if (!s.originalText || targetedSegment === s.originalText) {
+          nextContent = content.slice(0, start) + s.suggestedText + content.slice(end);
         } else {
-          nextContent = s.suggestedText;
+          // Fallback to localized search starting around start index
+          const idx = content.indexOf(s.originalText, start) !== -1
+            ? content.indexOf(s.originalText, start)
+            : content.indexOf(s.originalText);
+          if (idx !== -1) {
+            nextContent = content.slice(0, idx) + s.suggestedText + content.slice(idx + s.originalText.length);
+          } else {
+            nextContent = s.suggestedText;
+          }
+        }
+      } else {
+        // Fallback for suggestions without explicit indices
+        if (s.type === "insert") {
+          nextContent = content ? `${content} ${s.suggestedText}` : s.suggestedText;
+        } else if (s.type === "delete" && s.originalText) {
+          const idx = content.indexOf(s.originalText);
+          nextContent = idx !== -1 ? content.slice(0, idx) + content.slice(idx + s.originalText.length) : content;
+        } else if (s.type === "replace") {
+          if (s.originalText) {
+            const idx = content.indexOf(s.originalText);
+            nextContent = idx !== -1 ? content.slice(0, idx) + s.suggestedText + content.slice(idx + s.originalText.length) : s.suggestedText;
+          } else {
+            nextContent = s.suggestedText;
+          }
         }
       }
+
       tr.updateContent(block.id, nextContent);
     }
 
