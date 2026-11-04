@@ -941,7 +941,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         }
         onSelectStyle={(type, level) => {
           if (activeBlockId) {
-            handleChangeBlockType(activeBlockId, type, level);
+            const safeLevel = (level && level >= 1 && level <= 6 ? (level as 1 | 2 | 3 | 4 | 5 | 6) : 1);
+            handleChangeBlockType(activeBlockId, type, safeLevel);
           }
         }}
         activeMarks={activeMarks}

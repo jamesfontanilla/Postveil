@@ -17,7 +17,7 @@ import {
 import { TableGridPicker } from "./ribbon/components/TableGridPicker";
 import { StylesGallery } from "./ribbon/components/StylesGallery";
 import { ColorPaletteDropdown } from "./ribbon/components/ColorPaletteDropdown";
-import { BlockType } from "./types";
+import { BlockType } from "../types";
 import "./ribbon/DocsRibbon.css";
 
 export interface DocsRibbonProps extends RibbonCommandContext {
@@ -271,7 +271,7 @@ const RibbonShelf: React.FC<{
                         icon={item.icon as any}
                         label="1.15"
                         tooltip={item.tooltip}
-                        onClick={(e: any) => handleDropdownClick(item.id, e)}
+                        onClick={() => {}}
                       />
                       {openMenuId === item.id && item.items && (
                         <RibbonDropdownMenu
@@ -327,8 +327,7 @@ const RibbonShelf: React.FC<{
                 label="Table"
                 tooltip="Add a Table"
                 hasDropdown={true}
-                onClick={(e: any) => {
-                  setTableAnchorEl(e?.currentTarget || null);
+                onClick={() => {
                   setIsTablePickerOpen(!isTablePickerOpen);
                 }}
               />
@@ -375,12 +374,8 @@ const RibbonShelf: React.FC<{
                         icon={item.icon as any}
                         label={item.label}
                         tooltip={item.tooltip}
-                        onClick={(e: any) => {
-                          if (item.items) {
-                            handleDropdownClick(item.id, e);
-                          } else {
-                            dispatcher.dispatch(item.commandId || "", item.defaultParams);
-                          }
+                        onClick={() => {
+                          dispatcher.dispatch(item.commandId || "", item.defaultParams);
                         }}
                       />
                       {openMenuId === item.id && item.items && (
