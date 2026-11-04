@@ -103,8 +103,9 @@
   padding: 2px 8px;
   gap: 4px;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   scrollbar-width: thin;
+  position: relative;
 }
 
 /* Ribbon Group */
@@ -365,4 +366,37 @@
   height: 1px;
   background: var(--ribbon-border);
   margin: 4px 0;
+}
+
+/* Explicit Table Grid Picker Styling */
+.pdocs-table-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--ribbon-bg);
+  border: 1px solid var(--ribbon-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+  padding: 12px;
+  z-index: 100;
+  min-width: 210px;
+}
+
+.pdocs-table-grid {
+  display: grid !important;
+  gap: 4px;
+}
+
+.pdocs-table-cell {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--ribbon-border);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+.pdocs-table-cell.highlighted {
+  background-color: rgba(37, 99, 235, 0.25);
+  border-color: #3b82f6;
 }

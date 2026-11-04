@@ -22,7 +22,7 @@ export const TableGridPicker: React.FC<TableGridPickerProps> = ({
   };
 
   return (
-    <div className="pdocs-table-picker p-3 bg-[var(--ribbon-bg)] border border-[var(--ribbon-border)] rounded-lg shadow-xl select-none">
+    <div className="pdocs-table-picker select-none">
       <div className="text-xs font-semibold text-[var(--ribbon-text)] mb-2 text-center">
         {hoveredRow > 0 && hoveredCol > 0
           ? `${hoveredRow} × ${hoveredCol} Table`
@@ -30,9 +30,11 @@ export const TableGridPicker: React.FC<TableGridPickerProps> = ({
       </div>
 
       <div
-        className="grid gap-1"
+        className="pdocs-table-grid"
         style={{
+          display: "grid",
           gridTemplateColumns: `repeat(${maxCols}, minmax(0, 1fr))`,
+          gap: "4px",
         }}
         onMouseLeave={() => {
           setHoveredRow(0);
@@ -45,11 +47,7 @@ export const TableGridPicker: React.FC<TableGridPickerProps> = ({
             return (
               <div
                 key={`${r}-${c}`}
-                className={`w-5 h-5 border rounded-sm cursor-pointer transition-colors ${
-                  isHighlighted
-                    ? "bg-blue-500/20 border-blue-500"
-                    : "border-slate-300 dark:border-slate-700 hover:border-slate-400 bg-transparent"
-                }`}
+                className={`pdocs-table-cell ${isHighlighted ? "highlighted" : ""}`}
                 onMouseEnter={() => {
                   setHoveredRow(r + 1);
                   setHoveredCol(c + 1);

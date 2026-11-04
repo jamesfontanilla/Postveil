@@ -47,10 +47,19 @@ export const ColorPaletteDropdown: React.FC<ColorPaletteDropdownProps> = ({
 
   if (!isOpen || !anchorEl) return null;
 
+  const rect = anchorEl.getBoundingClientRect();
+  const top = rect.bottom + window.scrollY + 4;
+  const left = Math.max(10, Math.min(window.innerWidth - 220, rect.left + window.scrollX));
+
   return (
     <div
       ref={dropdownRef}
       className="pdocs-ribbon-dropdown p-2 bg-[var(--ribbon-bg)] border border-[var(--ribbon-border)] rounded-lg shadow-2xl z-50 min-w-[200px]"
+      style={{
+        position: "fixed",
+        top: `${rect.bottom + 4}px`,
+        left: `${left}px`,
+      }}
     >
       <div className="text-[11px] font-semibold text-[var(--ribbon-text-dim)] uppercase tracking-wider mb-2">
         {mode === "textColor" ? "Font Colors" : "Highlight Colors"}
