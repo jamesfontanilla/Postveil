@@ -1,4 +1,4 @@
-import { type UniversalDoc, type ExportOptions } from "../types";
+import { type UniversalDoc, type ExportOptions, type DocBlock, type TableRow, type TableCell } from "../types";
 import { type DocumentCodec } from "./UniversalFormatEngine";
 import JSZip from "jszip";
 
@@ -18,11 +18,27 @@ export const odtCodec: DocumentCodec = {
   },
 
   async import(raw: string | ArrayBuffer): Promise<UniversalDoc> {
+    const now = new Date().toISOString();
     try {
       const zip = await JSZip.loadAsync(raw);
       const contentXml = await zip.file("content.xml")?.async("string");
-      const title = "Imported ODT Document";
-      const now = new Date().toISOString();
+      const metaXml = await zip.file("meta.xml")?.async("string");
+
+      let title = "Imported ODT Document";
+      let author = "OpenDocument Author";
+
+      // 1. Parse meta.xml if present for true document title and creator
+      if (metaXml) {
+        try {
+          const metaDoc = new DOMParser().parseFromString(metaXml, "application/xml");
+          const titleEl = metaDoc.getElementsByTagName("dc:title")[0];
+          const creatorEl = metaDoc.getElementsByTagName("dc:creator")[0];
+          if (titleEl?.textContent?.trim()) title = titleEl.textContent.trim();
+          if (creatorEl?.textContent?.trim()) author = creatorEl.textContent.trim();
+        } catch {
+          // Fall back to defaults
+        }
+      }
 
       if (!contentXml) {
         throw new Error("Missing content.xml in ODT archive");
@@ -30,51 +46,189 @@ export const odtCodec: DocumentCodec = {
 
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(contentXml, "application/xml");
-      const pElements = xmlDoc.getElementsByTagName("text:p");
-      const blocks: any[] = [];
 
-      for (let i = 0; i < pElements.length; i++) {
-        const text = pElements[i].textContent?.trim();
-        if (text) {
-          blocks.push({
-            id: `b_odt_${i}`,
-            type: i === 0 ? "heading" : "paragraph",
-            level: i === 0 ? 1 : undefined,
-            content: text,
+      // 2. Locate <office:text>
+      const officeText =
+        xmlDoc.getElementsByTagName("office:text")[0] ||
+        xmlDoc.getElementsByTagName("text")[0] ||
+        xmlDoc.documentElement;
+
+      const blocks: DocBlock[] = [];
+      let blockCounter = 1;
+      const nextId = (prefix = "b_odt") => `${prefix}_${Date.now()}_${blockCounter++}`;
+
+      // 3. Sequentially traverse direct child nodes of office:text to preserve document order
+      const childNodes = Array.from(officeText.childNodes);
+
+      for (const node of childNodes) {
+        if (node.nodeType !== 1) continue; // Skip non-element nodes
+        const el = node as Element;
+        const tagName = (el.tagName || "").toLowerCase();
+
+        // 3a. Headings: <text:h>
+        if (tagName.endsWith(":h") || tagName === "h") {
+          const levelAttr = el.getAttribute("text:outline-level") || el.getAttribute("outline-level") || "1";
+          const levelNum = parseInt(levelAttr, 10);
+          const level: 1 | 2 | 3 | 4 | 5 | 6 = levelNum >= 1 && levelNum <= 6 ? (levelNum as any) : 1;
+          const text = (el.textContent || "").trim();
+          if (text) {
+            blocks.push({
+              id: nextId("b_h"),
+              type: "heading",
+              level,
+              content: text,
+            });
+          }
+          continue;
+        }
+
+        // 3b. Tables: <table:table>
+        if (tagName.endsWith(":table") || tagName === "table") {
+          const rows: TableRow[] = [];
+          const rowElements = Array.from(el.getElementsByTagName("table:table-row")).concat(
+            Array.from(el.getElementsByTagName("table-row"))
+          );
+
+          rowElements.forEach((rowEl, rIdx) => {
+            const cellElements = Array.from(rowEl.getElementsByTagName("table:table-cell")).concat(
+              Array.from(rowEl.getElementsByTagName("table-cell"))
+            );
+            const cells: TableCell[] = [];
+
+            cellElements.forEach((cellEl, cIdx) => {
+              const cellText = (cellEl.textContent || "").trim();
+              const isHeader = rIdx === 0 || cellEl.getAttribute("table:is-header") === "true";
+              cells.push({
+                id: `cell_${Date.now()}_${rIdx}_${cIdx}`,
+                content: cellText,
+                isHeader,
+              });
+            });
+
+            if (cells.length > 0) {
+              rows.push({
+                id: `row_${Date.now()}_${rIdx}`,
+                cells,
+              });
+            }
           });
+
+          if (rows.length > 0) {
+            blocks.push({
+              id: nextId("b_tbl"),
+              type: "table",
+              rows,
+            });
+          }
+          continue;
+        }
+
+        // 3c. Lists: <text:list>
+        if (tagName.endsWith(":list") || tagName === "list") {
+          const isOrdered = el.getAttribute("text:style-name")?.toLowerCase().includes("number") ?? false;
+          const itemElements = Array.from(el.getElementsByTagName("text:list-item")).concat(
+            Array.from(el.getElementsByTagName("list-item"))
+          );
+
+          itemElements.forEach((itemEl) => {
+            const itemText = (itemEl.textContent || "").trim();
+            if (itemText) {
+              blocks.push({
+                id: nextId(isOrdered ? "b_ord" : "b_bul"),
+                type: isOrdered ? "orderedList" : "bulletList",
+                content: itemText,
+              });
+            }
+          });
+          continue;
+        }
+
+        // 3d. Paragraphs: <text:p>
+        if (tagName.endsWith(":p") || tagName === "p") {
+          // Check for embedded MathML (<math:math> or <math>)
+          const mathElements = Array.from(el.getElementsByTagName("math:math")).concat(
+            Array.from(el.getElementsByTagName("math"))
+          );
+
+          if (mathElements.length > 0) {
+            const mathEl = mathElements[0];
+            const mathText = (mathEl.textContent || "").trim();
+            blocks.push({
+              id: nextId("b_math"),
+              type: "mathBlock",
+              latex: mathText,
+              content: mathText,
+            });
+            continue;
+          }
+
+          const text = (el.textContent || "").trim();
+          if (text) {
+            const styleName = (el.getAttribute("text:style-name") || "").toLowerCase();
+            const isQuote = styleName.includes("quote") || styleName.includes("quotation");
+            const isCode = styleName.includes("code") || styleName.includes("pre") || styleName.includes("mono");
+
+            if (isQuote) {
+              blocks.push({
+                id: nextId("b_q"),
+                type: "blockquote",
+                content: text,
+              });
+            } else if (isCode) {
+              blocks.push({
+                id: nextId("b_code"),
+                type: "codeBlock",
+                content: text,
+              });
+            } else {
+              blocks.push({
+                id: nextId("b_p"),
+                type: "paragraph",
+                content: text,
+              });
+            }
+          }
+          continue;
         }
       }
 
-      return {
-        metadata: {
-          id: `doc_${Date.now()}`,
-          title: blocks[0]?.content || title,
-          author: "OpenDocument Author",
-          createdAt: now,
-          updatedAt: now,
-          version: 1,
-          wordCount: blocks.length * 15,
-          charCount: blocks.length * 90,
-          readingTimeMinutes: 1,
-          paperSize: "A4",
-          orientation: "portrait",
-          lineSpacing: "1.15",
-          fontFamily: "Liberation Sans",
-          fontSize: 15,
-          isEncrypted: false,
-        },
-        blocks: blocks.length > 0 ? blocks : [
-          { id: "b1", type: "heading", level: 1, content: title },
-          { id: "b2", type: "paragraph", content: "Imported ODT content." },
-        ],
-      };
-    } catch {
-      const title = "Imported ODT Document";
-      const now = new Date().toISOString();
+      // If title wasn't in meta, take first heading or paragraph
+      if (title === "Imported ODT Document" && blocks[0]?.content) {
+        title = blocks[0].content;
+      }
+
+      const fullText = blocks.map((b) => b.content || "").join(" ");
+      const wordCount = fullText.split(/\s+/).filter(Boolean).length;
+      const charCount = fullText.length;
+
       return {
         metadata: {
           id: `doc_${Date.now()}`,
           title,
+          author,
+          createdAt: now,
+          updatedAt: now,
+          version: 1,
+          wordCount,
+          charCount,
+          readingTimeMinutes: Math.max(1, Math.ceil(wordCount / 200)),
+          paperSize: "A4",
+          orientation: "portrait",
+          lineSpacing: "1.15",
+          fontFamily: "Kerneon Grotesk",
+          fontSize: 14,
+          isEncrypted: false,
+        },
+        blocks: blocks.length > 0 ? blocks : [
+          { id: nextId("b_h"), type: "heading", level: 1, content: title },
+          { id: nextId("b_p"), type: "paragraph", content: "Imported ODT content." },
+        ],
+      };
+    } catch {
+      return {
+        metadata: {
+          id: `doc_${Date.now()}`,
+          title: "Imported ODT Document",
           author: "OpenDocument Author",
           createdAt: now,
           updatedAt: now,
@@ -85,12 +239,12 @@ export const odtCodec: DocumentCodec = {
           paperSize: "A4",
           orientation: "portrait",
           lineSpacing: "1.15",
-          fontFamily: "Liberation Sans",
-          fontSize: 15,
+          fontFamily: "Kerneon Grotesk",
+          fontSize: 14,
           isEncrypted: false,
         },
         blocks: [
-          { id: "b1", type: "heading", level: 1, content: title },
+          { id: "b1", type: "heading", level: 1, content: "Imported ODT Document" },
           { id: "b2", type: "paragraph", content: "Successfully imported OpenDocument." },
         ],
       };
@@ -129,10 +283,10 @@ export const odtCodec: DocumentCodec = {
 
     // 4. styles.xml
     const stylesXml = `<?xml version="1.0" encoding="UTF-8"?>
-<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" office:version="1.3">
+<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.3">
   <office:styles>
     <style:default-style style:family="paragraph">
-      <style:text-properties style:font-name="Liberation Sans" fo:font-size="11pt" fo:color="#1e293b"/>
+      <style:text-properties style:font-name="Kerneon Grotesk" fo:font-size="11pt" fo:color="#1e293b"/>
     </style:default-style>
   </office:styles>
 </office:document-styles>`;
@@ -153,7 +307,7 @@ export const odtCodec: DocumentCodec = {
           break;
         }
         case "blockquote": {
-          textNodes.push(`<text:p style:font-style="italic">${escapeXml(block.content || "")}</text:p>`);
+          textNodes.push(`<text:p style:font-style="italic" text:style-name="Quote">${escapeXml(block.content || "")}</text:p>`);
           break;
         }
         case "taskList":
@@ -162,8 +316,17 @@ export const odtCodec: DocumentCodec = {
           textNodes.push(`<text:p>${prefix}${escapeXml(block.content || "")}</text:p>`);
           break;
         }
+        case "orderedList": {
+          textNodes.push(`<text:p text:style-name="Numbering">${escapeXml(block.content || "")}</text:p>`);
+          break;
+        }
         case "codeBlock": {
-          textNodes.push(`<text:p style:font-family="monospace">${escapeXml(block.content || "")}</text:p>`);
+          textNodes.push(`<text:p style:font-family="monospace" text:style-name="Preformatted">${escapeXml(block.content || "")}</text:p>`);
+          break;
+        }
+        case "mathBlock": {
+          const formula = block.latex || block.content || "";
+          textNodes.push(`<text:p><draw:frame><math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mi>${escapeXml(formula)}</mi></mrow></math></draw:frame></text:p>`);
           break;
         }
         case "table": {
@@ -176,7 +339,7 @@ export const odtCodec: DocumentCodec = {
               }
               t += `</table:table-row>`;
             }
-            t += `</table:table-row></table:table>`;
+            t += `</table:table>`;
             textNodes.push(t);
           }
           break;
@@ -191,6 +354,9 @@ export const odtCodec: DocumentCodec = {
   xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
   xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
   xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+  xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+  xmlns:math="http://www.w3.org/1998/Math/MathML"
+  xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
   office:version="1.3">
   <office:body>
     <office:text>
