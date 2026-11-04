@@ -116,9 +116,10 @@ export const SimplifiedRibbonShelf: React.FC<SimplifiedRibbonShelfProps> = ({
           />
           <RibbonSplitButton
             id="sim-text-color"
-            icon={RibbonIcons.textColor}
+            customGlyph={<span className="text-[13px] font-bold leading-none" style={{ color: "var(--ribbon-text)" }}>A</span>}
             tooltip="Font Color"
-            onAction={() => dispatcher.dispatch("format.textColor", { color: activeMarks?.textColor || "#ef4444" })}
+            colorBar={activeMarks?.textColor || "#dc2626"}
+            onAction={() => dispatcher.dispatch("format.textColor", { color: activeMarks?.textColor || "#dc2626" })}
             onDropdown={(e) => handleOpenColorPicker("textColor", e)}
           />
           <RibbonSplitButton

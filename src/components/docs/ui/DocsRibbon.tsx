@@ -189,29 +189,29 @@ const RibbonShelf: React.FC<{
                 <FontSizeWidget currentSize={fontSize} onSizeChange={onFontSizeChange} />
                 <button
                   type="button"
-                  className="pdocs-ribbon-small-btn px-1 text-[13px] font-semibold"
+                  className="pdocs-ribbon-small-btn px-1"
                   title="Increase Font Size (Ctrl+Shift+>)"
                   onClick={() => onFontSizeChange(Math.min(72, (fontSize || 12) + 1))}
                 >
                   <span className="flex items-center gap-0.5 leading-none">
                     <span className="text-[13px] font-bold">A</span>
-                    <span className="text-[9px] -translate-y-1 font-extrabold text-[var(--ribbon-text-dim)]">▲</span>
+                    <span className="text-[8px] font-black text-[var(--ribbon-text-dim)]">▲</span>
                   </span>
                 </button>
                 <button
                   type="button"
-                  className="pdocs-ribbon-small-btn px-1 text-[13px] font-semibold"
+                  className="pdocs-ribbon-small-btn px-1"
                   title="Decrease Font Size (Ctrl+Shift+<)"
                   onClick={() => onFontSizeChange(Math.max(8, (fontSize || 12) - 1))}
                 >
                   <span className="flex items-center gap-0.5 leading-none">
                     <span className="text-[11px] font-bold">A</span>
-                    <span className="text-[9px] translate-y-0.5 font-extrabold text-[var(--ribbon-text-dim)]">▼</span>
+                    <span className="text-[8px] font-black text-[var(--ribbon-text-dim)]">▼</span>
                   </span>
                 </button>
                 <button
                   type="button"
-                  className="pdocs-ribbon-small-btn px-1.5"
+                  className="pdocs-ribbon-small-btn px-1"
                   title="Change Case"
                   onClick={() => {}}
                 >
@@ -296,30 +296,14 @@ const RibbonShelf: React.FC<{
                   onAction={() => dispatcher.dispatch("format.highlightColor", { color: "#fef08a" })}
                   onDropdown={(e) => handleOpenColorPicker("highlightColor", e)}
                 />
-                <div
-                  className="pdocs-ribbon-split-btn"
-                  title="Font Color"
-                  data-command-id="text-color"
-                >
-                  <button
-                    type="button"
-                    className="pdocs-ribbon-split-action relative flex flex-col items-center justify-center px-1"
-                    onClick={() => dispatcher.dispatch("format.textColor", { color: activeMarks?.textColor || "#dc2626" })}
-                  >
-                    <span className="text-[13px] font-bold leading-none" style={{ color: "var(--ribbon-text)" }}>A</span>
-                    <div
-                      className="w-3.5 h-[3px] rounded-[1px] mt-0.5"
-                      style={{ backgroundColor: activeMarks?.textColor || "#dc2626" }}
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    className="pdocs-ribbon-split-trigger"
-                    onClick={(e) => handleOpenColorPicker("textColor", e)}
-                  >
-                    <span className="text-[9px]">▾</span>
-                  </button>
-                </div>
+                <RibbonSplitButton
+                  id="text-color"
+                  customGlyph={<span className="text-[13px] font-bold leading-none" style={{ color: "var(--ribbon-text)" }}>A</span>}
+                  tooltip="Font Color"
+                  colorBar={activeMarks?.textColor || "#dc2626"}
+                  onAction={() => dispatcher.dispatch("format.textColor", { color: activeMarks?.textColor || "#dc2626" })}
+                  onDropdown={(e) => handleOpenColorPicker("textColor", e)}
+                />
               </div>
             </div>
           )}

@@ -3,7 +3,8 @@ import { LucideIcon, ChevronDown } from "lucide-react";
 
 export interface RibbonSplitButtonProps {
   id: string;
-  icon: LucideIcon;
+  icon?: LucideIcon;
+  customGlyph?: React.ReactNode;
   label?: string;
   tooltip: string;
   shortcut?: string;
@@ -17,6 +18,7 @@ export interface RibbonSplitButtonProps {
 export const RibbonSplitButton: React.FC<RibbonSplitButtonProps> = ({
   id,
   icon: Icon,
+  customGlyph,
   label,
   tooltip,
   shortcut,
@@ -36,14 +38,14 @@ export const RibbonSplitButton: React.FC<RibbonSplitButtonProps> = ({
     >
       <button
         type="button"
-        className="pdocs-ribbon-split-action"
+        className="pdocs-ribbon-split-action relative"
         onClick={(e) => {
           e.stopPropagation();
           if (!disabled) onAction();
         }}
         disabled={disabled}
       >
-        <Icon size={16} strokeWidth={1.85} />
+        {customGlyph ? customGlyph : Icon ? <Icon size={16} strokeWidth={1.85} /> : null}
         {label && <span className="small-label ml-1">{label}</span>}
         {colorBar && (
           <div
