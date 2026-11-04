@@ -148,6 +148,7 @@ export class SovereignNode {
   readonly imageAlt?: string;
   readonly imageWidth?: string;
   readonly imageAlign?: "left" | "center" | "right";
+  readonly align?: "left" | "center" | "right" | "justify";
   readonly tocStyle?: "dotted" | "links";
   readonly spans: readonly InlineSpan[];
   readonly html?: string;
@@ -168,6 +169,7 @@ export class SovereignNode {
     this.imageAlt = block.imageAlt;
     this.imageWidth = block.imageWidth;
     this.imageAlign = block.imageAlign;
+    this.align = block.align;
     this.tocStyle = block.tocStyle;
     this.spans = block.spans
       ? Object.freeze([...block.spans])
@@ -191,6 +193,7 @@ export class SovereignNode {
       imageAlt: this.imageAlt,
       imageWidth: this.imageWidth,
       imageAlign: this.imageAlign,
+      align: this.align,
       tocStyle: this.tocStyle,
       spans: this.spans ? [...this.spans] : undefined,
     };
@@ -213,6 +216,7 @@ export class SovereignNode {
       imageAlt: attrs.imageAlt !== undefined ? attrs.imageAlt : this.imageAlt,
       imageWidth: attrs.imageWidth !== undefined ? attrs.imageWidth : this.imageWidth,
       imageAlign: attrs.imageAlign !== undefined ? attrs.imageAlign : this.imageAlign,
+      align: attrs.align !== undefined ? attrs.align : this.align,
       tocStyle: attrs.tocStyle !== undefined ? attrs.tocStyle : this.tocStyle,
       spans: attrs.spans !== undefined ? attrs.spans : (this.spans as InlineSpan[] | undefined),
     });
@@ -235,6 +239,7 @@ export class SovereignNode {
       imageAlt: this.imageAlt,
       imageWidth: this.imageWidth,
       imageAlign: this.imageAlign,
+      align: this.align,
       tocStyle: this.tocStyle,
       spans: [{ text: newContent }],
     });

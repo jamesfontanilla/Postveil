@@ -421,12 +421,45 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
 
   const handleUndo = () => {
     const prev = engineRef.current.undo();
-    if (prev) setDoc({ ...prev });
+    if (prev) {
+      setDoc({ ...prev });
+      // Re-sync physical DOM nodes for blocks that may have had inline HTML/style overrides
+      setTimeout(() => {
+        prev.blocks.forEach((b) => {
+          const el = document.getElementById(b.id);
+          if (el) {
+            const contentEl = (el.querySelector(".pdocs-block-content") as HTMLElement) || el;
+            if (b.html !== undefined && contentEl.innerHTML !== b.html) {
+              contentEl.innerHTML = b.html || b.content || "";
+            } else if (!b.html && contentEl.textContent !== (b.content || "")) {
+              contentEl.textContent = b.content || "";
+            }
+            contentEl.style.textAlign = b.align || "left";
+          }
+        });
+      }, 10);
+    }
   };
 
   const handleRedo = () => {
     const next = engineRef.current.redo();
-    if (next) setDoc({ ...next });
+    if (next) {
+      setDoc({ ...next });
+      setTimeout(() => {
+        next.blocks.forEach((b) => {
+          const el = document.getElementById(b.id);
+          if (el) {
+            const contentEl = (el.querySelector(".pdocs-block-content") as HTMLElement) || el;
+            if (b.html !== undefined && contentEl.innerHTML !== b.html) {
+              contentEl.innerHTML = b.html || b.content || "";
+            } else if (!b.html && contentEl.textContent !== (b.content || "")) {
+              contentEl.textContent = b.content || "";
+            }
+            contentEl.style.textAlign = b.align || "left";
+          }
+        });
+      }, 10);
+    }
   };
 
   const handleNewDoc = () => {
