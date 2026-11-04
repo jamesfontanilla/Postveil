@@ -32,6 +32,8 @@ import { CryptographicSignatureModal } from "./ui/CryptographicSignatureModal";
 import { NewCommentModal } from "./ui/NewCommentModal";
 import { prewarmTopFonts, ensureFontLoaded } from "./engine/FontCatalog";
 
+import { SovereignDeltaEngine } from "./engine/SovereignDeltaEngine";
+
 interface PDocsAppProps {
   onBackToMail: () => void;
   onSwitchToAccounts: () => void;
@@ -242,6 +244,31 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   };
 
   const handleUpdateBlockContent = (id: string, content: string, html?: string) => {
+    if (reviewMode === "suggesting") {
+      const existingBlock = doc.blocks.find((b) => b.id === id);
+      const originalText = existingBlock?.content || "";
+      if (originalText !== content) {
+        const computed = SovereignDeltaEngine.computeSuggestion(
+          originalText,
+          content,
+          userName || (userEmail ? userEmail.split("@")[0] : "Reviewer"),
+          userEmail
+        );
+        if (computed) {
+          engineRef.current.addSuggestion(
+            id,
+            computed.type,
+            computed.suggestedText,
+            computed.originalText,
+            userName || (userEmail ? userEmail.split("@")[0] : "Reviewer"),
+            userEmail
+          );
+          setDoc({ ...engineRef.current.getDocument() });
+          return;
+        }
+      }
+    }
+
     engineRef.current.updateBlockContent(id, content, html);
     setDoc({ ...engineRef.current.getDocument() });
   };

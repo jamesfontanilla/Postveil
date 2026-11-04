@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { DocsRuler } from "./DocsRuler";
 import { LlmPasteParser } from "../engine/LlmPasteParser";
+import { SovereignDeltaEngine } from "../engine/SovereignDeltaEngine";
 import { type ReviewMode } from "../types";
 
 interface DocsCanvasProps {
@@ -740,6 +741,8 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                     block,
                     allBlocks: doc.blocks,
                     footnotes: doc.metadata.footnotes || [],
+                    suggestions: (doc.metadata.suggestions || []).filter((s) => s.blockId === block.id && s.status === "pending"),
+                    reviewMode,
                     onUpdate: onUpdateBlockContent,
                     onToggleTask,
                     onKeyDown: (e) => handleKeyDown(e, block),
@@ -1136,6 +1139,8 @@ interface RenderBlockParams {
   block: DocBlock;
   allBlocks: DocBlock[];
   footnotes?: import("../types").FootnoteItem[];
+  suggestions?: import("../types").DocSuggestion[];
+  reviewMode?: ReviewMode;
   onUpdate: (id: string, text: string, html?: string) => void;
   onToggleTask: (id: string) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
@@ -1153,6 +1158,8 @@ function renderBlock({
   block,
   allBlocks,
   footnotes,
+  suggestions,
+  reviewMode,
   onUpdate,
   onToggleTask,
   onKeyDown,
@@ -1165,6 +1172,13 @@ function renderBlock({
   onUpdateToc,
   onRefreshToc,
 }: RenderBlockParams) {
+  // If block has active suggestions, render inline redlines via SovereignDeltaEngine
+  const hasActiveSuggestions = suggestions && suggestions.length > 0;
+  const rawContent = block.content || "";
+  const renderedTrackedContent = hasActiveSuggestions
+    ? SovereignDeltaEngine.renderTrackedHtml(block.html || rawContent, suggestions)
+    : block.html;
+
   switch (block.type) {
     case "heading": {
       const lvl = block.level || 1;
@@ -1175,15 +1189,15 @@ function renderBlock({
           <div
             contentEditable
             suppressContentEditableWarning
-            className={`pdocs-block-content ${cls}`}
+            className={`pdocs-block-content ${cls} ${hasActiveSuggestions ? "pdocs-has-suggestions" : ""}`}
             onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             data-placeholder="Heading..."
             style={{ flex: 1, textAlign: block.align }}
-            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
+            dangerouslySetInnerHTML={renderedTrackedContent ? { __html: renderedTrackedContent } : undefined}
           >
-            {block.html ? undefined : block.content}
+            {renderedTrackedContent ? undefined : block.content}
           </div>
           {blockFootnotes.map((fn) => (
             <sup
@@ -1215,15 +1229,15 @@ function renderBlock({
           <div
             contentEditable
             suppressContentEditableWarning
-            className="pdocs-block-content pdocs-paragraph"
+            className={`pdocs-block-content pdocs-paragraph ${hasActiveSuggestions ? "pdocs-has-suggestions" : ""}`}
             onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             data-placeholder="Type '/' or paste text/math/code from chatbot..."
             style={{ flex: 1, textAlign: block.align }}
-            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
+            dangerouslySetInnerHTML={renderedTrackedContent ? { __html: renderedTrackedContent } : undefined}
           >
-            {block.html ? undefined : block.content}
+            {renderedTrackedContent ? undefined : block.content}
           </div>
           {blockFootnotes.map((fn) => (
             <sup
