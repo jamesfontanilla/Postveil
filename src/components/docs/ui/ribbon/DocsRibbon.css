@@ -419,19 +419,26 @@
   border-top: 1px solid var(--ribbon-border-subtle);
   border-bottom: none;
 }
+.pdocs-qat-strip > div {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 2px !important;
+}
 
 .pdocs-qat-btn {
   width: 24px;
   height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   border: 1px solid transparent;
   border-radius: 3px;
   background: transparent;
   color: var(--ribbon-text);
   cursor: pointer;
   transition: all 0.1s ease;
+  flex-shrink: 0;
 }
 .pdocs-qat-btn:hover:not(:disabled) {
   background: var(--ribbon-hover);
@@ -505,23 +512,41 @@
   background: var(--ribbon-hover);
 }
 
-/* Collapsible Ribbon Shelf */
+/* Collapsible Ribbon Shelf & Floating Flyout */
+.pdocs-ribbon-shelf-wrapper {
+  position: relative;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.pdocs-ribbon-shelf-wrapper.collapsed {
+  height: 0px !important;
+  overflow: hidden !important;
+}
+.pdocs-ribbon-shelf-wrapper.flyout {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--ribbon-bg);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
+  border-bottom: 1px solid var(--ribbon-border);
+}
+
 .pdocs-ribbon-shelf.collapsed {
   height: 0px !important;
   padding: 0 !important;
   overflow: hidden !important;
   border-bottom: none !important;
-  transition: height 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .pdocs-ribbon-shelf.flyout {
   position: absolute;
-  top: 34px;
+  top: 100%;
   left: 0;
   right: 0;
-  z-index: 50;
+  z-index: 60;
   height: var(--ribbon-shelf-h) !important;
   background: var(--ribbon-bg);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.28);
   border-bottom: 1px solid var(--ribbon-border);
 }
 
