@@ -9,3 +9,4 @@ export * from "./components/RibbonSplitButton";
 export * from "./components/RibbonGroup";
 export * from "./components/RibbonDropdownMenu";
 export * from "./components/RibbonWidgets";
+export * from "./components/TableAlignmentPicker";

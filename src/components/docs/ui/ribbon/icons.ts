@@ -44,6 +44,17 @@ import {
   Check,
   ChevronDown,
   Sparkles,
+  Rows,
+  Split,
+  Trash2,
+  RotateCw,
+  Sliders,
+  Crop,
+  Layers,
+  Square,
+  Grid,
+  Maximize,
+  Minimize,
 } from "lucide-react";
 
 export const RibbonIcons = {
@@ -105,6 +116,21 @@ export const RibbonIcons = {
   fullscreen: Maximize2,
   zoomIn: ZoomIn,
   zoomOut: ZoomOut,
+
+  // Table Contextual
+  tableRows: Rows,
+  tableSplit: Split,
+  trash: Trash2,
+  rotate: RotateCw,
+  grid: Grid,
+  square: Square,
+
+  // Picture Contextual
+  sliders: Sliders,
+  crop: Crop,
+  layers: Layers,
+  maximize: Maximize,
+  minimize: Minimize,
 
   // Controls
   check: Check,

@@ -624,6 +624,106 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     setDoc({ ...engineRef.current.getDocument() });
   };
 
+  const handleTableAction = (action: string, params: Record<string, any> = {}) => {
+    if (!activeBlockId) return;
+    const targetBlock = doc.blocks.find((b) => b.id === activeBlockId);
+    if (!targetBlock || targetBlock.type !== "table" || !targetBlock.rows) return;
+
+    const rows = targetBlock.rows.map((r) => ({
+      ...r,
+      cells: r.cells.map((c) => ({ ...c })),
+    }));
+
+    if (action === "table.insertRowAbove") {
+      const colCount = rows[0]?.cells.length || 3;
+      const newRow: import("./types").TableRow = {
+        id: `r_${Date.now()}`,
+        cells: Array.from({ length: colCount }, () => ({
+          id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          content: "",
+        })),
+      };
+      rows.unshift(newRow);
+      handleUpdateTableRows(activeBlockId, rows);
+    } else if (action === "table.insertRowBelow") {
+      const colCount = rows[0]?.cells.length || 3;
+      const newRow: import("./types").TableRow = {
+        id: `r_${Date.now()}`,
+        cells: Array.from({ length: colCount }, () => ({
+          id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          content: "",
+        })),
+      };
+      rows.push(newRow);
+      handleUpdateTableRows(activeBlockId, rows);
+    } else if (action === "table.insertColLeft") {
+      rows.forEach((r) => {
+        r.cells.unshift({
+          id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          content: "",
+        });
+      });
+      handleUpdateTableRows(activeBlockId, rows);
+    } else if (action === "table.insertColRight") {
+      rows.forEach((r) => {
+        r.cells.push({
+          id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          content: "",
+        });
+      });
+      handleUpdateTableRows(activeBlockId, rows);
+    } else if (action === "table.deleteRow") {
+      if (rows.length > 1) {
+        rows.pop();
+        handleUpdateTableRows(activeBlockId, rows);
+      }
+    } else if (action === "table.deleteTable") {
+      engineRef.current.deleteBlock(activeBlockId);
+      setDoc({ ...engineRef.current.getDocument() });
+      setActiveBlockId(null);
+    } else if (action === "table.look.headerRow") {
+      if (rows.length > 0) {
+        const isHeader = !rows[0].cells[0]?.isHeader;
+        rows[0].cells.forEach((c) => {
+          c.isHeader = isHeader;
+        });
+        handleUpdateTableRows(activeBlockId, rows);
+      }
+    } else if (action === "table.cellAlign") {
+      // Cell alignment command (align Left / Center / Right)
+      const align = params.align as string;
+      const map: Record<string, string> = {
+        topLeft: "left",
+        centerLeft: "left",
+        bottomLeft: "left",
+        topCenter: "center",
+        center: "center",
+        bottomCenter: "center",
+        topRight: "right",
+        centerRight: "right",
+        bottomRight: "right",
+      };
+      const textAlignment = map[align] || "left";
+      handleFormatCommand(textAlignment === "center" ? "justifyCenter" : textAlignment === "right" ? "justifyRight" : "justifyLeft");
+    }
+  };
+
+  const handlePictureAction = (action: string, params: Record<string, any> = {}) => {
+    if (!activeBlockId) return;
+    const targetBlock = doc.blocks.find((b) => b.id === activeBlockId);
+    if (!targetBlock || targetBlock.type !== "image") return;
+
+    if (action === "picture.reset") {
+      handleUpdateImage(activeBlockId, targetBlock.imageUrl || "", targetBlock.imageAlt, "100%", "center");
+    } else if (action === "picture.dimensions") {
+      const width = params.width || "100%";
+      handleUpdateImage(activeBlockId, targetBlock.imageUrl || "", targetBlock.imageAlt, width, targetBlock.imageAlign);
+    } else if (action === "picture.align") {
+      const align = params.align || "center";
+      handleUpdateImage(activeBlockId, targetBlock.imageUrl || "", targetBlock.imageAlt, targetBlock.imageWidth, align);
+    }
+  };
+
   const handleUpdateCallout = (blockId: string, variant?: import("./types").CalloutVariant, title?: string) => {
     engineRef.current.updateCallout(blockId, variant, title);
     setDoc({ ...engineRef.current.getDocument() });
@@ -946,6 +1046,14 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
           }
         }}
         activeMarks={activeMarks}
+        hasTableSelected={
+          activeBlockId ? doc.blocks.find((b) => b.id === activeBlockId)?.type === "table" : false
+        }
+        hasImageSelected={
+          activeBlockId ? doc.blocks.find((b) => b.id === activeBlockId)?.type === "image" : false
+        }
+        onTableAction={handleTableAction}
+        onPictureAction={handlePictureAction}
       />
 
       {/* Main Workspace */}

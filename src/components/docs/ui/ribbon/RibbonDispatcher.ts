@@ -50,6 +50,12 @@ export interface RibbonCommandContext {
   onViewModeChange: (mode: "paginated" | "continuous") => void;
   isRulerVisible?: boolean;
   onToggleRuler?: (visible: boolean) => void;
+
+  // Contextual Table actions
+  onTableAction?: (action: string, params?: Record<string, any>) => void;
+
+  // Contextual Picture actions
+  onPictureAction?: (action: string, params?: Record<string, any>) => void;
 }
 
 export class RibbonDispatcher {
@@ -186,6 +192,38 @@ export class RibbonDispatcher {
       case "ui.dialog":
         if (params.name === "pageSetup") this.ctx.onOpenPageSetupModal?.();
         if (params.name === "findReplace") this.ctx.onOpenFindReplaceModal?.();
+        return true;
+
+      // --- Contextual Table Commands ---
+      case "table.look.headerRow":
+      case "table.look.bandedRows":
+      case "table.look.firstColumn":
+      case "table.shading":
+      case "table.style":
+      case "table.borders":
+      case "table.insertRowAbove":
+      case "table.insertRowBelow":
+      case "table.insertColLeft":
+      case "table.insertColRight":
+      case "table.deleteRow":
+      case "table.deleteTable":
+      case "table.cellAlign":
+      case "table.autoFit":
+      case "table.distributeRows":
+      case "table.distributeCols":
+        this.ctx.onTableAction?.(commandId, params);
+        return true;
+
+      // --- Contextual Picture Commands ---
+      case "picture.change":
+        this.ctx.onOpenImageUpload?.();
+        return true;
+      case "picture.reset":
+      case "picture.border":
+      case "picture.shadow":
+      case "picture.align":
+      case "picture.dimensions":
+        this.ctx.onPictureAction?.(commandId, params);
         return true;
 
       default:

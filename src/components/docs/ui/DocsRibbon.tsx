@@ -4,6 +4,7 @@ import {
   RibbonCommandContext,
   RibbonTabDef,
   DEFAULT_RIBBON_TABS,
+  CONTEXTUAL_RIBBON_TABS,
   RibbonBigButton,
   RibbonSmallButton,
   RibbonSplitButton,
@@ -11,6 +12,7 @@ import {
   RibbonDropdownMenu,
   FontPickerWidget,
   FontSizeWidget,
+  TableAlignmentPicker,
   RibbonIcons,
   useRibbonDispatcher,
 } from "./ribbon";
@@ -28,6 +30,8 @@ export interface DocsRibbonProps extends RibbonCommandContext {
   currentBlockType?: BlockType;
   currentBlockLevel?: number;
   onSelectStyle?: (type: BlockType, level?: number) => void;
+  hasTableSelected?: boolean;
+  hasImageSelected?: boolean;
 }
 
 const RibbonShelf: React.FC<{
@@ -354,6 +358,15 @@ const RibbonShelf: React.FC<{
             grp.id !== "insert.tables" && (
               <div className="flex items-center gap-1">
                 {grp.items.map((item) => {
+                  if (item.customRender === "TableAlignmentPicker") {
+                    return (
+                      <div key={item.id} className="flex flex-col items-center">
+                        <TableAlignmentPicker
+                          onSelectAlign={(align) => dispatcher.dispatch("table.cellAlign", { align })}
+                        />
+                      </div>
+                    );
+                  }
                   if (item.kind === "big") {
                     return (
                       <RibbonBigButton
@@ -363,6 +376,23 @@ const RibbonShelf: React.FC<{
                         label={item.label}
                         tooltip={item.tooltip}
                         onClick={() => dispatcher.dispatch(item.commandId || "", item.defaultParams)}
+                      />
+                    );
+                  }
+                  if (item.kind === "split") {
+                    return (
+                      <RibbonSplitButton
+                        key={item.id}
+                        id={item.id}
+                        icon={item.icon as any}
+                        label={item.label}
+                        tooltip={item.tooltip}
+                        onAction={() => dispatcher.dispatch(item.commandId || "", item.defaultParams)}
+                        onDropdown={(e: React.MouseEvent) => {
+                          if (item.id === "td-shading") {
+                            handleOpenColorPicker("highlightColor", e);
+                          }
+                        }}
                       />
                     );
                   }
@@ -413,26 +443,65 @@ const RibbonShelf: React.FC<{
 export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
   const [activeTabId, setActiveTabId] = useState<string>("home");
 
+  // Track contextual tab states & auto-switching
+  const prevTableSelected = React.useRef(false);
+  const prevImageSelected = React.useRef(false);
+
+  React.useEffect(() => {
+    if (props.hasTableSelected && !prevTableSelected.current) {
+      setActiveTabId("table-layout");
+    } else if (!props.hasTableSelected && prevTableSelected.current) {
+      if (activeTabId === "table-layout" || activeTabId === "table-design") {
+        setActiveTabId("home");
+      }
+    }
+    prevTableSelected.current = !!props.hasTableSelected;
+  }, [props.hasTableSelected, activeTabId]);
+
+  React.useEffect(() => {
+    if (props.hasImageSelected && !prevImageSelected.current) {
+      setActiveTabId("picture-format");
+    } else if (!props.hasImageSelected && prevImageSelected.current) {
+      if (activeTabId === "picture-format") {
+        setActiveTabId("home");
+      }
+    }
+    prevImageSelected.current = !!props.hasImageSelected;
+  }, [props.hasImageSelected, activeTabId]);
+
+  // Compute all visible tabs (core + active contextual)
+  const visibleTabs: RibbonTabDef[] = [...DEFAULT_RIBBON_TABS];
+  if (props.hasTableSelected) {
+    visibleTabs.push(CONTEXTUAL_RIBBON_TABS["table-design"]);
+    visibleTabs.push(CONTEXTUAL_RIBBON_TABS["table-layout"]);
+  }
+  if (props.hasImageSelected) {
+    visibleTabs.push(CONTEXTUAL_RIBBON_TABS["picture-format"]);
+  }
+
   const currentTab =
-    DEFAULT_RIBBON_TABS.find((t) => t.id === activeTabId) || DEFAULT_RIBBON_TABS[0];
+    visibleTabs.find((t) => t.id === activeTabId) || visibleTabs[0];
 
   return (
     <RibbonProvider context={props}>
       <div className="pdocs-ribbon-container">
         {/* Tab Strip */}
         <div className="pdocs-ribbon-tab-bar" role="tablist">
-          {DEFAULT_RIBBON_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTabId === tab.id}
-              className={`pdocs-ribbon-tab-btn ${activeTabId === tab.id ? "active" : ""}`}
-              onClick={() => setActiveTabId(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {visibleTabs.map((tab) => {
+            const isContextual = !!tab.isContextual;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTabId === tab.id}
+                className={`pdocs-ribbon-tab-btn ${isContextual ? "contextual" : ""} ${activeTabId === tab.id ? "active" : ""}`}
+                onClick={() => setActiveTabId(tab.id)}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Shelf with Groups */}
