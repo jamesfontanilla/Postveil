@@ -558,6 +558,8 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
       }`}
       role="main"
       aria-label="Document editing surface"
+      data-paper-size={paperSize}
+      data-orientation={orientation}
     >
       {/* Interactive Drag Margin Ruler */}
       {viewMode !== "continuous" && showRuler && (
@@ -576,6 +578,8 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
           <div
             key={`page-${pageIdx}`}
             className="pdocs-paper-sheet pdocs-paper-page"
+            data-paper-size={paperSize}
+            data-orientation={orientation}
             style={{
               width: isContinuous ? "100%" : `${dim.width}px`,
               height: isContinuous ? "auto" : `${dim.height}px`,

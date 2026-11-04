@@ -593,11 +593,70 @@
     page-break-inside: avoid !important;
     break-inside: avoid !important;
     overflow: visible !important;
-    height: auto !important;
-    min-height: 100vh !important;
     position: relative !important;
     box-sizing: border-box !important;
     background-color: #ffffff !important;
+  }
+
+  /* Physical Paper Dimensions: Metric & Inch Standards for 1:1 Print Driver Fidelity */
+  .pdocs-paper-page[data-paper-size="A4"][data-orientation="portrait"] {
+    width: 210mm !important;
+    min-height: 297mm !important;
+  }
+  .pdocs-paper-page[data-paper-size="A4"][data-orientation="landscape"] {
+    width: 297mm !important;
+    min-height: 210mm !important;
+  }
+
+  .pdocs-paper-page[data-paper-size="Letter"][data-orientation="portrait"] {
+    width: 8.5in !important;
+    min-height: 11in !important;
+  }
+  .pdocs-paper-page[data-paper-size="Letter"][data-orientation="landscape"] {
+    width: 11in !important;
+    min-height: 8.5in !important;
+  }
+
+  .pdocs-paper-page[data-paper-size="Legal"][data-orientation="portrait"] {
+    width: 8.5in !important;
+    min-height: 14in !important;
+  }
+  .pdocs-paper-page[data-paper-size="Legal"][data-orientation="landscape"] {
+    width: 14in !important;
+    min-height: 8.5in !important;
+  }
+
+  .pdocs-paper-page[data-paper-size="A3"][data-orientation="portrait"] {
+    width: 297mm !important;
+    min-height: 420mm !important;
+  }
+  .pdocs-paper-page[data-paper-size="A3"][data-orientation="landscape"] {
+    width: 420mm !important;
+    min-height: 297mm !important;
+  }
+
+  .pdocs-paper-page[data-paper-size="A5"][data-orientation="portrait"] {
+    width: 148mm !important;
+    min-height: 210mm !important;
+  }
+  .pdocs-paper-page[data-paper-size="A5"][data-orientation="landscape"] {
+    width: 210mm !important;
+    min-height: 148mm !important;
+  }
+
+  .pdocs-paper-page[data-paper-size="Tabloid"][data-orientation="portrait"] {
+    width: 11in !important;
+    min-height: 17in !important;
+  }
+  .pdocs-paper-page[data-paper-size="Tabloid"][data-orientation="landscape"] {
+    width: 17in !important;
+    min-height: 11in !important;
+  }
+
+  /* Default fallback to A4 */
+  .pdocs-paper-page:not([data-paper-size]) {
+    width: 210mm !important;
+    min-height: 297mm !important;
   }
 
   /* Last page sheet should not force an unnecessary blank trailing physical sheet */
