@@ -65,6 +65,7 @@ interface DocsHeaderProps {
   lastSavedAt?: Date | null;
   saveResult?: SaveResult | null;
   onManualSave?: () => void;
+  remotePeers?: import("../engine/SovereignCollabMesh").RemotePeerAwareness[];
 }
 
 export const DocsHeader: React.FC<DocsHeaderProps> = ({
@@ -100,6 +101,7 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
   lastSavedAt,
   saveResult,
   onManualSave,
+  remotePeers = [],
 }) => {
   const [isWaffleOpen, setIsWaffleOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -801,10 +803,50 @@ export const DocsHeader: React.FC<DocsHeaderProps> = ({
           <span className="pdocs-btn-text">Import</span>
         </button>
 
-        <button className="pdocs-btn-export pdocs-header-btn-export" onClick={onOpenExport} title="Export to 10 Formats">
-          <Download size={15} />
-          <span className="pdocs-btn-text">Export As</span>
-        </button>
+        {/* Live Collaborative Peer Mesh Presence */}
+        {remotePeers.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              backgroundColor: "rgba(15, 118, 110, 0.08)",
+              border: "1px solid rgba(15, 118, 110, 0.2)",
+              padding: "2px 8px",
+              borderRadius: "999px",
+            }}
+            title={`${remotePeers.length} peer(s) connected via encrypted WebRTC mesh`}
+          >
+            <div style={{ display: "flex", marginLeft: 4 }}>
+              {remotePeers.slice(0, 4).map((peer, idx) => (
+                <div
+                  key={peer.peerId}
+                  title={`${peer.name} (${peer.email || "Guest"}) - Live WebRTC peer`}
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: "50%",
+                    backgroundColor: peer.color,
+                    color: "#ffffff",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "2px solid #ffffff",
+                    marginLeft: idx === 0 ? 0 : -8,
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.15)",
+                  }}
+                >
+                  {peer.name.charAt(0).toUpperCase()}
+                </div>
+              ))}
+            </div>
+            <span style={{ fontSize: "11px", fontWeight: 700, color: "#0f766e", marginLeft: 4 }}>
+              {remotePeers.length} peer{remotePeers.length > 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
 
         {/* User Profile Avatar */}
         <div style={{ position: "relative" }}>

@@ -33,6 +33,7 @@ import { NewCommentModal } from "./ui/NewCommentModal";
 import { prewarmTopFonts, ensureFontLoaded } from "./engine/FontCatalog";
 
 import { SovereignDeltaEngine } from "./engine/SovereignDeltaEngine";
+import { SovereignCollabMesh, type RemotePeerAwareness } from "./engine/SovereignCollabMesh";
 
 interface PDocsAppProps {
   onBackToMail: () => void;
@@ -94,6 +95,35 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [fontFamily, setFontFamily] = useState<string>("Kerneon Grotesk");
   const [fontSize, setFontSize] = useState(15);
   const [markdownSource, setMarkdownSource] = useState("");
+  const [remotePeers, setRemotePeers] = useState<RemotePeerAwareness[]>([]);
+  const collabMeshRef = useRef<SovereignCollabMesh | null>(null);
+
+  // Initialize WebRTC Collab Mesh for real-time peer-to-peer sync
+  useEffect(() => {
+    const mesh = new SovereignCollabMesh(doc.metadata.id, userName, userEmail);
+    collabMeshRef.current = mesh;
+
+    const unsubPeers = mesh.onPeersChange((peers) => {
+      setRemotePeers(peers);
+    });
+
+    const unsubDeltas = mesh.onRemoteDelta((delta) => {
+      engineRef.current.updateBlockContent(delta.blockId, delta.content, delta.html);
+      setDoc({ ...engineRef.current.getDocument() });
+    });
+
+    return () => {
+      unsubPeers();
+      unsubDeltas();
+      mesh.destroy();
+      collabMeshRef.current = null;
+    };
+  }, [doc.metadata.id, userName, userEmail]);
+
+  // Broadcast local focus/cursor changes across the WebRTC mesh
+  useEffect(() => {
+    collabMeshRef.current?.broadcastAwareness(activeBlockId);
+  }, [activeBlockId]);
 
   // Restore active document from OPFS on mount and prewarm fonts
   useEffect(() => {
@@ -275,6 +305,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
 
     engineRef.current.updateBlockContent(id, content, html);
     setDoc({ ...engineRef.current.getDocument() });
+
+    // Stream live content update across WebRTC data channel mesh
+    collabMeshRef.current?.broadcastDelta(id, content, html);
   };
 
   const handleToggleTask = (id: string) => {
@@ -812,6 +845,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         lastSavedAt={lastSavedAt}
         saveResult={lastSaveResult}
         onManualSave={handleManualSave}
+        remotePeers={remotePeers}
       />
 
       {/* Formatting Toolbar */}
@@ -951,6 +985,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 onMergeWithPreviousBlock={handleMergeWithPreviousBlock}
                 onActiveMarksChange={setActiveMarks}
                 onActiveBlockChange={setActiveBlockId}
+                remotePeers={remotePeers}
               />
             </div>
           </div>
@@ -982,6 +1017,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             onMergeWithPreviousBlock={handleMergeWithPreviousBlock}
             onActiveMarksChange={setActiveMarks}
             onActiveBlockChange={setActiveBlockId}
+            remotePeers={remotePeers}
           />
         )}
       </div>

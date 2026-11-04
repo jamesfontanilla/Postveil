@@ -73,6 +73,7 @@ interface DocsCanvasProps {
   onMergeWithPreviousBlock?: (blockId: string) => void;
   onActiveMarksChange?: (marks: ActiveMarks) => void;
   onActiveBlockChange?: (blockId: string) => void;
+  remotePeers?: import("../engine/SovereignCollabMesh").RemotePeerAwareness[];
 }
 
 // Paper dimensions in pixels at 96 DPI
@@ -216,6 +217,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   onMergeWithPreviousBlock,
   onActiveMarksChange,
   onActiveBlockChange,
+  remotePeers = [],
 }) => {
   // Live Selection Listener: computes active formatting marks and caret block
   useEffect(() => {
@@ -756,6 +758,44 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                     onUpdateToc,
                     onRefreshToc: () => setTocTicker((prev) => prev + 1),
                   })}
+
+                  {/* Remote Peer Selection / Cursor Presence Pill */}
+                  {(() => {
+                    const activePeersOnBlock = remotePeers.filter((p) => p.activeBlockId === block.id);
+                    if (activePeersOnBlock.length === 0) return null;
+                    return (
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: "-8px",
+                          top: "-10px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 3,
+                          zIndex: 20,
+                          pointerEvents: "none",
+                        }}
+                      >
+                        {activePeersOnBlock.map((peer) => (
+                          <span
+                            key={peer.peerId}
+                            style={{
+                              backgroundColor: peer.color,
+                              color: "#ffffff",
+                              fontSize: "9px",
+                              fontWeight: 700,
+                              padding: "1px 5px",
+                              borderRadius: "3px",
+                              boxShadow: "0 1px 4px rgba(0,0,0,0.2)",
+                              letterSpacing: "0.02em",
+                            }}
+                          >
+                            {peer.name}
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   {/* Active Comment Indicator Pill */}
                   {(() => {
