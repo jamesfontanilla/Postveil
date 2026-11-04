@@ -12,6 +12,16 @@ export interface DocStorageSummary {
   blocksCount?: number;
 }
 
+export interface StorageEstimateInfo {
+  usageBytes: number;
+  quotaBytes: number;
+  percentUsed: number;
+  usageFormatted: string;
+  quotaFormatted: string;
+  isPersistent: boolean;
+  supported: boolean;
+}
+
 export class OpfsDocStorage {
   private static DIRECTORY_NAME = "pdocs_vault";
   private static ACTIVE_KEY = "pdocs_active_id";
@@ -22,6 +32,54 @@ export class OpfsDocStorage {
 
   public static async isOpfsSupported(): Promise<boolean> {
     return typeof navigator !== "undefined" && "storage" in navigator && typeof navigator.storage?.getDirectory === "function";
+  }
+
+  /**
+   * Queries browser storage subsystem for live disk usage, quota allocation, and persistence status
+   */
+  public static async getStorageHealth(): Promise<StorageEstimateInfo> {
+    const formatBytes = (bytes: number): string => {
+      if (bytes === 0) return "0 B";
+      const k = 1024;
+      const sizes = ["B", "KB", "MB", "GB", "TB"];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+    };
+
+    try {
+      if (typeof navigator !== "undefined" && "storage" in navigator && typeof navigator.storage.estimate === "function") {
+        const estimate = await navigator.storage.estimate();
+        const usageBytes = estimate.usage || 0;
+        const quotaBytes = estimate.quota || 0;
+        const percentUsed = quotaBytes > 0 ? (usageBytes / quotaBytes) * 100 : 0;
+        let isPersistent = false;
+        if (typeof navigator.storage.persisted === "function") {
+          try {
+            isPersistent = await navigator.storage.persisted();
+          } catch {}
+        }
+
+        return {
+          usageBytes,
+          quotaBytes,
+          percentUsed: Math.round(percentUsed * 10) / 10,
+          usageFormatted: formatBytes(usageBytes),
+          quotaFormatted: formatBytes(quotaBytes),
+          isPersistent,
+          supported: true,
+        };
+      }
+    } catch {}
+
+    return {
+      usageBytes: 0,
+      quotaBytes: 0,
+      percentUsed: 0,
+      usageFormatted: "Unknown",
+      quotaFormatted: "Unlimited",
+      isPersistent: false,
+      supported: false,
+    };
   }
 
   public static getActiveDocumentId(): string | null {

@@ -10,8 +10,9 @@ import {
   Clock,
   Sparkles,
   Check,
+  HardDrive,
 } from "lucide-react";
-import { OpfsDocStorage, type DocStorageSummary } from "../engine/OpfsDocStorage";
+import { OpfsDocStorage, type DocStorageSummary, type StorageEstimateInfo } from "../engine/OpfsDocStorage";
 import { type UniversalDoc } from "../types";
 
 interface DocumentLibraryModalProps {
@@ -34,12 +35,17 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [storageHealth, setStorageHealth] = useState<StorageEstimateInfo | null>(null);
 
   const fetchDocs = async () => {
     setIsLoading(true);
     try {
-      const list = await OpfsDocStorage.listLocalDocuments();
+      const [list, health] = await Promise.all([
+        OpfsDocStorage.listLocalDocuments(),
+        OpfsDocStorage.getStorageHealth(),
+      ]);
       setDocsList(list);
+      setStorageHealth(health);
     } finally {
       setIsLoading(false);
     }
@@ -490,9 +496,34 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
             color: "#64748b",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Sparkles size={14} color="#0f5132" />
-            <span>Files are stored strictly on your local device.</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Sparkles size={14} color="#0f5132" />
+              <span>Sovereign local vault</span>
+            </div>
+            {storageHealth && storageHealth.supported && (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "2px 8px",
+                  borderRadius: 6,
+                  background: "#e2e8f0",
+                  fontSize: 11,
+                  color: "#334155",
+                }}
+                title={`Used: ${storageHealth.usageFormatted} of ${storageHealth.quotaFormatted} (${storageHealth.percentUsed}%)${storageHealth.isPersistent ? " • Persistent storage active" : ""}`}
+              >
+                <HardDrive size={12} color="#0284c7" />
+                <span>
+                  {storageHealth.usageFormatted} / {storageHealth.quotaFormatted} in local vault
+                </span>
+                {storageHealth.isPersistent && (
+                  <span style={{ color: "#16a34a", fontWeight: 600 }}>• Sealed</span>
+                )}
+              </div>
+            )}
           </div>
           <button onClick={onClose} className="pdocs-btn-secondary" style={{ height: "32px" }}>
             Close
