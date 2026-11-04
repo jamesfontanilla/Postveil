@@ -12,6 +12,7 @@ import {
   type SignatureMetadata,
   type AutosaveStatus,
   type SaveResult,
+  type ActiveMarks,
 } from "./types";
 import { UniversalFormatEngine } from "./formats/UniversalFormatEngine";
 import { DocumentEngine } from "./engine/DocumentEngine";
@@ -76,6 +77,16 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
   const [hyperlinkInitialUrl, setHyperlinkInitialUrl] = useState("");
   const [showRuler, setShowRuler] = useState(true);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const [activeMarks, setActiveMarks] = useState<ActiveMarks>({
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    code: false,
+    sub: false,
+    sup: false,
+    align: "left",
+  });
   const [fontFamily, setFontFamily] = useState<string>("Schibsted Grotesk");
   const [fontSize, setFontSize] = useState(15);
   const [markdownSource, setMarkdownSource] = useState("");
@@ -784,6 +795,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         onOpenNewCommentModal={() => handleOpenNewCommentModal()}
         onOpenSignatureModal={() => setIsSignatureModalOpen(true)}
         onFormatCommand={handleFormatCommand}
+        activeMarks={activeMarks}
       />
 
       {/* Main Workspace */}
@@ -871,6 +883,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 onOpenNewCommentModal={handleOpenNewCommentModal}
                 onChangeBlockType={handleChangeBlockType}
                 onMergeWithPreviousBlock={handleMergeWithPreviousBlock}
+                onActiveMarksChange={setActiveMarks}
+                onActiveBlockChange={setActiveBlockId}
               />
             </div>
           </div>
@@ -900,6 +914,8 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             onOpenNewCommentModal={handleOpenNewCommentModal}
             onChangeBlockType={handleChangeBlockType}
             onMergeWithPreviousBlock={handleMergeWithPreviousBlock}
+            onActiveMarksChange={setActiveMarks}
+            onActiveBlockChange={setActiveBlockId}
           />
         )}
       </div>

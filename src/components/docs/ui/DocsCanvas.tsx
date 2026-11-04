@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { SovereignMathEngine } from "../engine/SovereignMathEngine";
 import { SovereignInputRules } from "../engine/SovereignInputRules";
 import {
@@ -11,6 +11,7 @@ import {
   type PaperSize,
   type Orientation,
   type DocMargins,
+  type ActiveMarks,
 } from "../types";
 import {
   CheckSquare,
@@ -69,6 +70,8 @@ interface DocsCanvasProps {
   onOpenNewCommentModal?: (blockId: string, quotedText?: string) => void;
   onChangeBlockType?: (blockId: string, type: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) => void;
   onMergeWithPreviousBlock?: (blockId: string) => void;
+  onActiveMarksChange?: (marks: ActiveMarks) => void;
+  onActiveBlockChange?: (blockId: string) => void;
 }
 
 // Paper dimensions in pixels at 96 DPI
@@ -210,7 +213,97 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   onOpenNewCommentModal,
   onChangeBlockType,
   onMergeWithPreviousBlock,
+  onActiveMarksChange,
+  onActiveBlockChange,
 }) => {
+  // Live Selection Listener: computes active formatting marks and caret block
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+
+      const anchorNode = sel.anchorNode;
+      if (!anchorNode) return;
+
+      // Find enclosing block row
+      let curr: Node | null = anchorNode.nodeType === Node.ELEMENT_NODE ? anchorNode : anchorNode.parentElement;
+      let enclosingBlockId: string | null = null;
+      let enclosingBlockAlign: "left" | "center" | "right" | "justify" = "left";
+
+      while (curr && curr !== document.body) {
+        if (curr instanceof HTMLElement) {
+          const elId = curr.id;
+          if (elId) {
+            const match = doc.blocks.find((b) => b.id === elId);
+            if (match) {
+              enclosingBlockId = match.id;
+              enclosingBlockAlign = match.align || "left";
+              break;
+            }
+          }
+        }
+        curr = curr.parentNode;
+      }
+
+      if (enclosingBlockId && onActiveBlockChange) {
+        onActiveBlockChange(enclosingBlockId);
+      }
+
+      if (!onActiveMarksChange) return;
+
+      // Check formatting marks via standard queryCommandState and DOM node inspection
+      let isBold = false;
+      let isItalic = false;
+      let isUnderline = false;
+      let isStrike = false;
+      let isSub = false;
+      let isSup = false;
+      let isCode = false;
+
+      try {
+        isBold = document.queryCommandState("bold");
+        isItalic = document.queryCommandState("italic");
+        isUnderline = document.queryCommandState("underline");
+        isStrike = document.queryCommandState("strikeThrough");
+        isSub = document.queryCommandState("subscript");
+        isSup = document.queryCommandState("superscript");
+      } catch {
+        // Fallback for browsers that restrict queryCommandState
+      }
+
+      // Check node tree ancestry for tags like <code>, <sub>, <sup>
+      let nodeCurr: Node | null = anchorNode;
+      while (nodeCurr && nodeCurr !== document.body) {
+        if (nodeCurr instanceof HTMLElement) {
+          const tag = nodeCurr.tagName.toLowerCase();
+          if (tag === "b" || tag === "strong") isBold = true;
+          if (tag === "i" || tag === "em") isItalic = true;
+          if (tag === "u") isUnderline = true;
+          if (tag === "s" || tag === "strike" || tag === "del") isStrike = true;
+          if (tag === "sub") isSub = true;
+          if (tag === "sup") isSup = true;
+          if (tag === "code") isCode = true;
+        }
+        nodeCurr = nodeCurr.parentNode;
+      }
+
+      onActiveMarksChange({
+        bold: isBold,
+        italic: isItalic,
+        underline: isUnderline,
+        strike: isStrike,
+        code: isCode,
+        sub: isSub,
+        sup: isSup,
+        align: enclosingBlockAlign,
+      });
+    };
+
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [doc.blocks, onActiveMarksChange, onActiveBlockChange]);
   // Equation Editor state
   const [editingMathBlockId, setEditingMathBlockId] = useState<string | null>(null);
   const [mathLatexInput, setMathLatexInput] = useState("");

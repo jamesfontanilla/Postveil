@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Undo,
   Redo,
@@ -50,6 +50,7 @@ import {
   type DocMargins,
   type MarginPreset,
   type ReviewMode,
+  type ActiveMarks,
 } from "../types";
 import { FontPicker } from "./FontPicker";
 import { ensureFontLoaded } from "../engine/FontCatalog";
@@ -86,6 +87,7 @@ interface DocsToolbarProps {
   onOpenNewCommentModal?: () => void;
   onOpenSignatureModal?: () => void;
   onFormatCommand?: (command: string, value?: string) => void;
+  activeMarks?: ActiveMarks;
 }
 
 import { ColorPickerPopover } from "../../platform/ribbon";
@@ -122,6 +124,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   onOpenNewCommentModal,
   onOpenSignatureModal,
   onFormatCommand,
+  activeMarks,
 }) => {
   const [activeTextColor, setActiveTextColor] = useState("#000000");
   const [activeHighlightColor, setActiveHighlightColor] = useState("transparent");
@@ -131,6 +134,12 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
   const [isColumnsOpen, setIsColumnsOpen] = useState(false);
   const [isModeOpen, setIsModeOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync color indicators if activeMarks provides explicit colors
+  useEffect(() => {
+    if (activeMarks?.textColor) setActiveTextColor(activeMarks.textColor);
+    if (activeMarks?.highlightColor) setActiveHighlightColor(activeMarks.highlightColor);
+  }, [activeMarks?.textColor, activeMarks?.highlightColor]);
 
   const applyTextColor = (color: string) => {
     setActiveTextColor(color);
@@ -261,7 +270,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
 
       {/* Inline Marks */}
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.bold ? "active" : ""}`}
         title="Bold (Ctrl+B)"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -272,7 +281,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         <Bold size={16} />
       </button>
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.italic ? "active" : ""}`}
         title="Italic (Ctrl+I)"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -283,7 +292,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         <Italic size={16} />
       </button>
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.underline ? "active" : ""}`}
         title="Underline (Ctrl+U)"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -294,7 +303,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         <Underline size={16} />
       </button>
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.strike ? "active" : ""}`}
         title="Strikethrough"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -384,7 +393,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
 
       {/* Subscript & Superscript */}
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.sub ? "active" : ""}`}
         title="Subscript (Ctrl+,)"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -395,7 +404,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         <Subscript size={15} />
       </button>
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.sup ? "active" : ""}`}
         title="Superscript (Ctrl+.)"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -420,7 +429,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
       </button>
 
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.code ? "active" : ""}`}
         title="Inline Code"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -452,7 +461,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
 
       {/* Alignment */}
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.align === "left" || !activeMarks?.align ? "active" : ""}`}
         title="Align Left"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -463,7 +472,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         <AlignLeft size={16} />
       </button>
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.align === "center" ? "active" : ""}`}
         title="Align Center"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -474,7 +483,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         <AlignCenter size={16} />
       </button>
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.align === "right" ? "active" : ""}`}
         title="Align Right"
         onMouseDown={(e) => {
           e.preventDefault();
@@ -485,7 +494,7 @@ export const DocsToolbar: React.FC<DocsToolbarProps> = ({
         <AlignRight size={16} />
       </button>
       <button
-        className="pdocs-tool-btn"
+        className={`pdocs-tool-btn ${activeMarks?.align === "justify" ? "active" : ""}`}
         title="Justify"
         onMouseDown={(e) => {
           e.preventDefault();

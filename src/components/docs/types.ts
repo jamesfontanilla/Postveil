@@ -39,6 +39,19 @@ export interface InlineSpan {
   marks?: InlineMark[];
 }
 
+export interface ActiveMarks {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strike: boolean;
+  code: boolean;
+  sub: boolean;
+  sup: boolean;
+  align: "left" | "center" | "right" | "justify";
+  textColor?: string;
+  highlightColor?: string;
+}
+
 export interface TableCell {
   id: string;
   content: string;
