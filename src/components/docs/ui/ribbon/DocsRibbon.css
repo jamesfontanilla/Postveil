@@ -4,33 +4,35 @@
    ========================================================================== */
 
 :root {
+  --ribbon-bg: #ffffff;
+  --ribbon-tab-bar: #f8fafc;
+  --ribbon-border: #e2e8f0;
+  --ribbon-border-subtle: rgba(0, 0, 0, 0.08);
+  --ribbon-hover: rgba(0, 0, 0, 0.06);
+  --ribbon-active: rgba(37, 99, 235, 0.12);
+  --ribbon-active-border: #2563eb;
+  --ribbon-text: #0f172a;
+  --ribbon-text-dim: #64748b;
+  --ribbon-accent: #2563eb;
+  --ribbon-shelf-h: 92px;
+  --ribbon-content-h: 68px;
+  --ribbon-label-h: 20px;
+}
+
+/* Dark Theme Variables (when html or container has dark mode class) */
+.dark,
+.pdocs-theme-dark,
+[data-theme="dark"] {
   --ribbon-bg: #0b0f19;
   --ribbon-tab-bar: #070a10;
   --ribbon-border: #1e293b;
-  --ribbon-border-subtle: rgba(255, 255, 255, 0.07);
+  --ribbon-border-subtle: rgba(255, 255, 255, 0.08);
   --ribbon-hover: rgba(255, 255, 255, 0.08);
   --ribbon-active: rgba(37, 99, 235, 0.25);
   --ribbon-active-border: #3b82f6;
   --ribbon-text: #f8fafc;
   --ribbon-text-dim: #94a3b8;
   --ribbon-accent: #38bdf8;
-  --ribbon-shelf-h: 92px;
-  --ribbon-content-h: 68px;
-  --ribbon-label-h: 20px;
-}
-
-/* Light Theme Variables */
-.pdocs-theme-light {
-  --ribbon-bg: #f8fafc;
-  --ribbon-tab-bar: #f1f5f9;
-  --ribbon-border: #e2e8f0;
-  --ribbon-border-subtle: rgba(0, 0, 0, 0.06);
-  --ribbon-hover: rgba(0, 0, 0, 0.05);
-  --ribbon-active: rgba(37, 99, 235, 0.12);
-  --ribbon-active-border: #2563eb;
-  --ribbon-text: #0f172a;
-  --ribbon-text-dim: #64748b;
-  --ribbon-accent: #0284c7;
 }
 
 /* Base Ribbon Container */

@@ -33,11 +33,11 @@ export const FontSizeWidget: React.FC<FontSizeWidgetProps> = ({
       <select
         value={currentSize || 11}
         onChange={(e) => onSizeChange(Number(e.target.value))}
-        className="pdocs-font-size-select text-xs h-[22px] px-1 rounded border border-white/10 bg-transparent text-white focus:outline-none"
+        className="pdocs-font-size-select text-xs h-[22px] px-1 rounded border border-[var(--ribbon-border)] bg-[var(--ribbon-bg)] text-[var(--ribbon-text)] focus:outline-none"
         title="Font Size"
       >
         {COMMON_FONT_SIZES.map((size) => (
-          <option key={size} value={size} className="bg-slate-900 text-white">
+          <option key={size} value={size} className="bg-[var(--ribbon-bg)] text-[var(--ribbon-text)]">
             {size}
           </option>
         ))}
