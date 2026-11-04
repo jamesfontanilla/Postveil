@@ -603,7 +603,7 @@ export class DocumentEngine {
         }
       }
 
-      tr.updateContent(block.id, nextContent);
+      tr.updateContent(block.id, nextContent, nextContent);
     }
 
     const suggestions = this.doc.metadata.suggestions.map((item) =>
