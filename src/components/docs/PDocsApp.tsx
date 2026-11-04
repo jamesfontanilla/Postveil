@@ -20,6 +20,7 @@ import { OpfsDocStorage } from "./engine/OpfsDocStorage";
 import { DocsHeader } from "./ui/DocsHeader";
 import { DocsToolbar } from "./ui/DocsToolbar";
 import { DocsRibbon } from "./ui/DocsRibbon";
+import { SelectionMiniToolbar, DocsContextMenu } from "./ui/ribbon";
 import { DocsSidebar } from "./ui/DocsSidebar";
 import { DocsCanvas } from "./ui/DocsCanvas";
 import { ExportModal } from "./ui/ExportModal";
@@ -1184,6 +1185,36 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             remotePeers={remotePeers}
           />
         )}
+
+        {/* Selection Mini-Toolbar (Floating Formatting Capsule) */}
+        <SelectionMiniToolbar
+          onFormat={handleFormatCommand}
+          onAlign={(alignment) => {
+            const map: Record<string, string> = {
+              left: "justifyLeft",
+              center: "justifyCenter",
+              right: "justifyRight",
+            };
+            handleFormatCommand(map[alignment] || "justifyLeft");
+          }}
+          activeMarks={activeMarks}
+        />
+
+        {/* Contextual Right-Click Canvas Menu */}
+        <DocsContextMenu
+          onFormat={handleFormatCommand}
+          onOpenHyperlinkModal={() => handleOpenHyperlinkModal()}
+          onOpenNewCommentModal={() => handleOpenNewCommentModal()}
+          hasTableSelected={
+            activeBlockId ? doc.blocks.find((b) => b.id === activeBlockId)?.type === "table" : false
+          }
+          hasImageSelected={
+            activeBlockId ? doc.blocks.find((b) => b.id === activeBlockId)?.type === "image" : false
+          }
+          onTableAction={handleTableAction}
+          onPictureAction={handlePictureAction}
+          activeMarks={activeMarks}
+        />
       </div>
 
       {/* Export Modal */}

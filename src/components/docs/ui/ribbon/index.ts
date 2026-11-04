@@ -14,3 +14,7 @@ export * from "./components/QuickAccessToolbar";
 export * from "./components/BackstageView";
 export * from "./components/KeyTipsOverlay";
 export * from "./components/RibbonPinButton";
+export * from "./hooks/useRibbonReflow";
+export * from "./components/CollapsedGroupButton";
+export * from "./components/SelectionMiniToolbar";
+export * from "./components/DocsContextMenu";

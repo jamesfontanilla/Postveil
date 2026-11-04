@@ -17,6 +17,8 @@ import {
   RibbonPinButton,
   KeyTipsOverlay,
   BackstageView,
+  useRibbonReflow,
+  CollapsedGroupButton,
   RibbonIcons,
   useRibbonDispatcher,
 } from "./ribbon";
@@ -458,6 +460,9 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
   const [isFlyoutOpen, setIsFlyoutOpen] = useState(false);
   const [isQatBelowRibbon, setIsQatBelowRibbon] = useState(false);
 
+  const shelfWrapperRef = React.useRef<HTMLDivElement>(null);
+  const { tier } = useRibbonReflow(shelfWrapperRef);
+
   // Track contextual tab states & auto-switching
   const prevTableSelected = React.useRef(false);
   const prevImageSelected = React.useRef(false);
@@ -588,7 +593,10 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
         </div>
 
         {/* Shelf with Groups (Inline or Floating Flyout) */}
-        <div className={`pdocs-ribbon-shelf-wrapper ${isRibbonCollapsed ? (isFlyoutOpen ? "flyout" : "collapsed") : ""}`}>
+        <div
+          ref={shelfWrapperRef}
+          className={`pdocs-ribbon-shelf-wrapper tier-${tier} ${isRibbonCollapsed ? (isFlyoutOpen ? "flyout" : "collapsed") : ""}`}
+        >
           {shouldRenderShelf && (
             <RibbonShelf
               currentTab={currentTab}

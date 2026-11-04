@@ -258,6 +258,13 @@
 .pdocs-ribbon-small-btn:active {
   background: var(--ribbon-active);
 }
+
+/* Tier 1+ Reduction: Hide Small Button Text Labels */
+.tier-1 .pdocs-ribbon-small-btn .small-label,
+.tier-2 .pdocs-ribbon-small-btn .small-label,
+.tier-3 .pdocs-ribbon-small-btn .small-label {
+  display: none !important;
+}
 .pdocs-ribbon-small-btn.active {
   background: var(--ribbon-active);
   border-color: var(--ribbon-active-border);
@@ -696,4 +703,118 @@
 .pdocs-export-card:hover {
   background: rgba(37, 99, 235, 0.15);
   border-color: #3b82f6;
+}
+
+/* ==========================================================================
+   PHASE 6: MINI-TOOLBAR, CONTEXT MENU & COLLAPSED GROUP BUTTON
+   ========================================================================== */
+
+/* Collapsed Group Button (Tier 3) */
+.pdocs-collapsed-group-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  height: 60px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ribbon-text);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.pdocs-collapsed-group-btn:hover,
+.pdocs-collapsed-group-btn.active {
+  background: var(--ribbon-hover);
+  border-color: var(--ribbon-border);
+}
+
+.pdocs-collapsed-group-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  padding: 10px;
+  background: var(--ribbon-bg);
+  border: 1px solid var(--ribbon-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  min-width: 200px;
+}
+
+/* Selection Mini-Toolbar */
+.pdocs-selection-mini-toolbar {
+  background: var(--ribbon-bg);
+  border: 1px solid var(--ribbon-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+  opacity: 0.95;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+  user-select: none;
+}
+.pdocs-selection-mini-toolbar:hover {
+  opacity: 1;
+}
+
+.pdocs-mini-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ribbon-text);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+.pdocs-mini-btn:hover {
+  background: var(--ribbon-hover);
+  border-color: var(--ribbon-border);
+}
+.pdocs-mini-btn.active {
+  background: var(--ribbon-active);
+  color: var(--ribbon-accent);
+  border-color: var(--ribbon-active-border);
+}
+
+/* Contextual Right-Click Canvas Menu */
+.pdocs-context-menu {
+  background: var(--ribbon-bg);
+  border: 1px solid var(--ribbon-border);
+  border-radius: 6px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+  padding: 4px 0;
+  min-width: 190px;
+  user-select: none;
+  animation: contextFadeIn 0.1s ease-out;
+}
+@keyframes contextFadeIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.pdocs-context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--ribbon-text);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.pdocs-context-menu-item:hover {
+  background: var(--ribbon-hover);
+}
+
+.pdocs-context-menu-divider {
+  height: 1px;
+  background: var(--ribbon-border);
+  margin: 4px 0;
 }
