@@ -18,23 +18,54 @@ export const FontPicker: React.FC<FontPickerProps> = ({
   height,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [dropdownCoords, setDropdownCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Update coords when opening or resizing/scrolling
+  const updatePosition = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const left = Math.max(8, Math.min(window.innerWidth - 350, rect.left));
+      setDropdownCoords({
+        top: rect.bottom + 4,
+        left,
+      });
+    }
+  };
+
+  const handleToggle = () => {
+    if (!isOpen) {
+      updatePosition();
+    }
+    setIsOpen(!isOpen);
+  };
 
   // Close when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(target) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
     if (isOpen) {
       document.addEventListener("mousedown", handleClickOutside);
+      window.addEventListener("scroll", updatePosition, true);
+      window.addEventListener("resize", updatePosition);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
     };
   }, [isOpen]);
 
@@ -91,12 +122,13 @@ export const FontPicker: React.FC<FontPickerProps> = ({
   ];
 
   return (
-    <div className="pdocs-font-picker-wrapper" ref={dropdownRef} style={{ position: "relative" }}>
+    <div className="pdocs-font-picker-wrapper" style={{ position: "relative" }}>
       {/* Trigger Button styled like Google Docs / Word Font Dropdown */}
       <button
+        ref={triggerRef}
         type="button"
         className="pdocs-tool-btn pdocs-font-trigger"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         title="Font Family & Typography"
         style={{
           display: "flex",
@@ -137,18 +169,19 @@ export const FontPicker: React.FC<FontPickerProps> = ({
       {/* Floating Font Menu with Search & In-Menu Typography Preview */}
       {isOpen && (
         <div
+          ref={dropdownRef}
           className="pdocs-font-dropdown"
           style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            left: 0,
+            position: "fixed",
+            top: `${dropdownCoords.top}px`,
+            left: `${dropdownCoords.left}px`,
             width: "340px",
             maxHeight: "440px",
             backgroundColor: "#ffffff",
             borderRadius: "10px",
             border: "1px solid #cbd5e1",
             boxShadow: "0 12px 30px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.05)",
-            zIndex: 1000,
+            zIndex: 99999,
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",

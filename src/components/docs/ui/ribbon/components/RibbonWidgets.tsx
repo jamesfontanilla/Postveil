@@ -36,19 +36,48 @@ export const FontSizeWidget: React.FC<FontSizeWidgetProps> = ({
   onSizeChange,
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
+  const [coords, setCoords] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const buttonRef = React.useRef<HTMLButtonElement>(null);
+
+  const updatePosition = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setCoords({
+        top: rect.bottom + 4,
+        left: Math.max(8, Math.min(window.innerWidth - 65, rect.left)),
+      });
+    }
+  };
+
+  const handleToggle = () => {
+    if (!isOpen) {
+      updatePosition();
+    }
+    setIsOpen(!isOpen);
+  };
 
   React.useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(target) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
     if (isOpen) {
       document.addEventListener("mousedown", handleClickOutside);
+      window.addEventListener("scroll", updatePosition, true);
+      window.addEventListener("resize", updatePosition);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
     };
   }, [isOpen]);
 
@@ -56,13 +85,13 @@ export const FontSizeWidget: React.FC<FontSizeWidgetProps> = ({
 
   return (
     <div
-      ref={containerRef}
       className="relative flex-shrink-0"
       style={{ width: "48px", height: "24px" }}
     >
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         className="w-full h-full flex items-center justify-between px-2 rounded-[3px] border border-[var(--ribbon-border,#cbd5e1)] bg-[var(--ribbon-bg,#ffffff)] text-[var(--ribbon-text)] hover:bg-[var(--ribbon-hover,#f1f5f9)] transition-colors select-none text-[12px] font-medium"
         style={{ boxSizing: "border-box" }}
         title="Font Size"
@@ -73,8 +102,15 @@ export const FontSizeWidget: React.FC<FontSizeWidgetProps> = ({
 
       {isOpen && (
         <div
-          className="absolute top-full left-0 mt-1 max-h-[220px] w-[56px] overflow-y-auto bg-[var(--ribbon-bg,#ffffff)] border border-[var(--ribbon-border,#cbd5e1)] rounded-[4px] shadow-lg py-1 z-50 text-[12px]"
-          style={{ scrollbarWidth: "thin" }}
+          ref={containerRef}
+          className="max-h-[220px] w-[56px] overflow-y-auto bg-[var(--ribbon-bg,#ffffff)] border border-[var(--ribbon-border,#cbd5e1)] rounded-[4px] shadow-lg py-1 text-[12px]"
+          style={{
+            position: "fixed",
+            top: `${coords.top}px`,
+            left: `${coords.left}px`,
+            scrollbarWidth: "thin",
+            zIndex: 99999,
+          }}
         >
           {COMMON_FONT_SIZES.map((s) => (
             <button
