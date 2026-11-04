@@ -19,6 +19,7 @@ import { DocumentEngine } from "./engine/DocumentEngine";
 import { OpfsDocStorage } from "./engine/OpfsDocStorage";
 import { DocsHeader } from "./ui/DocsHeader";
 import { DocsToolbar } from "./ui/DocsToolbar";
+import { DocsRibbon } from "./ui/DocsRibbon";
 import { DocsSidebar } from "./ui/DocsSidebar";
 import { DocsCanvas } from "./ui/DocsCanvas";
 import { ExportModal } from "./ui/ExportModal";
@@ -848,16 +849,15 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         remotePeers={remotePeers}
       />
 
-      {/* Formatting Toolbar */}
-      <DocsToolbar
+      {/* Office Precision Ribbon */}
+      <DocsRibbon
         canUndo={engineRef.current.canUndo()}
         canRedo={engineRef.current.canRedo()}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        onPrint={() => window.print()}
-        onInsertBlock={handleInsertBlock}
+        onSave={handleManualSave}
         fontFamily={fontFamily}
-        onFontFamilyChange={(f) => {
+        onFontChange={(f) => {
           setFontFamily(f);
           engineRef.current.updateFontFamily(f);
           setDoc((prev) => ({
@@ -866,35 +866,73 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
           }));
         }}
         fontSize={fontSize}
-        onFontSizeChange={(delta) => {
-          const next = Math.min(32, Math.max(10, fontSize + delta));
-          setFontSize(next);
+        onFontSizeChange={(size) => {
+          setFontSize(size);
           setDoc((prev) => ({
             ...prev,
-            metadata: { ...prev.metadata, fontSize: next },
+            metadata: { ...prev.metadata, fontSize: size },
           }));
         }}
-        lineSpacing={doc.metadata.lineSpacing || "1.15"}
-        onLineSpacingChange={handleLineSpacingChange}
-        paperSize={doc.metadata.paperSize}
-        orientation={doc.metadata.orientation}
-        margins={doc.metadata.margins}
-        onPaperSetupChange={handlePaperSetupChange}
-        onMarginsChange={handleMarginsChange}
-        onOpenPageSetup={() => setIsPageSetupOpen(true)}
-        onOpenFindReplace={() => setIsFindReplaceOpen(true)}
-        onOpenHyperlinkModal={() => handleOpenHyperlinkModal()}
-        onAddFootnote={() => handleAddFootnote()}
-        columns={doc.metadata.columns || 1}
-        columnSpacing={doc.metadata.columnSpacing || 0.5}
-        columnDivider={doc.metadata.columnDivider || false}
-        onColumnsChange={handleColumnsChange}
-        onInsertImageFile={handleInsertImageFile}
+        onFormatCommand={handleFormatCommand}
+        onAlignChange={(alignment) => {
+          const map: Record<string, string> = {
+            left: "justifyLeft",
+            center: "justifyCenter",
+            right: "justifyRight",
+            justify: "justifyFull",
+          };
+          handleFormatCommand(map[alignment] || "justifyLeft");
+        }}
+        onBlockTypeChange={(type) => {
+          if (activeBlockId) {
+            handleChangeBlockType(activeBlockId, type);
+          }
+        }}
+        onLineSpacingChange={(spacing) => {
+          const val = String(spacing);
+          if (val === "1.0" || val === "1.15" || val === "1.5" || val === "2.0") {
+            handleLineSpacingChange(val);
+          }
+        }}
+        onMarginPresetChange={(preset) => {
+          handleMarginsChange(preset as any);
+        }}
+        onOrientationChange={(orientation) => {
+          handlePaperSetupChange(doc.metadata.paperSize, orientation);
+        }}
+        onPaperSizeChange={(paperSize) => {
+          handlePaperSetupChange(paperSize, doc.metadata.orientation);
+        }}
+        onColumnsChange={(cols) => {
+          handleColumnsChange((cols === 2 ? 2 : cols === 3 ? 3 : 1));
+        }}
         reviewMode={reviewMode}
         onReviewModeChange={setReviewMode}
+        onViewModeChange={(mode) => setViewMode(mode)}
+        onOpenPageSetupModal={() => setIsPageSetupOpen(true)}
+        onOpenFindReplaceModal={() => setIsFindReplaceOpen(true)}
+        onOpenHyperlinkModal={() => handleOpenHyperlinkModal()}
         onOpenNewCommentModal={() => handleOpenNewCommentModal()}
         onOpenSignatureModal={() => setIsSignatureModalOpen(true)}
-        onFormatCommand={handleFormatCommand}
+        onOpenImageUpload={() => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/*";
+          input.onchange = (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (file) handleInsertImageFile(file);
+          };
+          input.click();
+        }}
+        onAddFootnote={() => handleAddFootnote()}
+        onInsertTable={() => {
+          handleInsertBlock("table");
+        }}
+        onInsertEquation={() => {
+          handleInsertBlock("mathBlock");
+        }}
+        isRulerVisible={showRuler}
+        onToggleRuler={(visible) => setShowRuler(visible)}
         activeMarks={activeMarks}
       />
 
