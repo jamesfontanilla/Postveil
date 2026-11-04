@@ -177,16 +177,24 @@
   display: flex;
   flex-direction: column;
   position: relative;
-  padding: 0 4px;
-  border-right: 1px solid var(--ribbon-border-subtle);
+  padding: 0 6px;
   flex-shrink: 0;
+}
+.pdocs-ribbon-group::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  right: 0;
+  width: 1px;
+  background: var(--ribbon-border-subtle);
 }
 
 .pdocs-ribbon-group-content {
   display: flex;
   align-items: center;
   height: var(--ribbon-content-h);
-  gap: 3px;
+  gap: 4px;
 }
 
 .pdocs-ribbon-group-title-row {
@@ -195,15 +203,17 @@
   justify-content: center;
   height: var(--ribbon-label-h);
   position: relative;
+  margin-top: auto;
 }
 
 .pdocs-ribbon-group-title {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   color: var(--ribbon-text-dim);
   text-align: center;
+  line-height: 1;
 }
 
 .pdocs-ribbon-dialog-launcher {
@@ -227,12 +237,12 @@
   color: var(--ribbon-text);
 }
 
-/* 3-Row Vertical Stack */
+/* 3-Row Vertical Stack (68px Height = 22 + 1 + 22 + 1 + 22) */
 .pdocs-ribbon-stack-3 {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  height: 66px;
+  height: 68px;
   gap: 1px;
 }
 
@@ -243,21 +253,21 @@
   height: 22px;
 }
 
-/* Big Button (32px Icon on Top + 2-line Label Below) */
+/* Big Button (32px Icon Top + 2-line Label Below, 68px Total Height) */
 .pdocs-ribbon-big-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 46px;
-  height: 66px;
+  min-width: 48px;
+  height: 68px;
   padding: 4px 6px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
   cursor: pointer;
   color: var(--ribbon-text);
-  transition: all 0.15s ease;
+  transition: all 0.12s ease;
   position: relative;
   text-decoration: none;
 }
@@ -278,6 +288,8 @@
 }
 
 .pdocs-ribbon-big-btn .big-icon {
+  width: 32px;
+  height: 32px;
   margin-bottom: 2px;
   display: flex;
   align-items: center;
@@ -285,12 +297,13 @@
 }
 
 .pdocs-ribbon-big-btn .big-label {
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 12px;
   text-align: center;
   color: var(--ribbon-text);
   white-space: pre-line;
   max-width: 68px;
+  letter-spacing: -0.01em;
 }
 
 .pdocs-ribbon-big-btn .dropdown-chevron {
@@ -299,7 +312,7 @@
   right: 3px;
 }
 
-/* Small Button (22px Height) */
+/* Small Button (22px Height, 16px Icon) */
 .pdocs-ribbon-small-btn {
   display: inline-flex;
   align-items: center;
@@ -312,9 +325,9 @@
   border-radius: 3px;
   cursor: pointer;
   color: var(--ribbon-text);
-  font-size: 11px;
+  font-size: 12px;
   gap: 4px;
-  transition: all 0.12s ease;
+  transition: all 0.1s ease;
 }
 .pdocs-ribbon-small-btn:hover {
   background: var(--ribbon-hover);
@@ -363,6 +376,7 @@
   color: var(--ribbon-text);
   border-radius: 2px 0 0 2px;
   position: relative;
+  font-size: 12px;
 }
 .pdocs-ribbon-split-action:hover {
   background: var(--ribbon-hover);

@@ -43,7 +43,7 @@ export const RibbonSplitButton: React.FC<RibbonSplitButtonProps> = ({
         }}
         disabled={disabled}
       >
-        <Icon size={14} strokeWidth={2} />
+        <Icon size={16} strokeWidth={1.85} />
         {label && <span className="small-label ml-1">{label}</span>}
         {colorBar && (
           <div
@@ -61,7 +61,7 @@ export const RibbonSplitButton: React.FC<RibbonSplitButtonProps> = ({
         }}
         disabled={disabled}
       >
-        <ChevronDown size={10} />
+        <ChevronDown size={10} strokeWidth={2} />
       </button>
     </div>
   );

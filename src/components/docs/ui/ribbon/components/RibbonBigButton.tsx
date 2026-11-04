@@ -58,7 +58,7 @@ export const RibbonBigButton: React.FC<RibbonBigButtonProps> = ({
       data-command-id={id}
     >
       <div className="big-icon">
-        <Icon size={26} strokeWidth={1.8} />
+        <Icon size={30} strokeWidth={1.75} />
       </div>
       <span className="big-label">{formattedLabel}</span>
       {hasDropdown && (
@@ -70,7 +70,7 @@ export const RibbonBigButton: React.FC<RibbonBigButtonProps> = ({
             else onClick();
           }}
         >
-          <ChevronDown size={10} />
+          <ChevronDown size={11} strokeWidth={2} />
         </span>
       )}
     </button>

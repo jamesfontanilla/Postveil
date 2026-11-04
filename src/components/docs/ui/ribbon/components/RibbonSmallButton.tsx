@@ -39,7 +39,7 @@ export const RibbonSmallButton: React.FC<RibbonSmallButtonProps> = ({
       title={fullTooltip}
       data-command-id={id}
     >
-      <Icon size={14} strokeWidth={2} />
+      <Icon size={16} strokeWidth={1.85} />
       {label && <span className="small-label">{label}</span>}
     </button>
   );
