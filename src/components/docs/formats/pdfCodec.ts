@@ -1,5 +1,7 @@
-import { type UniversalDoc, type ExportOptions, type DocumentCodec } from "../types.ts";
+import { type UniversalDoc, type ExportOptions, type DocumentCodec, type DocBlock } from "../types.ts";
 import { jsPDF } from "jspdf";
+import katex from "katex";
+import html2canvas from "html2canvas";
 
 export const pdfCodec: DocumentCodec = {
   id: "pdf",
@@ -30,9 +32,23 @@ export const pdfCodec: DocumentCodec = {
 
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 54; // 0.75 in * 72 pt
+    const margins = doc.metadata.margins;
+    const margin = margins?.left ? margins.left * 72 : 54; // default 0.75 in * 72 pt
     const maxContentWidth = pageWidth - margin * 2;
     let y = margin + 20;
+
+    // Font selection based on document metadata
+    const docFontFamily = doc.metadata.fontFamily || "Kerneon Grotesk";
+    const isMonospaceDoc = /mono/i.test(docFontFamily);
+    const isSerifDoc = /serif|times|georgia|merriweather|garamond/i.test(docFontFamily);
+
+    const getPrimaryFont = (): string => {
+      if (isMonospaceDoc) return "courier";
+      if (isSerifDoc) return "times";
+      return "helvetica";
+    };
+
+    const primaryFont = getPrimaryFont();
 
     const checkPageBreak = (neededHeight: number) => {
       if (y + neededHeight > pageHeight - margin - 30) {
@@ -44,7 +60,7 @@ export const pdfCodec: DocumentCodec = {
 
     const drawHeaderFooter = () => {
       // Header
-      pdf.setFont("helvetica", "normal");
+      pdf.setFont(primaryFont, "normal");
       pdf.setFontSize(8);
       pdf.setTextColor(148, 163, 184); // #94a3b8
       pdf.text(doc.metadata.headerText || doc.metadata.title, margin, margin - 10);
@@ -66,7 +82,7 @@ export const pdfCodec: DocumentCodec = {
         case "heading": {
           const lvl = block.level || 1;
           const sz = lvl === 1 ? 22 : lvl === 2 ? 16 : 13;
-          pdf.setFont("helvetica", "bold");
+          pdf.setFont(primaryFont, "bold");
           pdf.setFontSize(sz);
           pdf.setTextColor(lvl === 1 ? 15 : 30, lvl === 1 ? 81 : 41, lvl === 1 ? 50 : 59);
 
@@ -89,11 +105,17 @@ export const pdfCodec: DocumentCodec = {
         }
 
         case "paragraph": {
-          pdf.setFont("helvetica", "normal");
+          pdf.setFont(primaryFont, "normal");
           pdf.setFontSize(10.5);
           pdf.setTextColor(26, 26, 26);
 
-          const lines = pdf.splitTextToSize(block.content || "", maxContentWidth);
+          const text = block.content || "";
+          if (!text.trim()) {
+            y += 10;
+            break;
+          }
+
+          const lines = pdf.splitTextToSize(text, maxContentWidth);
           const blockH = lines.length * 15 + 8;
           checkPageBreak(blockH);
 
@@ -103,7 +125,7 @@ export const pdfCodec: DocumentCodec = {
         }
 
         case "blockquote": {
-          pdf.setFont("helvetica", "italic");
+          pdf.setFont(isSerifDoc ? "times" : "helvetica", "italic");
           pdf.setFontSize(10);
           pdf.setTextColor(71, 85, 105);
 
@@ -124,12 +146,20 @@ export const pdfCodec: DocumentCodec = {
         }
 
         case "taskList":
-        case "bulletList": {
-          pdf.setFont("helvetica", "normal");
+        case "bulletList":
+        case "orderedList": {
+          pdf.setFont(primaryFont, "normal");
           pdf.setFontSize(10);
           pdf.setTextColor(30, 41, 59);
 
-          const prefix = block.type === "taskList" ? (block.checked ? "[x] " : "[ ] ") : "• ";
+          const prefix =
+            block.type === "taskList"
+              ? block.checked
+                ? "[x] "
+                : "[ ] "
+              : block.type === "orderedList"
+              ? "1. "
+              : "• ";
           const text = prefix + (block.content || "");
           const lines = pdf.splitTextToSize(text, maxContentWidth - 12);
           const blockH = lines.length * 14 + 4;
@@ -141,7 +171,7 @@ export const pdfCodec: DocumentCodec = {
         }
 
         case "callout": {
-          pdf.setFont("helvetica", "bold");
+          pdf.setFont(primaryFont, "bold");
           pdf.setFontSize(9);
           pdf.setTextColor(15, 81, 50);
 
@@ -158,17 +188,68 @@ export const pdfCodec: DocumentCodec = {
           pdf.line(margin, y - 4, margin, y - 4 + blockH);
 
           pdf.text(title, margin + 14, y + 8);
-          pdf.setFont("helvetica", "normal");
+          pdf.setFont(primaryFont, "normal");
           pdf.setTextColor(51, 65, 85);
           pdf.text(lines, margin + 14, y + 22);
           y += blockH + 8;
           break;
         }
 
+        case "mathBlock": {
+          const formula = (block.latex || block.content || "").trim();
+          if (formula) {
+            // Render KaTeX formula to canvas/image to ensure crisp vector-grade symbols (integrals, fractions, radicals)
+            const mathImage = await renderLatexToImage(formula);
+            if (mathImage) {
+              const maxImgW = maxContentWidth - 32;
+              const imgW = Math.min(mathImage.width, maxImgW);
+              const scale = imgW / mathImage.width;
+              const imgH = mathImage.height * scale;
+              const blockH = imgH + 28;
+
+              checkPageBreak(blockH);
+
+              // Render decorative equation card
+              pdf.setFillColor(250, 250, 252);
+              pdf.rect(margin, y - 4, maxContentWidth, blockH, "F");
+              pdf.setDrawColor(226, 232, 240);
+              pdf.setLineWidth(0.5);
+              pdf.rect(margin, y - 4, maxContentWidth, blockH, "S");
+
+              // Center equation
+              const imgX = margin + (maxContentWidth - imgW) / 2;
+              const imgY = y + 8;
+              pdf.addImage(mathImage.dataUrl, "PNG", imgX, imgY, imgW, imgH);
+
+              y += blockH + 8;
+            } else {
+              // Fallback: semantic text representation of formula
+              const fallbackText = extractSemanticMathText(formula);
+              const lines = pdf.splitTextToSize(fallbackText, maxContentWidth - 32);
+              const blockH = lines.length * 14 + 20;
+
+              checkPageBreak(blockH);
+
+              pdf.setFillColor(250, 250, 252);
+              pdf.rect(margin, y - 4, maxContentWidth, blockH, "F");
+              pdf.setDrawColor(226, 232, 240);
+              pdf.setLineWidth(0.5);
+              pdf.rect(margin, y - 4, maxContentWidth, blockH, "S");
+
+              pdf.setFont("times", "italic");
+              pdf.setFontSize(11);
+              pdf.setTextColor(15, 23, 42);
+              pdf.text(lines, margin + 16, y + 12);
+              y += blockH + 8;
+            }
+          }
+          break;
+        }
+
         case "table": {
           if (block.rows && block.rows.length > 0) {
             const rowH = 22;
-            const colCount = block.rows[0].cells.length || 1;
+            const colCount = Math.max(...block.rows.map((r) => r.cells.length), 1);
             const colW = maxContentWidth / colCount;
             const tableH = block.rows.length * rowH + 10;
             checkPageBreak(Math.min(tableH, 120));
@@ -183,11 +264,11 @@ export const pdfCodec: DocumentCodec = {
                 if (c.isHeader) {
                   pdf.setFillColor(241, 245, 249);
                   pdf.rect(cellX, y, colW, rowH, "F");
-                  pdf.setFont("helvetica", "bold");
+                  pdf.setFont(primaryFont, "bold");
                   pdf.setFontSize(9);
                   pdf.setTextColor(15, 23, 42);
                 } else {
-                  pdf.setFont("helvetica", "normal");
+                  pdf.setFont(primaryFont, "normal");
                   pdf.setFontSize(9);
                   pdf.setTextColor(30, 41, 59);
                 }
@@ -226,9 +307,25 @@ export const pdfCodec: DocumentCodec = {
           break;
         }
 
+        case "divider": {
+          checkPageBreak(16);
+          pdf.setDrawColor(203, 213, 225);
+          pdf.setLineWidth(0.75);
+          pdf.line(margin, y + 6, pageWidth - margin, y + 6);
+          y += 16;
+          break;
+        }
+
+        case "pageBreak": {
+          pdf.addPage();
+          y = margin + 20;
+          drawHeaderFooter();
+          break;
+        }
+
         default:
           if (block.content) {
-            pdf.setFont("helvetica", "normal");
+            pdf.setFont(primaryFont, "normal");
             pdf.setFontSize(10);
             pdf.setTextColor(30, 41, 59);
             const lines = pdf.splitTextToSize(block.content, maxContentWidth);
@@ -245,3 +342,70 @@ export const pdfCodec: DocumentCodec = {
     return { data: blob, filename };
   },
 };
+
+/**
+ * Renders LaTeX formula directly to high-res PNG dataUrl using KaTeX and html2canvas in browser runtime.
+ * Returns null if DOM/browser context is not present.
+ */
+async function renderLatexToImage(latex: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  if (typeof document === "undefined" || !document.createElement) {
+    return null;
+  }
+
+  try {
+    const mathHtml = katex.renderToString(latex, {
+      displayMode: true,
+      throwOnError: false,
+    });
+
+    const container = document.createElement("div");
+    container.style.position = "fixed";
+    container.style.top = "-9999px";
+    container.style.left = "-9999px";
+    container.style.padding = "10px 16px";
+    container.style.background = "#ffffff";
+    container.style.color = "#0f172a";
+    container.style.fontFamily = "KaTeX_Main, Times New Roman, serif";
+    container.style.fontSize = "16px";
+    container.style.display = "inline-block";
+    container.innerHTML = mathHtml;
+
+    document.body.appendChild(container);
+
+    const canvas = await html2canvas(container, {
+      scale: 2, // High DPI rendering
+      backgroundColor: null,
+      logging: false,
+    });
+
+    document.body.removeChild(container);
+
+    return {
+      dataUrl: canvas.toDataURL("image/png"),
+      width: canvas.width / 2,
+      height: canvas.height / 2,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extracts human-readable Unicode mathematical text from KaTeX MathML output as a robust fallback.
+ */
+function extractSemanticMathText(latex: string): string {
+  try {
+    const mml = katex.renderToString(latex, {
+      displayMode: true,
+      output: "mathml",
+      throwOnError: false,
+    });
+    return mml
+      .replace(/<annotation[\s\S]*?<\/annotation>/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || latex;
+  } catch {
+    return latex;
+  }
+}
