@@ -18,11 +18,19 @@ export interface FontOption {
 export const FONT_CATALOG: FontOption[] = [
   // --- Modern Sans-Serif ---
   {
+    family: "Kerneon Grotesk",
+    name: "Kerneon Grotesk",
+    category: "sans-serif",
+    weights: [100, 300, 400, 500, 600, 700, 800, 900],
+    previewText: "Sovereign cryptographic documents with pure geometric precision",
+    tags: ["flagship", "sovereign", "geometric", "default", "proprietary"],
+  },
+  {
     family: "Schibsted Grotesk",
     name: "Schibsted Grotesk",
     category: "sans-serif",
     weights: [400, 500, 600, 700],
-    tags: ["default", "editorial", "clean", "modern"],
+    tags: ["editorial", "clean", "modern"],
   },
   {
     family: "Inter",
@@ -218,6 +226,14 @@ export const FONT_CATALOG: FontOption[] = [
 
   // --- Monospace & Developer Fonts ---
   {
+    family: "Kerneon Mono",
+    name: "Kerneon Mono",
+    category: "monospace",
+    weights: [400, 500, 600, 700],
+    previewText: "fn verify_substrate() -> EdwardsPoint { ... }",
+    tags: ["flagship", "sovereign", "cryptographic", "developer", "slashed-zero"],
+  },
+  {
     family: "JetBrains Mono",
     name: "JetBrains Mono",
     category: "monospace",
@@ -393,6 +409,18 @@ export function ensureFontLoaded(family: string): Promise<void> {
     return Promise.resolve();
   }
 
+  // Handle local proprietary Kerneon fonts without requesting Google Fonts CDN
+  if (family === "Kerneon Grotesk" || family === "Kerneon Mono") {
+    loadedFonts.add(family);
+    if (typeof document !== "undefined" && "fonts" in document) {
+      return (document as any).fonts
+        ?.load(`1rem "${family}"`)
+        .then(() => {})
+        .catch(() => {});
+    }
+    return Promise.resolve();
+  }
+
   return new Promise((resolve) => {
     try {
       const fontDef = FONT_CATALOG.find(
@@ -449,6 +477,8 @@ export function ensureFontLoaded(family: string): Promise<void> {
  */
 export function prewarmTopFonts(): void {
   const topList = [
+    "Kerneon Grotesk",
+    "Kerneon Mono",
     "Inter",
     "Merriweather",
     "JetBrains Mono",

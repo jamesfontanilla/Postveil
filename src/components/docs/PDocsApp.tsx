@@ -87,7 +87,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     sup: false,
     align: "left",
   });
-  const [fontFamily, setFontFamily] = useState<string>("Schibsted Grotesk");
+  const [fontFamily, setFontFamily] = useState<string>("Kerneon Grotesk");
   const [fontSize, setFontSize] = useState(15);
   const [markdownSource, setMarkdownSource] = useState("");
 

@@ -307,13 +307,14 @@ export const FontPicker: React.FC<FontPickerProps> = ({ currentFont, onSelectFon
                             fontSize: "10px",
                             padding: "1px 6px",
                             borderRadius: "4px",
-                            backgroundColor: "#f1f5f9",
-                            color: "#64748b",
+                            backgroundColor: font.family.startsWith("Kerneon") ? "#dcfce7" : "#f1f5f9",
+                            color: font.family.startsWith("Kerneon") ? "#15803d" : "#64748b",
+                            fontWeight: font.family.startsWith("Kerneon") ? 700 : 500,
                             textTransform: "uppercase",
                             letterSpacing: "0.03em",
                           }}
                         >
-                          {font.category}
+                          {font.family.startsWith("Kerneon") ? "FLAGSHIP" : font.category}
                         </span>
                       </div>
 
