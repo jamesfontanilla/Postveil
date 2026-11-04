@@ -515,11 +515,128 @@
   color: #dc2626;
 }
 
+/* ==========================================================================
+   Industrial Sovereign Print Stylesheet (W3C Paged Media Specification)
+   ========================================================================== */
 @media print {
-  .hover-action-tools {
+  @page {
+    size: auto;
+    margin: 0;
+  }
+
+  /* Reset window, body and background for pristine physical print output */
+  html,
+  body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Unmount / Hide all web application chrome, ribbons, sidebars, rulers, and floating widgets */
+  .pdocs-header,
+  .pdocs-toolbar,
+  .pdocs-sidebar,
+  .pdocs-sidebar-scrim,
+  .pdocs-ruler,
+  .pdocs-zoom-bar,
+  .pdocs-block-actions,
+  .pdocs-block-add-btn,
+  .pdocs-block-delete-btn,
+  .hover-action-tools,
+  .pdocs-comment-badge,
+  .pdocs-selection-toolbar,
+  .pdocs-modal-overlay,
+  .pdocs-modal,
+  .pdocs-floating-panel,
+  header,
+  nav,
+  aside {
     display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Ensure the workspace and canvas expand naturally to page width */
+  .pdocs-container,
+  .pdocs-workspace,
+  .pdocs-canvas-container,
+  .pdocs-canvas-paginated,
+  .pdocs-canvas-continuous {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  /* Physical Paper Page Sheets */
+  .pdocs-paper-sheet,
+  .pdocs-paper-page {
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    background-color: #ffffff !important;
+  }
+
+  /* Last page sheet should not force an unnecessary blank trailing physical sheet */
+  .pdocs-paper-sheet:last-of-type,
+  .pdocs-paper-page:last-of-type {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
+  /* Ensure content rows, tables, code blocks, and math cards do not slice mid-block */
+  .pdocs-block-row,
+  .pdocs-table-block,
+  .pdocs-math-block,
+  .pdocs-code-block,
+  .pdocs-callout-block,
+  .pdocs-blockquote {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Headings must stay with following content ("Keep with next") */
+  .pdocs-heading-1,
+  .pdocs-heading-2,
+  .pdocs-heading-3,
+  .pdocs-heading-4 {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  /* Clean up running headers and footers for printed sheets */
+  .pdocs-page-header,
+  .pdocs-page-footer {
+    opacity: 1 !important;
+    visibility: visible !important;
+    border-color: #e2e8f0 !important;
+    color: #64748b !important;
   }
 }
+
 
 .pdocs-block-content {
   flex: 1;
