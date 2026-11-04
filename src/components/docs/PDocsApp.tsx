@@ -933,6 +933,17 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         }}
         isRulerVisible={showRuler}
         onToggleRuler={(visible) => setShowRuler(visible)}
+        currentBlockType={
+          activeBlockId ? doc.blocks.find((b) => b.id === activeBlockId)?.type : "paragraph"
+        }
+        currentBlockLevel={
+          activeBlockId ? doc.blocks.find((b) => b.id === activeBlockId)?.level : 1
+        }
+        onSelectStyle={(type, level) => {
+          if (activeBlockId) {
+            handleChangeBlockType(activeBlockId, type, level);
+          }
+        }}
         activeMarks={activeMarks}
       />
 

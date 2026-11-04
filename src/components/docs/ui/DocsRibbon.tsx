@@ -14,6 +14,10 @@ import {
   RibbonIcons,
   useRibbonDispatcher,
 } from "./ribbon";
+import { TableGridPicker } from "./ribbon/components/TableGridPicker";
+import { StylesGallery } from "./ribbon/components/StylesGallery";
+import { ColorPaletteDropdown } from "./ribbon/components/ColorPaletteDropdown";
+import { BlockType } from "./types";
 import "./ribbon/DocsRibbon.css";
 
 export interface DocsRibbonProps extends RibbonCommandContext {
@@ -21,6 +25,9 @@ export interface DocsRibbonProps extends RibbonCommandContext {
   onTabChange?: (tabId: string) => void;
   fontFamily: string;
   fontSize: number;
+  currentBlockType?: BlockType;
+  currentBlockLevel?: number;
+  onSelectStyle?: (type: BlockType, level?: number) => void;
 }
 
 const RibbonShelf: React.FC<{
@@ -29,11 +36,31 @@ const RibbonShelf: React.FC<{
   fontSize: number;
   onFontChange: (f: string) => void;
   onFontSizeChange: (s: number) => void;
+  currentBlockType?: BlockType;
+  currentBlockLevel?: number;
+  onSelectStyle?: (type: BlockType, level?: number) => void;
   activeMarks?: any;
-}> = ({ currentTab, fontFamily, fontSize, onFontChange, onFontSizeChange, activeMarks }) => {
+}> = ({
+  currentTab,
+  fontFamily,
+  fontSize,
+  onFontChange,
+  onFontSizeChange,
+  currentBlockType = "paragraph",
+  currentBlockLevel = 1,
+  onSelectStyle,
+  activeMarks,
+}) => {
   const dispatcher = useRibbonDispatcher();
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+
+  // Specialized dropdown states
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+  const [colorMode, setColorMode] = useState<"textColor" | "highlightColor">("textColor");
+  const [colorAnchorEl, setColorAnchorEl] = useState<HTMLElement | null>(null);
+  const [isTablePickerOpen, setIsTablePickerOpen] = useState(false);
+  const [tableAnchorEl, setTableAnchorEl] = useState<HTMLElement | null>(null);
 
   const handleDropdownClick = (itemId: string, e: React.MouseEvent) => {
     if (openMenuId === itemId) {
@@ -43,6 +70,12 @@ const RibbonShelf: React.FC<{
       setOpenMenuId(itemId);
       setAnchorEl(e.currentTarget as HTMLElement);
     }
+  };
+
+  const handleOpenColorPicker = (mode: "textColor" | "highlightColor", e: React.MouseEvent) => {
+    setColorMode(mode);
+    setColorAnchorEl(e.currentTarget as HTMLElement);
+    setIsColorPickerOpen(true);
   };
 
   return (
@@ -55,6 +88,7 @@ const RibbonShelf: React.FC<{
           dialogLauncherId={grp.dialogCommand}
           onLaunchDialog={() => grp.dialogCommand && dispatcher.dispatch(grp.dialogCommand)}
         >
+          {/* HOME TAB GROUPS */}
           {grp.id === "home.clipboard" && (
             <>
               {grp.items
@@ -91,7 +125,7 @@ const RibbonShelf: React.FC<{
 
           {grp.id === "home.font" && (
             <div className="pdocs-ribbon-stack-3">
-              {/* Row 1: Font Picker + Font Size */}
+              {/* Row 1: Font Family + Font Size */}
               <div className="pdocs-ribbon-row">
                 <FontPickerWidget currentFont={fontFamily} onFontChange={onFontChange} />
                 <FontSizeWidget currentSize={fontSize} onSizeChange={onFontSizeChange} />
@@ -158,7 +192,7 @@ const RibbonShelf: React.FC<{
                   tooltip="Font Color"
                   colorBar={activeMarks?.textColor || "#000000"}
                   onAction={() => dispatcher.dispatch("format.textColor", { color: "#000000" })}
-                  onDropdown={(e) => handleDropdownClick("text-color", e)}
+                  onDropdown={(e) => handleOpenColorPicker("textColor", e)}
                 />
                 <RibbonSplitButton
                   id="highlight-color"
@@ -166,7 +200,7 @@ const RibbonShelf: React.FC<{
                   tooltip="Highlight Color"
                   colorBar={activeMarks?.highlightColor || "transparent"}
                   onAction={() => dispatcher.dispatch("format.highlightColor", { color: "#fef08a" })}
-                  onDropdown={(e) => handleDropdownClick("highlight-color", e)}
+                  onDropdown={(e) => handleOpenColorPicker("highlightColor", e)}
                 />
               </div>
             </div>
@@ -178,20 +212,23 @@ const RibbonShelf: React.FC<{
                 <RibbonSmallButton
                   id="bullet-list"
                   icon={RibbonIcons.bulletList}
-                  tooltip="Bullets"
-                  onClick={() => dispatcher.dispatch("para.blockType", { type: "bullet-list" })}
+                  tooltip="Bullet List"
+                  active={currentBlockType === "bulletList"}
+                  onClick={() => dispatcher.dispatch("para.blockType", { type: "bulletList" })}
                 />
                 <RibbonSmallButton
                   id="numbered-list"
                   icon={RibbonIcons.orderedList}
-                  tooltip="Numbering"
-                  onClick={() => dispatcher.dispatch("para.blockType", { type: "numbered-list" })}
+                  tooltip="Numbered List"
+                  active={currentBlockType === "orderedList"}
+                  onClick={() => dispatcher.dispatch("para.blockType", { type: "orderedList" })}
                 />
                 <RibbonSmallButton
                   id="check-list"
                   icon={RibbonIcons.checkList}
                   tooltip="Checklist"
-                  onClick={() => dispatcher.dispatch("para.blockType", { type: "checklist" })}
+                  active={currentBlockType === "taskList"}
+                  onClick={() => dispatcher.dispatch("para.blockType", { type: "taskList" })}
                 />
               </div>
               <div className="pdocs-ribbon-row">
@@ -234,7 +271,7 @@ const RibbonShelf: React.FC<{
                         icon={item.icon as any}
                         label="1.15"
                         tooltip={item.tooltip}
-                        onClick={() => {}}
+                        onClick={(e: any) => handleDropdownClick(item.id, e)}
                       />
                       {openMenuId === item.id && item.items && (
                         <RibbonDropdownMenu
@@ -251,50 +288,129 @@ const RibbonShelf: React.FC<{
             </div>
           )}
 
-          {/* Standard Group Fallback */}
-          {grp.id !== "home.clipboard" && grp.id !== "home.font" && grp.id !== "home.paragraph" && (
-            <div className="flex items-center gap-1">
-              {grp.items.map((item) => {
-                if (item.kind === "big") {
-                  return (
-                    <RibbonBigButton
-                      key={item.id}
-                      id={item.id}
-                      icon={item.icon as any}
-                      label={item.label}
-                      tooltip={item.tooltip}
-                      onClick={() => dispatcher.dispatch(item.commandId || "", item.defaultParams)}
-                    />
-                  );
-                }
-                return (
-                  <div key={item.id} className="relative">
-                    <RibbonSmallButton
-                      key={item.id}
-                      id={item.id}
-                      icon={item.icon as any}
-                      label={item.label}
-                      tooltip={item.tooltip}
-                      onClick={() => {
-                        dispatcher.dispatch(item.commandId || "", item.defaultParams);
-                      }}
-                    />
-                    {openMenuId === item.id && item.items && (
-                      <RibbonDropdownMenu
-                        isOpen={true}
-                        anchorEl={anchorEl}
-                        items={item.items}
-                        onSelect={(cmd, params) => dispatcher.dispatch(cmd, params)}
-                        onClose={() => setOpenMenuId(null)}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+          {grp.id === "home.styles" && (
+            <StylesGallery
+              currentType={currentBlockType}
+              currentLevel={currentBlockLevel}
+              onSelectStyle={(type, level) => {
+                if (onSelectStyle) onSelectStyle(type, level);
+                else dispatcher.dispatch("para.blockType", { type, level });
+              }}
+            />
+          )}
+
+          {grp.id === "home.editing" && (
+            <div className="pdocs-ribbon-stack-3">
+              <RibbonSmallButton
+                id="find"
+                icon={RibbonIcons.aiSparkle}
+                label="Find & Replace"
+                tooltip="Find & Replace (Ctrl+H)"
+                onClick={() => dispatcher.dispatch("ui.dialog", { name: "findReplace" })}
+              />
+              <RibbonSmallButton
+                id="select-all"
+                icon={RibbonIcons.check}
+                label="Select All"
+                tooltip="Select All (Ctrl+A)"
+                onClick={() => document.execCommand("selectAll")}
+              />
             </div>
           )}
+
+          {/* INSERT TAB GROUPS */}
+          {grp.id === "insert.tables" && (
+            <div className="relative">
+              <RibbonBigButton
+                id="table"
+                icon={RibbonIcons.table}
+                label="Table"
+                tooltip="Add a Table"
+                hasDropdown={true}
+                onClick={(e: any) => {
+                  setTableAnchorEl(e?.currentTarget || null);
+                  setIsTablePickerOpen(!isTablePickerOpen);
+                }}
+              />
+              {isTablePickerOpen && (
+                <div className="absolute top-full left-0 mt-1 z-50">
+                  <TableGridPicker
+                    onSelect={(rows, cols) => {
+                      dispatcher.dispatch("insert.table", { rows, cols });
+                      setIsTablePickerOpen(false);
+                    }}
+                    onClose={() => setIsTablePickerOpen(false)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* FALLBACK RENDERING FOR OTHER STANDARD GROUPS */}
+          {grp.id !== "home.clipboard" &&
+            grp.id !== "home.font" &&
+            grp.id !== "home.paragraph" &&
+            grp.id !== "home.styles" &&
+            grp.id !== "home.editing" &&
+            grp.id !== "insert.tables" && (
+              <div className="flex items-center gap-1">
+                {grp.items.map((item) => {
+                  if (item.kind === "big") {
+                    return (
+                      <RibbonBigButton
+                        key={item.id}
+                        id={item.id}
+                        icon={item.icon as any}
+                        label={item.label}
+                        tooltip={item.tooltip}
+                        onClick={() => dispatcher.dispatch(item.commandId || "", item.defaultParams)}
+                      />
+                    );
+                  }
+                  return (
+                    <div key={item.id} className="relative">
+                      <RibbonSmallButton
+                        key={item.id}
+                        id={item.id}
+                        icon={item.icon as any}
+                        label={item.label}
+                        tooltip={item.tooltip}
+                        onClick={(e: any) => {
+                          if (item.items) {
+                            handleDropdownClick(item.id, e);
+                          } else {
+                            dispatcher.dispatch(item.commandId || "", item.defaultParams);
+                          }
+                        }}
+                      />
+                      {openMenuId === item.id && item.items && (
+                        <RibbonDropdownMenu
+                          isOpen={true}
+                          anchorEl={anchorEl}
+                          items={item.items}
+                          onSelect={(cmd, params) => dispatcher.dispatch(cmd, params)}
+                          onClose={() => setOpenMenuId(null)}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
         </RibbonGroup>
       ))}
+
+      {/* Universal Color Palette Dropdown */}
+      <ColorPaletteDropdown
+        isOpen={isColorPickerOpen}
+        anchorEl={colorAnchorEl}
+        mode={colorMode}
+        currentColor={colorMode === "textColor" ? activeMarks?.textColor || "#000000" : activeMarks?.highlightColor || "transparent"}
+        onSelectColor={(color) => {
+          dispatcher.dispatch(colorMode === "textColor" ? "format.textColor" : "format.highlightColor", { color });
+        }}
+        onClose={() => setIsColorPickerOpen(false)}
+      />
     </div>
   );
 };
@@ -331,6 +447,9 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
           fontSize={props.fontSize}
           onFontChange={props.onFontChange}
           onFontSizeChange={props.onFontSizeChange}
+          currentBlockType={props.currentBlockType}
+          currentBlockLevel={props.currentBlockLevel}
+          onSelectStyle={props.onSelectStyle}
           activeMarks={props.activeMarks}
         />
       </div>

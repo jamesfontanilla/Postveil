@@ -251,6 +251,45 @@ export const DEFAULT_RIBBON_TABS: RibbonTabDef[] = [
           },
         ],
       },
+      {
+        id: "home.styles",
+        name: "Styles",
+        items: [
+          {
+            id: "styles-gallery",
+            kind: "custom",
+            label: "Styles",
+            tooltip: "Apply Document Style Preset",
+            customRender: "StylesGalleryWidget",
+            priority: 1,
+          },
+        ],
+      },
+      {
+        id: "home.editing",
+        name: "Editing",
+        items: [
+          {
+            id: "find",
+            kind: "small",
+            label: "Find",
+            tooltip: "Find and Replace (Ctrl+H)",
+            icon: RibbonIcons.aiSparkle,
+            commandId: "ui.dialog",
+            defaultParams: { name: "findReplace" },
+            priority: 2,
+          },
+          {
+            id: "select-all",
+            kind: "small",
+            label: "Select All",
+            tooltip: "Select All (Ctrl+A)",
+            icon: RibbonIcons.check,
+            commandId: "edit.selectAll",
+            priority: 3,
+          },
+        ],
+      },
     ],
   },
   {
