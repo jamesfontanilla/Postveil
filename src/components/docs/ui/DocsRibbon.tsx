@@ -22,6 +22,8 @@ import {
   RibbonIcons,
   useRibbonDispatcher,
   EquationSymbolsGallery,
+  SimplifiedRibbonShelf,
+  RibbonMode,
 } from "./ribbon";
 import { TableGridPicker } from "./ribbon/components/TableGridPicker";
 import { StylesGallery } from "./ribbon/components/StylesGallery";
@@ -512,6 +514,13 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
       return false;
     }
   });
+  const [ribbonMode, setRibbonMode] = useState<RibbonMode>(() => {
+    try {
+      return (localStorage.getItem("pdocs_ribbon_mode") as RibbonMode) || "classic";
+    } catch {
+      return "classic";
+    }
+  });
   const [isFlyoutOpen, setIsFlyoutOpen] = useState(false);
   const [isQatBelowRibbon, setIsQatBelowRibbon] = useState<boolean>(() => {
     try {
@@ -525,6 +534,12 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
   const { tier } = useRibbonReflow(shelfWrapperRef);
 
   // Synchronize state preferences to localStorage
+  const handleSetRibbonMode = (mode: RibbonMode) => {
+    setRibbonMode(mode);
+    try {
+      localStorage.setItem("pdocs_ribbon_mode", mode);
+    } catch {}
+  };
   const handleSetRibbonCollapsed = (collapsed: boolean | ((prev: boolean) => boolean)) => {
     setIsRibbonCollapsed((prev) => {
       const next = typeof collapsed === "function" ? collapsed(prev) : collapsed;
@@ -693,14 +708,28 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
             );
           })}
 
-          {/* Ribbon Pin / Collapse Button */}
-          <RibbonPinButton
-            isCollapsed={isRibbonCollapsed}
-            onToggleCollapse={() => {
-              handleSetRibbonCollapsed((prev) => !prev);
-              setIsFlyoutOpen(false);
-            }}
-          />
+          {/* Ribbon Controls: Mode Switcher & Pin / Collapse Button */}
+          <div className="flex items-center gap-0.5 ml-auto mr-1.5">
+            <button
+              type="button"
+              className="pdocs-ribbon-mode-btn"
+              title={ribbonMode === "classic" ? "Switch to Simplified Ribbon" : "Switch to Classic Ribbon"}
+              onClick={() => handleSetRibbonMode(ribbonMode === "classic" ? "simplified" : "classic")}
+            >
+              {ribbonMode === "classic" ? (
+                <RibbonIcons.chevronDown size={13} />
+              ) : (
+                <RibbonIcons.chevronUp size={13} />
+              )}
+            </button>
+            <RibbonPinButton
+              isCollapsed={isRibbonCollapsed}
+              onToggleCollapse={() => {
+                handleSetRibbonCollapsed((prev) => !prev);
+                setIsFlyoutOpen(false);
+              }}
+            />
+          </div>
         </div>
 
         {/* Shelf with Groups (Inline or Floating Flyout) */}
@@ -709,17 +738,31 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
           className={`pdocs-ribbon-shelf-wrapper tier-${tier} ${isRibbonCollapsed ? (isFlyoutOpen ? "flyout" : "collapsed") : ""}`}
         >
           {shouldRenderShelf && (
-            <RibbonShelf
-              currentTab={currentTab}
-              fontFamily={props.fontFamily}
-              fontSize={props.fontSize}
-              onFontChange={props.onFontChange}
-              onFontSizeChange={props.onFontSizeChange}
-              currentBlockType={props.currentBlockType}
-              currentBlockLevel={props.currentBlockLevel}
-              onSelectStyle={props.onSelectStyle}
-              activeMarks={props.activeMarks}
-            />
+            ribbonMode === "simplified" ? (
+              <SimplifiedRibbonShelf
+                currentTab={currentTab}
+                fontFamily={props.fontFamily}
+                fontSize={props.fontSize}
+                onFontChange={props.onFontChange}
+                onFontSizeChange={props.onFontSizeChange}
+                currentBlockType={props.currentBlockType}
+                currentBlockLevel={props.currentBlockLevel}
+                onSelectStyle={props.onSelectStyle}
+                activeMarks={props.activeMarks}
+              />
+            ) : (
+              <RibbonShelf
+                currentTab={currentTab}
+                fontFamily={props.fontFamily}
+                fontSize={props.fontSize}
+                onFontChange={props.onFontChange}
+                onFontSizeChange={props.onFontSizeChange}
+                currentBlockType={props.currentBlockType}
+                currentBlockLevel={props.currentBlockLevel}
+                onSelectStyle={props.onSelectStyle}
+                activeMarks={props.activeMarks}
+              />
+            )
           )}
         </div>
 

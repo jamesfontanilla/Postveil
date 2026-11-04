@@ -19,3 +19,4 @@ export * from "./components/CollapsedGroupButton";
 export * from "./components/SelectionMiniToolbar";
 export * from "./components/DocsContextMenu";
 export * from "./components/EquationSymbolsGallery";
+export * from "./components/SimplifiedRibbonShelf";

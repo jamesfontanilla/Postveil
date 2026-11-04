@@ -61,6 +61,7 @@ import {
   ArrowLeft,
   FolderOpen,
   Share2,
+  MoreHorizontal,
 } from "lucide-react";
 
 export const RibbonIcons = {
@@ -150,4 +151,5 @@ export const RibbonIcons = {
   check: Check,
   chevronDown: ChevronDown,
   aiSparkle: Sparkles,
+  more: MoreHorizontal,
 };

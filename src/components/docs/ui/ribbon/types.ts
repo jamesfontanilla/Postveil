@@ -18,6 +18,8 @@ export type RibbonTabId =
   | "shape-format"
   | "equation-design";
 
+export type RibbonMode = "classic" | "simplified";
+
 export type RibbonItemKind =
   | "big"
   | "small"
