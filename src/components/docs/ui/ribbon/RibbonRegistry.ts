@@ -3,8 +3,15 @@ import { RibbonIcons } from "./icons";
 
 export const DEFAULT_RIBBON_TABS: RibbonTabDef[] = [
   {
+    id: "file",
+    label: "File",
+    keyTip: "F",
+    groups: [],
+  },
+  {
     id: "home",
     label: "Home",
+    keyTip: "H",
     groups: [
       {
         id: "home.clipboard",

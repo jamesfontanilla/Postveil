@@ -10,3 +10,7 @@ export * from "./components/RibbonGroup";
 export * from "./components/RibbonDropdownMenu";
 export * from "./components/RibbonWidgets";
 export * from "./components/TableAlignmentPicker";
+export * from "./components/QuickAccessToolbar";
+export * from "./components/BackstageView";
+export * from "./components/KeyTipsOverlay";
+export * from "./components/RibbonPinButton";

@@ -55,6 +55,12 @@ import {
   Grid,
   Maximize,
   Minimize,
+  Pin,
+  PinOff,
+  ChevronUp,
+  ArrowLeft,
+  FolderOpen,
+  Share2,
 } from "lucide-react";
 
 export const RibbonIcons = {
@@ -131,6 +137,14 @@ export const RibbonIcons = {
   layers: Layers,
   maximize: Maximize,
   minimize: Minimize,
+
+  // Pinning & Backstage
+  pin: Pin,
+  pinOff: PinOff,
+  chevronUp: ChevronUp,
+  back: ArrowLeft,
+  folder: FolderOpen,
+  share: Share2,
 
   // Controls
   check: Check,

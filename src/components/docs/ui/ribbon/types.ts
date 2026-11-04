@@ -63,12 +63,39 @@ export interface RibbonTabDef {
   label: string;
   isContextual?: boolean;
   contextualType?: "table" | "image" | "shape";
+  keyTip?: string;
   groups: RibbonGroupDef[];
 }
 
 export interface QatItemDef {
   id: string;
   label: string;
-  icon: LucideIcon;
+  iconName: string;
   commandId: string;
+  defaultParams?: Record<string, any>;
+  defaultVisible: boolean;
+  shortcut?: string;
+  keyTip?: string;
 }
+
+export interface KeyTipBadge {
+  id: string;
+  code: string;
+  label?: string;
+  targetId: string;
+  commandId?: string;
+  rect?: DOMRect;
+}
+
+export type BackstageTab =
+  | "home"
+  | "new"
+  | "open"
+  | "info"
+  | "save"
+  | "saveAs"
+  | "export"
+  | "print"
+  | "share"
+  | "close";
+

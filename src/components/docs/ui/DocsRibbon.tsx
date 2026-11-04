@@ -13,13 +13,17 @@ import {
   FontPickerWidget,
   FontSizeWidget,
   TableAlignmentPicker,
+  QuickAccessToolbar,
+  RibbonPinButton,
+  KeyTipsOverlay,
+  BackstageView,
   RibbonIcons,
   useRibbonDispatcher,
 } from "./ribbon";
 import { TableGridPicker } from "./ribbon/components/TableGridPicker";
 import { StylesGallery } from "./ribbon/components/StylesGallery";
 import { ColorPaletteDropdown } from "./ribbon/components/ColorPaletteDropdown";
-import { BlockType } from "../types";
+import { BlockType, UniversalDoc, SupportedFormat } from "../types";
 import "./ribbon/DocsRibbon.css";
 
 export interface DocsRibbonProps extends RibbonCommandContext {
@@ -32,6 +36,12 @@ export interface DocsRibbonProps extends RibbonCommandContext {
   onSelectStyle?: (type: BlockType, level?: number) => void;
   hasTableSelected?: boolean;
   hasImageSelected?: boolean;
+  doc?: UniversalDoc;
+  onNewDoc?: () => void;
+  onOpenLibrary?: () => void;
+  onExportFormat?: (format: SupportedFormat) => void;
+  userEmail?: string;
+  userName?: string;
 }
 
 const RibbonShelf: React.FC<{
@@ -442,6 +452,11 @@ const RibbonShelf: React.FC<{
 
 export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
   const [activeTabId, setActiveTabId] = useState<string>("home");
+  const [isBackstageOpen, setIsBackstageOpen] = useState(false);
+  const [isKeyTipsActive, setIsKeyTipsActive] = useState(false);
+  const [isRibbonCollapsed, setIsRibbonCollapsed] = useState(false);
+  const [isFlyoutOpen, setIsFlyoutOpen] = useState(false);
+  const [isQatBelowRibbon, setIsQatBelowRibbon] = useState(false);
 
   // Track contextual tab states & auto-switching
   const prevTableSelected = React.useRef(false);
@@ -450,24 +465,43 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
   React.useEffect(() => {
     if (props.hasTableSelected && !prevTableSelected.current) {
       setActiveTabId("table-layout");
+      if (isRibbonCollapsed) setIsFlyoutOpen(true);
     } else if (!props.hasTableSelected && prevTableSelected.current) {
       if (activeTabId === "table-layout" || activeTabId === "table-design") {
         setActiveTabId("home");
       }
     }
     prevTableSelected.current = !!props.hasTableSelected;
-  }, [props.hasTableSelected, activeTabId]);
+  }, [props.hasTableSelected, activeTabId, isRibbonCollapsed]);
 
   React.useEffect(() => {
     if (props.hasImageSelected && !prevImageSelected.current) {
       setActiveTabId("picture-format");
+      if (isRibbonCollapsed) setIsFlyoutOpen(true);
     } else if (!props.hasImageSelected && prevImageSelected.current) {
       if (activeTabId === "picture-format") {
         setActiveTabId("home");
       }
     }
     prevImageSelected.current = !!props.hasImageSelected;
-  }, [props.hasImageSelected, activeTabId]);
+  }, [props.hasImageSelected, activeTabId, isRibbonCollapsed]);
+
+  // Global hotkeys: Ctrl+F1 for collapse, Alt for KeyTips
+  React.useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === "F1") {
+        e.preventDefault();
+        setIsRibbonCollapsed((prev) => !prev);
+        setIsFlyoutOpen(false);
+      } else if (e.key === "Alt" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+        // Toggle KeyTips
+        e.preventDefault();
+        setIsKeyTipsActive((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
 
   // Compute all visible tabs (core + active contextual)
   const visibleTabs: RibbonTabDef[] = [...DEFAULT_RIBBON_TABS];
@@ -480,42 +514,145 @@ export const DocsRibbon: React.FC<DocsRibbonProps> = (props) => {
   }
 
   const currentTab =
-    visibleTabs.find((t) => t.id === activeTabId) || visibleTabs[0];
+    visibleTabs.find((t) => t.id === activeTabId) || visibleTabs[1] || visibleTabs[0];
+
+  const handleTabClick = (tabId: string) => {
+    if (tabId === "file") {
+      setIsBackstageOpen(true);
+      return;
+    }
+    if (isRibbonCollapsed) {
+      if (activeTabId === tabId && isFlyoutOpen) {
+        setIsFlyoutOpen(false);
+      } else {
+        setActiveTabId(tabId);
+        setIsFlyoutOpen(true);
+      }
+    } else {
+      setActiveTabId(tabId);
+    }
+  };
+
+  const handleTabDoubleClick = (tabId: string) => {
+    if (tabId === "file") return;
+    setIsRibbonCollapsed((prev) => !prev);
+    setIsFlyoutOpen(false);
+  };
+
+  const shouldRenderShelf = !isRibbonCollapsed || isFlyoutOpen;
 
   return (
     <RibbonProvider context={props}>
       <div className="pdocs-ribbon-container">
+        {/* Quick Access Toolbar (Above Ribbon) */}
+        {!isQatBelowRibbon && (
+          <QuickAccessToolbar
+            canUndo={props.canUndo}
+            canRedo={props.canRedo}
+            isBelowRibbon={false}
+            onTogglePlacement={setIsQatBelowRibbon}
+          />
+        )}
+
         {/* Tab Strip */}
         <div className="pdocs-ribbon-tab-bar" role="tablist">
           {visibleTabs.map((tab) => {
             const isContextual = !!tab.isContextual;
+            const isFile = tab.id === "file";
+            const isActive = !isFile && activeTabId === tab.id;
+
             return (
               <button
                 key={tab.id}
                 type="button"
                 role="tab"
-                aria-selected={activeTabId === tab.id}
-                className={`pdocs-ribbon-tab-btn ${isContextual ? "contextual" : ""} ${activeTabId === tab.id ? "active" : ""}`}
-                onClick={() => setActiveTabId(tab.id)}
+                aria-selected={isActive}
+                className={`pdocs-ribbon-tab-btn ${isFile ? "bg-blue-600! text-white! font-bold" : ""} ${isContextual ? "contextual" : ""} ${isActive ? "active" : ""}`}
+                onClick={() => handleTabClick(tab.id)}
+                onDoubleClick={() => handleTabDoubleClick(tab.id)}
+                data-keytip={tab.keyTip}
               >
                 {tab.label}
               </button>
             );
           })}
+
+          {/* Ribbon Pin / Collapse Button */}
+          <RibbonPinButton
+            isCollapsed={isRibbonCollapsed}
+            onToggleCollapse={() => {
+              setIsRibbonCollapsed((prev) => !prev);
+              setIsFlyoutOpen(false);
+            }}
+          />
         </div>
 
-        {/* Shelf with Groups */}
-        <RibbonShelf
-          currentTab={currentTab}
-          fontFamily={props.fontFamily}
-          fontSize={props.fontSize}
-          onFontChange={props.onFontChange}
-          onFontSizeChange={props.onFontSizeChange}
-          currentBlockType={props.currentBlockType}
-          currentBlockLevel={props.currentBlockLevel}
-          onSelectStyle={props.onSelectStyle}
-          activeMarks={props.activeMarks}
+        {/* Shelf with Groups (Inline or Floating Flyout) */}
+        <div className={`pdocs-ribbon-shelf-wrapper ${isRibbonCollapsed ? (isFlyoutOpen ? "flyout" : "collapsed") : ""}`}>
+          {shouldRenderShelf && (
+            <RibbonShelf
+              currentTab={currentTab}
+              fontFamily={props.fontFamily}
+              fontSize={props.fontSize}
+              onFontChange={props.onFontChange}
+              onFontSizeChange={props.onFontSizeChange}
+              currentBlockType={props.currentBlockType}
+              currentBlockLevel={props.currentBlockLevel}
+              onSelectStyle={props.onSelectStyle}
+              activeMarks={props.activeMarks}
+            />
+          )}
+        </div>
+
+        {/* Quick Access Toolbar (Below Ribbon if configured) */}
+        {isQatBelowRibbon && (
+          <QuickAccessToolbar
+            canUndo={props.canUndo}
+            canRedo={props.canRedo}
+            isBelowRibbon={true}
+            onTogglePlacement={setIsQatBelowRibbon}
+          />
+        )}
+
+        {/* KeyTips Floating Badges Overlay */}
+        <KeyTipsOverlay
+          isActive={isKeyTipsActive}
+          activeTabId={activeTabId}
+          onSelectTab={(tabId) => {
+            if (tabId === "file") {
+              setIsBackstageOpen(true);
+            } else {
+              setActiveTabId(tabId);
+              if (isRibbonCollapsed) setIsFlyoutOpen(true);
+            }
+          }}
+          onExecuteCommand={(cmd) => {
+            if (cmd === "format.bold") props.onFormatCommand("bold");
+            else if (cmd === "format.italic") props.onFormatCommand("italic");
+            else if (cmd === "format.underline") props.onFormatCommand("underline");
+            else if (cmd === "file.save") props.onSave?.();
+            else if (cmd === "edit.undo") props.onUndo();
+            else if (cmd === "edit.redo") props.onRedo();
+          }}
+          onDismiss={() => setIsKeyTipsActive(false)}
         />
+
+        {/* Backstage View Modal Overlay */}
+        {props.doc && (
+          <BackstageView
+            isOpen={isBackstageOpen}
+            doc={props.doc}
+            onClose={() => setIsBackstageOpen(false)}
+            onNewDoc={props.onNewDoc || (() => {})}
+            onOpenLibrary={props.onOpenLibrary || (() => {})}
+            onSaveDoc={props.onSave || (() => {})}
+            onExportFormat={props.onExportFormat || (() => {})}
+            onPrint={() => window.print()}
+            onOpenSignatureModal={props.onOpenSignatureModal}
+            userEmail={props.userEmail}
+            userName={props.userName}
+          />
+        )}
       </div>
     </RibbonProvider>
   );

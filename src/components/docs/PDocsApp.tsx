@@ -1054,6 +1054,12 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         }
         onTableAction={handleTableAction}
         onPictureAction={handlePictureAction}
+        doc={doc}
+        onNewDoc={handleNewDoc}
+        onOpenLibrary={() => setIsLibraryOpen(true)}
+        onExportFormat={handleOpenExportWithFormat}
+        userEmail={userEmail}
+        userName={userName}
       />
 
       {/* Main Workspace */}

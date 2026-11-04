@@ -400,3 +400,275 @@
   background-color: rgba(37, 99, 235, 0.25);
   border-color: #3b82f6;
 }
+
+/* ==========================================================================
+   PHASE 5: QAT, PINNING, BACKSTAGE & KEYTIPS
+   ========================================================================== */
+
+/* Quick Access Toolbar */
+.pdocs-qat-strip {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--ribbon-tab-bar);
+  border-bottom: 1px solid var(--ribbon-border-subtle);
+  user-select: none;
+}
+.pdocs-qat-strip.below-ribbon {
+  border-top: 1px solid var(--ribbon-border-subtle);
+  border-bottom: none;
+}
+
+.pdocs-qat-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ribbon-text);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+.pdocs-qat-btn:hover:not(:disabled) {
+  background: var(--ribbon-hover);
+  border-color: var(--ribbon-border);
+}
+.pdocs-qat-btn:disabled,
+.pdocs-qat-btn.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.pdocs-qat-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--ribbon-bg);
+  border: 1px solid var(--ribbon-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+  padding: 6px 0;
+  z-index: 100;
+  min-width: 220px;
+}
+.pdocs-qat-dropdown-title {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ribbon-text-dim);
+}
+.pdocs-qat-dropdown-divider {
+  height: 1px;
+  background: var(--ribbon-border);
+  margin: 4px 0;
+}
+.pdocs-qat-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  font-size: 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--ribbon-text);
+  cursor: pointer;
+}
+.pdocs-qat-dropdown-item:hover {
+  background: var(--ribbon-hover);
+}
+
+/* Ribbon Pin Button */
+.pdocs-ribbon-pin-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--ribbon-text-dim);
+  cursor: pointer;
+  margin-left: auto;
+  margin-right: 6px;
+  transition: all 0.15s ease;
+}
+.pdocs-ribbon-pin-btn:hover {
+  color: var(--ribbon-text);
+  background: var(--ribbon-hover);
+}
+
+/* Collapsible Ribbon Shelf */
+.pdocs-ribbon-shelf.collapsed {
+  height: 0px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-bottom: none !important;
+  transition: height 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.pdocs-ribbon-shelf.flyout {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  height: var(--ribbon-shelf-h) !important;
+  background: var(--ribbon-bg);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid var(--ribbon-border);
+}
+
+/* KeyTips Badges */
+.pdocs-keytips-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
+.pdocs-keytip-badge {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #475569;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 2px;
+  z-index: 10000;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.dark .pdocs-keytip-badge {
+  background: #0f172a;
+  color: #f8fafc;
+  border-color: #64748b;
+}
+
+/* Backstage View Overlay */
+.pdocs-backstage-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  background: #0f172a;
+  color: #f8fafc;
+  animation: backstageFadeIn 0.15s ease-out;
+}
+@keyframes backstageFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.pdocs-backstage-sidebar {
+  width: 140px;
+  background: #070a10;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 8px;
+}
+
+.pdocs-backstage-back-btn {
+  margin-bottom: 24px;
+  padding: 4px;
+  background: transparent;
+  border: none;
+  color: #f8fafc;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.pdocs-backstage-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pdocs-backstage-nav-item {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.pdocs-backstage-nav-item:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+}
+.pdocs-backstage-nav-item.active {
+  color: #ffffff;
+  background: rgba(37, 99, 235, 0.3);
+  font-weight: 600;
+}
+.pdocs-backstage-nav-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 8px 4px;
+}
+
+.pdocs-backstage-content {
+  flex: 1;
+  padding: 40px 48px;
+  overflow-y: auto;
+  background: #0f172a;
+}
+.pdocs-backstage-pane {
+  max-width: 900px;
+}
+
+.pdocs-template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+.pdocs-template-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.pdocs-recent-item {
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.pdocs-export-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.pdocs-export-card:hover {
+  background: rgba(37, 99, 235, 0.15);
+  border-color: #3b82f6;
+}
