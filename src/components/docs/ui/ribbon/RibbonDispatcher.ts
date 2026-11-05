@@ -23,6 +23,9 @@ export interface RibbonCommandContext {
   onAlignChange: (alignment: "left" | "center" | "right" | "justify") => void;
   onBlockTypeChange: (type: BlockType) => void;
   onLineSpacingChange: (spacing: number) => void;
+  onIndentChange?: (delta: number) => void;
+  showFormattingMarks?: boolean;
+  onToggleFormattingMarks?: () => void;
   activeMarks?: ActiveMarks;
 
   // Modals & Panels
@@ -88,6 +91,33 @@ export class RibbonDispatcher {
         if (this.ctx.canRedo) this.ctx.onRedo();
         return true;
 
+      case "edit.cut": {
+        document.execCommand("cut");
+        return true;
+      }
+      case "edit.copy": {
+        document.execCommand("copy");
+        return true;
+      }
+      case "edit.paste": {
+        if (navigator.clipboard?.readText) {
+          navigator.clipboard.readText().then((text) => {
+            if (text) {
+              document.execCommand("insertText", false, text);
+            }
+          }).catch(() => {
+            document.execCommand("paste");
+          });
+        } else {
+          document.execCommand("paste");
+        }
+        return true;
+      }
+      case "edit.formatPainter": {
+        this.ctx.onFormatCommand?.("formatPainter");
+        return true;
+      }
+
       // --- Inline Formatting Commands ---
       case "format.bold":
       case "format.italic":
@@ -99,6 +129,11 @@ export class RibbonDispatcher {
         const cmdName = commandId.replace("format.", "");
         const mappedCmd = cmdName === "clear" ? "removeFormat" : cmdName;
         this.ctx.onFormatCommand(mappedCmd);
+        return true;
+      }
+
+      case "format.case": {
+        if (params.type) this.ctx.onFormatCommand("changeCase", params.type);
         return true;
       }
 
@@ -125,6 +160,16 @@ export class RibbonDispatcher {
 
       case "para.blockType":
         if (params.type) this.ctx.onBlockTypeChange(params.type);
+        return true;
+
+      case "para.indent":
+        if (params.delta !== undefined) {
+          this.ctx.onIndentChange?.(params.delta);
+        }
+        return true;
+
+      case "para.showFormattingMarks":
+        this.ctx.onToggleFormattingMarks?.();
         return true;
 
       case "para.lineSpacing":

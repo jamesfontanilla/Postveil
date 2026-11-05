@@ -74,6 +74,7 @@ interface DocsCanvasProps {
   onActiveMarksChange?: (marks: ActiveMarks) => void;
   onActiveBlockChange?: (blockId: string) => void;
   remotePeers?: import("../engine/SovereignCollabMesh").RemotePeerAwareness[];
+  showFormattingMarks?: boolean;
 }
 
 // Paper dimensions in pixels at 96 DPI
@@ -218,6 +219,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
   onActiveMarksChange,
   onActiveBlockChange,
   remotePeers = [],
+  showFormattingMarks = false,
 }) => {
   // Live Selection Listener: computes active formatting marks and caret block
   useEffect(() => {
@@ -738,7 +740,16 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
               }}
             >
               {pageBlocks.map((block) => (
-                <div key={block.id} id={block.id} className="pdocs-block-row group" style={{ breakInside: "avoid" }}>
+                <div
+                  key={block.id}
+                  id={block.id}
+                  className="pdocs-block-row group"
+                  style={{
+                    breakInside: "avoid",
+                    paddingLeft: block.indentLevel ? `${block.indentLevel * 36}px` : undefined,
+                    transition: "padding-left 0.15s ease",
+                  }}
+                >
                   {renderBlock({
                     block,
                     allBlocks: doc.blocks,
@@ -757,6 +768,7 @@ export const DocsCanvas: React.FC<DocsCanvasProps> = ({
                     onUpdateImage,
                     onUpdateToc,
                     onRefreshToc: () => setTocTicker((prev) => prev + 1),
+                    showFormattingMarks,
                   })}
 
                   {/* Remote Peer Selection / Cursor Presence Pill */}
@@ -1215,6 +1227,7 @@ interface RenderBlockParams {
   onUpdateImage?: (blockId: string, url: string, alt?: string, width?: string, align?: "left" | "center" | "right") => void;
   onUpdateToc?: (blockId: string, style: "dotted" | "links") => void;
   onRefreshToc?: () => void;
+  showFormattingMarks?: boolean;
 }
 
 function renderBlock({
@@ -1234,6 +1247,7 @@ function renderBlock({
   onUpdateImage,
   onUpdateToc,
   onRefreshToc,
+  showFormattingMarks = false,
 }: RenderBlockParams) {
   // If block has active suggestions, render inline redlines via SovereignDeltaEngine
   const hasActiveSuggestions = suggestions && suggestions.length > 0;
@@ -1302,6 +1316,21 @@ function renderBlock({
           >
             {renderedTrackedContent ? undefined : block.content}
           </div>
+          {showFormattingMarks && (
+            <span
+              style={{
+                userSelect: "none",
+                pointerEvents: "none",
+                color: "#94a3b8",
+                fontSize: "14px",
+                marginLeft: "4px",
+                opacity: 0.7,
+              }}
+              title="End of paragraph (¶)"
+            >
+              ¶
+            </span>
+          )}
           {blockFootnotes.map((fn) => (
             <sup
               key={fn.id}
@@ -1354,39 +1383,39 @@ function renderBlock({
 
     case "bulletList": {
       return (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, width: "100%" }}>
-          <span style={{ fontSize: "16px", color: "#0f5132", lineHeight: 1.6 }}>•</span>
-          <div
-            contentEditable
-            suppressContentEditableWarning
-            className="pdocs-block-content"
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
-            onKeyDown={onKeyDown}
-            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
-          >
-            {block.html ? undefined : block.content}
-          </div>
-        </div>
+        <ul className="pdocs-list-ul" style={{ listStyleType: "disc", paddingLeft: "24px", margin: "2px 0", width: "100%" }}>
+          <li style={{ width: "100%" }}>
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              className="pdocs-block-content"
+              onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
+              onKeyDown={onKeyDown}
+              dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
+            >
+              {block.html ? undefined : block.content}
+            </div>
+          </li>
+        </ul>
       );
     }
 
     case "orderedList": {
       return (
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, width: "100%" }}>
-          <span style={{ fontSize: "14px", fontWeight: 600, color: "#0f5132", minWidth: 20 }}>
-            1.
-          </span>
-          <div
-            contentEditable
-            suppressContentEditableWarning
-            className="pdocs-block-content"
-            onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
-            onKeyDown={onKeyDown}
-            dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
-          >
-            {block.html ? undefined : block.content}
-          </div>
-        </div>
+        <ol className="pdocs-list-ol" style={{ listStyleType: "decimal", paddingLeft: "24px", margin: "2px 0", width: "100%" }}>
+          <li style={{ width: "100%" }}>
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              className="pdocs-block-content"
+              onBlur={(e) => onUpdate(block.id, e.currentTarget.textContent || "", e.currentTarget.innerHTML)}
+              onKeyDown={onKeyDown}
+              dangerouslySetInnerHTML={block.html ? { __html: block.html } : undefined}
+            >
+              {block.html ? undefined : block.content}
+            </div>
+          </li>
+        </ol>
       );
     }
 

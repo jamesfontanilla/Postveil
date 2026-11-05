@@ -81,6 +81,7 @@ export interface DocBlock {
   imageWidth?: string; // e.g. "50%", "100%"
   imageAlign?: "left" | "center" | "right";
   align?: "left" | "center" | "right" | "justify"; // Text alignment for paragraph, heading, etc.
+  indentLevel?: number; // Indentation level (0 to 8)
   tocStyle?: "dotted" | "links"; // For Table of Contents
 }
 export type PaperSize = "A4" | "Letter" | "Legal" | "A3" | "A5" | "Tabloid";

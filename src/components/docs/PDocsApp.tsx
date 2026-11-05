@@ -443,7 +443,20 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     }
 
     // 3. Inline markup formatting: execute command inside the active block and record HTML transaction
-    if (command === "code") {
+    if (command === "changeCase") {
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        const text = range.toString();
+        if (text) {
+          let converted = text;
+          if (value === "uppercase") converted = text.toUpperCase();
+          else if (value === "lowercase") converted = text.toLowerCase();
+          else if (value === "capitalize") converted = text.replace(/\b\w/g, (c) => c.toUpperCase());
+          else if (value === "sentence") converted = text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+          document.execCommand("insertText", false, converted);
+        }
+      }
+    } else if (command === "code") {
       if (sel && sel.rangeCount > 0) {
         const range = sel.getRangeAt(0);
         const text = range.toString();
@@ -615,8 +628,20 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
     }, 30);
   };
 
+  const [showFormattingMarks, setShowFormattingMarks] = useState(false);
+
   const handleChangeBlockType = (blockId: string, newType: BlockType, level?: 1 | 2 | 3 | 4 | 5 | 6) => {
     engineRef.current.changeBlockType(blockId, newType, level);
+    setDoc({ ...engineRef.current.getDocument() });
+  };
+
+  const handleIndentChange = (delta: number) => {
+    if (!activeBlockId) return;
+    const block = doc.blocks.find((b) => b.id === activeBlockId);
+    if (!block) return;
+    const currentIndent = block.indentLevel || 0;
+    const newIndent = Math.max(0, Math.min(8, currentIndent + delta));
+    engineRef.current.updateBlockAttrs(activeBlockId, { indentLevel: newIndent });
     setDoc({ ...engineRef.current.getDocument() });
   };
 
@@ -1005,6 +1030,9 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             handleChangeBlockType(activeBlockId, type);
           }
         }}
+        onIndentChange={handleIndentChange}
+        showFormattingMarks={showFormattingMarks}
+        onToggleFormattingMarks={() => setShowFormattingMarks((prev) => !prev)}
         onLineSpacingChange={(spacing) => {
           const val = String(spacing);
           if (val === "1.0" || val === "1.15" || val === "1.5" || val === "2.0") {
@@ -1171,6 +1199,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
                 onActiveMarksChange={setActiveMarks}
                 onActiveBlockChange={setActiveBlockId}
                 remotePeers={remotePeers}
+                showFormattingMarks={showFormattingMarks}
               />
             </div>
           </div>
@@ -1203,6 +1232,7 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
             onActiveMarksChange={setActiveMarks}
             onActiveBlockChange={setActiveBlockId}
             remotePeers={remotePeers}
+            showFormattingMarks={showFormattingMarks}
           />
         )}
 

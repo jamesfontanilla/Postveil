@@ -85,6 +85,10 @@ const RibbonShelf: React.FC<{
   const [colorAnchorEl, setColorAnchorEl] = useState<HTMLElement | null>(null);
   const [isTablePickerOpen, setIsTablePickerOpen] = useState(false);
   const [tableAnchorEl, setTableAnchorEl] = useState<HTMLElement | null>(null);
+  const [isCaseMenuOpen, setIsCaseMenuOpen] = useState(false);
+  const [caseAnchorEl, setCaseAnchorEl] = useState<HTMLElement | null>(null);
+  const [isSpacingMenuOpen, setIsSpacingMenuOpen] = useState(false);
+  const [spacingAnchorEl, setSpacingAnchorEl] = useState<HTMLElement | null>(null);
 
   const handleDropdownClick = (itemId: string, e: React.MouseEvent) => {
     if (openMenuId === itemId) {
@@ -209,17 +213,65 @@ const RibbonShelf: React.FC<{
                     <span className="text-[8px] font-black text-[var(--ribbon-text-dim)]">▼</span>
                   </span>
                 </button>
-                <button
-                  type="button"
-                  className="pdocs-ribbon-small-btn px-1"
-                  title="Change Case"
-                  onClick={() => {}}
-                >
-                  <span className="flex items-center gap-0.5 text-[12px] font-semibold">
-                    <span>Aa</span>
-                    <span className="text-[8px] text-[var(--ribbon-text-dim)]">▾</span>
-                  </span>
-                </button>
+                <div className="relative inline-block">
+                  <button
+                    type="button"
+                    className="pdocs-ribbon-small-btn px-1"
+                    title="Change Case"
+                    onClick={(e) => {
+                      setCaseAnchorEl(e.currentTarget);
+                      setIsCaseMenuOpen((prev) => !prev);
+                    }}
+                  >
+                    <span className="flex items-center gap-0.5 text-[12px] font-semibold">
+                      <span>Aa</span>
+                      <span className="text-[8px] text-[var(--ribbon-text-dim)]">▾</span>
+                    </span>
+                  </button>
+                  {isCaseMenuOpen && (
+                    <div
+                      className="absolute left-0 top-full mt-1 w-36 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded shadow-lg py-1 z-50 text-[12px]"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between"
+                        onClick={() => {
+                          dispatcher.dispatch("format.case", { type: "sentence" });
+                          setIsCaseMenuOpen(false);
+                        }}
+                      >
+                        Sentence case
+                      </button>
+                      <button
+                        className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between"
+                        onClick={() => {
+                          dispatcher.dispatch("format.case", { type: "lowercase" });
+                          setIsCaseMenuOpen(false);
+                        }}
+                      >
+                        lowercase
+                      </button>
+                      <button
+                        className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between"
+                        onClick={() => {
+                          dispatcher.dispatch("format.case", { type: "uppercase" });
+                          setIsCaseMenuOpen(false);
+                        }}
+                      >
+                        UPPERCASE
+                      </button>
+                      <button
+                        className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between"
+                        onClick={() => {
+                          dispatcher.dispatch("format.case", { type: "capitalize" });
+                          setIsCaseMenuOpen(false);
+                        }}
+                      >
+                        Capitalize Each Word
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <RibbonSmallButton
                   id="clear"
                   icon={RibbonIcons.clearFormat}
@@ -346,13 +398,13 @@ const RibbonShelf: React.FC<{
                   id="decrease-indent"
                   icon={RibbonIcons.outdent}
                   tooltip="Decrease Indent"
-                  onClick={() => {}}
+                  onClick={() => dispatcher.dispatch("para.indent", { delta: -1 })}
                 />
                 <RibbonSmallButton
                   id="increase-indent"
                   icon={RibbonIcons.indent}
                   tooltip="Increase Indent"
-                  onClick={() => {}}
+                  onClick={() => dispatcher.dispatch("para.indent", { delta: 1 })}
                 />
                 <RibbonSmallButton
                   id="sort-paras"
@@ -364,7 +416,7 @@ const RibbonShelf: React.FC<{
                   id="show-hide-marks"
                   icon={RibbonIcons.pilcrow}
                   tooltip="Show/Hide ¶"
-                  onClick={() => {}}
+                  onClick={() => dispatcher.dispatch("para.showFormattingMarks")}
                 />
               </div>
 
@@ -402,14 +454,42 @@ const RibbonShelf: React.FC<{
                   active={activeMarks?.alignment === "justify"}
                   onClick={() => dispatcher.dispatch("para.align", { alignment: "justify" })}
                 />
-                <div className="flex items-center">
+                <div className="relative inline-flex items-center">
                   <RibbonSmallButton
                     id="line-spacing"
                     icon={RibbonIcons.lineSpacing}
                     tooltip="Line and Paragraph Spacing"
-                    onClick={() => {}}
+                    onClick={() => {
+                      setIsSpacingMenuOpen((prev) => !prev);
+                    }}
                   />
-                  <span className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer">▾</span>
+                  <span
+                    className="text-[8px] text-[var(--ribbon-text-dim)] -ml-1 mr-1 cursor-pointer"
+                    onClick={() => {
+                      setIsSpacingMenuOpen((prev) => !prev);
+                    }}
+                  >
+                    ▾
+                  </span>
+                  {isSpacingMenuOpen && (
+                    <div
+                      className="absolute left-0 top-full mt-1 w-28 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 rounded shadow-lg py-1 z-50 text-[12px]"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {["1.0", "1.15", "1.5", "2.0"].map((sp) => (
+                        <button
+                          key={sp}
+                          className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between"
+                          onClick={() => {
+                            dispatcher.dispatch("para.lineSpacing", { spacing: parseFloat(sp) });
+                            setIsSpacingMenuOpen(false);
+                          }}
+                        >
+                          <span>{sp}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center">
                   <RibbonSmallButton
