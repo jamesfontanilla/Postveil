@@ -244,6 +244,7 @@ export class SovereignNode {
       imageWidth: this.imageWidth,
       imageAlign: this.imageAlign,
       align: this.align,
+      indentLevel: this.indentLevel,
       tocStyle: this.tocStyle,
       spans: [{ text: newContent }],
     });
