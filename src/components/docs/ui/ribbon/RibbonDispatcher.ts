@@ -100,15 +100,28 @@ export class RibbonDispatcher {
         return true;
       }
       case "edit.paste": {
+        const lastActiveEl = document.querySelector(".pdocs-block-content:focus") as HTMLElement ||
+          document.querySelector(".pdocs-block-row:hover .pdocs-block-content") as HTMLElement ||
+          document.querySelector(".pdocs-block-content") as HTMLElement;
+
         if (navigator.clipboard?.readText) {
           navigator.clipboard.readText().then((text) => {
             if (text) {
+              if (lastActiveEl && document.activeElement !== lastActiveEl) {
+                lastActiveEl.focus();
+              }
               document.execCommand("insertText", false, text);
             }
           }).catch(() => {
+            if (lastActiveEl && document.activeElement !== lastActiveEl) {
+              lastActiveEl.focus();
+            }
             document.execCommand("paste");
           });
         } else {
+          if (lastActiveEl && document.activeElement !== lastActiveEl) {
+            lastActiveEl.focus();
+          }
           document.execCommand("paste");
         }
         return true;

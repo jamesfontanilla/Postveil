@@ -149,6 +149,7 @@ export class SovereignNode {
   readonly imageWidth?: string;
   readonly imageAlign?: "left" | "center" | "right";
   readonly align?: "left" | "center" | "right" | "justify";
+  readonly indentLevel?: number;
   readonly tocStyle?: "dotted" | "links";
   readonly spans: readonly InlineSpan[];
   readonly html?: string;
@@ -170,6 +171,7 @@ export class SovereignNode {
     this.imageWidth = block.imageWidth;
     this.imageAlign = block.imageAlign;
     this.align = block.align;
+    this.indentLevel = block.indentLevel;
     this.tocStyle = block.tocStyle;
     this.spans = block.spans
       ? Object.freeze([...block.spans])
@@ -194,6 +196,7 @@ export class SovereignNode {
       imageWidth: this.imageWidth,
       imageAlign: this.imageAlign,
       align: this.align,
+      indentLevel: this.indentLevel,
       tocStyle: this.tocStyle,
       spans: this.spans ? [...this.spans] : undefined,
     };
@@ -217,6 +220,7 @@ export class SovereignNode {
       imageWidth: attrs.imageWidth !== undefined ? attrs.imageWidth : this.imageWidth,
       imageAlign: attrs.imageAlign !== undefined ? attrs.imageAlign : this.imageAlign,
       align: attrs.align !== undefined ? attrs.align : this.align,
+      indentLevel: attrs.indentLevel !== undefined ? attrs.indentLevel : this.indentLevel,
       tocStyle: attrs.tocStyle !== undefined ? attrs.tocStyle : this.tocStyle,
       spans: attrs.spans !== undefined ? attrs.spans : (this.spans as InlineSpan[] | undefined),
     });

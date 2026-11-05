@@ -1034,10 +1034,13 @@ export const PDocsApp: React.FC<PDocsAppProps> = ({
         showFormattingMarks={showFormattingMarks}
         onToggleFormattingMarks={() => setShowFormattingMarks((prev) => !prev)}
         onLineSpacingChange={(spacing) => {
-          const val = String(spacing);
-          if (val === "1.0" || val === "1.15" || val === "1.5" || val === "2.0") {
-            handleLineSpacingChange(val);
-          }
+          const num = typeof spacing === "number" ? spacing : parseFloat(String(spacing));
+          let val: "1.0" | "1.15" | "1.5" | "2.0" = "1.15";
+          if (num <= 1.05) val = "1.0";
+          else if (num <= 1.25) val = "1.15";
+          else if (num <= 1.75) val = "1.5";
+          else val = "2.0";
+          handleLineSpacingChange(val);
         }}
         onMarginPresetChange={(preset) => {
           handleMarginsChange(preset as any);
