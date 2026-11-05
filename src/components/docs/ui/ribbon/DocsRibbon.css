@@ -522,10 +522,137 @@
   background: var(--ribbon-active);
   color: var(--ribbon-accent);
 }
-.pdocs-ribbon-menu-separator {
-  height: 1px;
-  background: var(--ribbon-border);
-  margin: 4px 0;
+/* ==========================================================================
+   OFFICE STYLES GALLERY & TILE SPECIFICATION (WordCraft Architecture Parity)
+   ========================================================================== */
+.pdocs-styles-gallery-container {
+  display: flex;
+  align-items: center;
+  height: 68px;
+  background: var(--ribbon-bg);
+  border: 1px solid var(--ribbon-border);
+  border-radius: 4px;
+  padding: 2px;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.pdocs-styles-viewport {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow-x: hidden;
+  height: 62px;
+  box-sizing: border-box;
+}
+
+.pdocs-style-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 74px;
+  min-width: 74px;
+  height: 60px;
+  padding: 4px 5px 3px 5px;
+  background: var(--ribbon-bg);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: all 0.1s ease;
+  text-align: left;
+  outline: none;
+}
+
+.pdocs-style-tile:hover {
+  background: var(--ribbon-hover);
+  border-color: var(--ribbon-border);
+}
+
+.pdocs-style-tile.active {
+  background: var(--ribbon-active);
+  border-color: var(--ribbon-active-border);
+  box-shadow: inset 0 0 0 1px var(--ribbon-active-border);
+}
+
+.pdocs-style-preview {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.1;
+  pointer-events: none;
+}
+
+.pdocs-style-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--ribbon-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1.2;
+  margin-top: auto;
+  pointer-events: none;
+}
+
+/* 3-Button Vertical Navigation Strip (▲, ▼, ▾) */
+.pdocs-styles-nav-strip {
+  display: flex;
+  flex-direction: column;
+  width: 16px;
+  height: 60px;
+  margin-left: 2px;
+  border-left: 1px solid var(--ribbon-border-subtle);
+  box-sizing: border-box;
+}
+
+.pdocs-styles-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 2px;
+  color: var(--ribbon-text-dim);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.1s ease;
+}
+
+.pdocs-styles-nav-btn:hover:not(:disabled) {
+  background: var(--ribbon-hover);
+  color: var(--ribbon-text);
+}
+
+.pdocs-styles-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Full Styles Gallery Dropdown Modal / Popover */
+.pdocs-styles-expanded-menu {
+  position: fixed;
+  background: var(--ribbon-bg);
+  border: 1px solid var(--ribbon-border);
+  border-radius: 6px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28), 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  z-index: 99999;
+  width: 360px;
+  max-height: 380px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.pdocs-styles-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
 }
 
 /* Explicit Table Grid Picker Styling */
